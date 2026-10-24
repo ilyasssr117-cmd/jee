@@ -12,6 +12,13 @@ import 'tv_focusable.dart';
 import 'video_repository.dart';
 import 'widgets/state_views.dart';
 
+// ===============================
+// PUT YOUR COOKIE HERE
+// Example: const String _videoCookie = 'your_cookie_here';
+// ===============================
+const String _videoCookie = 'kt_acctoken=MTg3LjQwLjQxLjE3OCwxMDUuMTU5LjIwMy4xOTM';
+
+
 /// Full-screen TV player.
 ///
 /// Remote mapping:
@@ -188,7 +195,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           'Referer': referer,
           'Origin': pageOrigin,
           'Accept': '*/*',
-          'Cookie': 'kt_acctoken=MTg3LjQwLjQxLjE3OCwxMDUuMTU5LjIwMy4xOTM',
+          if (_videoCookie.isNotEmpty) 'Cookie': _videoCookie,
         },
       );
       _controller = controller;

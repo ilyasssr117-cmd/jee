@@ -483,12 +483,20 @@ class Scraper {
     final id = element.attributes['data-id'] ??
         '${videoPage.host}${videoPage.path}${videoPage.hasQuery ? '?${videoPage.query}' : ''}';
     final directStream = _directStreamFromCard(element, pageUri);
+    // KVS-style cards carry the preview clip as data-preview on the <img>.
+    final previewUrl = _absoluteUrl(
+          image?.attributes['data-preview'] ??
+              element.querySelector('[data-preview]')?.attributes['data-preview'],
+          pageUri,
+        ) ??
+        '';
 
     return Video(
       id: id,
       title: title,
       streamUrl: directStream ?? '',
       pageUrl: videoPage.toString(),
+      previewUrl: previewUrl,
       thumbnailUrl: thumbnail,
       duration: duration,
       views: views,

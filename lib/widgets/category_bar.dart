@@ -10,7 +10,11 @@ class CategoryBar extends StatelessWidget {
     required this.categories,
     required this.selected,
     required this.onSelected,
+    this.rightInset = 0,
   });
+
+  /// Space kept free at the right edge (the floating sidebar).
+  final double rightInset;
 
   final List<String> categories;
   final String selected;
@@ -18,16 +22,18 @@ class CategoryBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final margin = context.s(Gaps.screenH);
+    final margin = context.hMargin;
     return SizedBox(
       // Chip height + vertical room so the focus scale is never clipped.
       height: context.s(44 + 24),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
-        padding: EdgeInsets.symmetric(
-          horizontal: margin,
-          vertical: context.s(12),
+        padding: EdgeInsets.fromLTRB(
+          margin,
+          context.s(12),
+          margin + rightInset,
+          context.s(12),
         ),
         itemCount: categories.length,
         separatorBuilder: (_, __) => SizedBox(width: context.s(Gaps.md - 4)),

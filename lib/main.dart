@@ -5,7 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
+import 'favorites_store.dart';
 import 'home_page.dart';
+import 'local_store.dart';
+import 'platform_ui.dart';
+import 'playback_progress.dart';
+import 'search_history.dart';
 import 'tv_focusable.dart';
 
 void main() {
@@ -62,15 +67,19 @@ Future<void> _bootstrap() async {
   imageCache.maximumSize = 150;
   imageCache.maximumSizeBytes = 64 << 20;
 
-  // Televisions are always landscape. Never let an orientation call block or
-  // crash start-up on unusual devices.
+  // TVs are landscape, phones portrait (the player switches to landscape by
+  // itself). Never let an orientation call block or crash start-up.
+  await applyBrowseOrientation();
+
+  // Favourites, recent searches and watched marks live in local storage. A
+  // failure here must never block start-up: the app just starts empty.
   try {
-    await SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    await LocalStore.init();
+    FavoritesStore.instance.load();
+    SearchHistory.instance.load();
+    PlaybackProgress.instance.load();
   } catch (error) {
-    debugPrint('[STARTUP] Orientation lock failed: $error');
+    debugPrint('[STARTUP] Local data failed to load: $error');
   }
 
   runApp(const TvTubeApp());

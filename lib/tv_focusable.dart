@@ -31,6 +31,8 @@ class TvFocusable extends StatefulWidget {
     this.scale = 1.05,
     this.scrollAlignment = 0.4,
     this.semanticLabel,
+    this.focusOnHover = false,
+    this.onLongPress,
   });
 
   final Widget Function(BuildContext context, bool focused) builder;
@@ -45,15 +47,28 @@ class TvFocusable extends StatefulWidget {
   final double? scrollAlignment;
   final String? semanticLabel;
 
+  /// Moves focus here when a real mouse pointer moves over the widget.
+  final bool focusOnHover;
+
+  /// Hold OK (or long-press). When set, a short press activates on release
+  /// instead of on press, so the two can be told apart.
+  final VoidCallback? onLongPress;
+
   @override
   State<TvFocusable> createState() => _TvFocusableState();
 }
 
 class _TvFocusableState extends State<TvFocusable> {
   bool _focused = false;
+  bool _pressed = false;
+  bool _longFired = false;
 
   void _handleFocusChange(bool focused) {
     if (!mounted) return;
+    if (!focused) {
+      _pressed = false;
+      _longFired = false;
+    }
     if (_focused != focused) setState(() => _focused = focused);
     if (!focused) return;
 
@@ -74,6 +89,29 @@ class _TvFocusableState extends State<TvFocusable> {
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (!_activationKeys.contains(event.logicalKey)) {
+      return KeyEventResult.ignored;
+    }
+    if (widget.onLongPress != null) {
+      if (event is KeyDownEvent) {
+        _pressed = true;
+        _longFired = false;
+        return KeyEventResult.handled;
+      }
+      if (event is KeyRepeatEvent) {
+        // The first auto-repeat of a held button is the long press.
+        if (_pressed && !_longFired) {
+          _longFired = true;
+          widget.onLongPress!();
+        }
+        return KeyEventResult.handled;
+      }
+      if (event is KeyUpEvent) {
+        final tap = _pressed && !_longFired;
+        _pressed = false;
+        _longFired = false;
+        if (tap) widget.onTap();
+        return KeyEventResult.handled;
+      }
       return KeyEventResult.ignored;
     }
     if (event is KeyDownEvent) {
@@ -112,7 +150,19 @@ class _TvFocusableState extends State<TvFocusable> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
-          child: child,
+          onLongPress: widget.onLongPress,
+          child: widget.focusOnHover
+              ? Builder(
+                  builder: (context) => MouseRegion(
+                    // onHover (not onEnter): content scrolling under a still
+                    // pointer must never steal D-pad focus.
+                    onHover: (_) {
+                      if (!_focused) Focus.of(context).requestFocus();
+                    },
+                    child: child,
+                  ),
+                )
+              : child,
         ),
       ),
     );

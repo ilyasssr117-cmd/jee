@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'error_text.dart';
 import 'models.dart';
 import 'player_page.dart';
+import 'preview_manager.dart';
 import 'video_repository.dart';
 
 /// Resolves a playable stream for [video] and opens the player.
@@ -14,9 +15,13 @@ Future<String?> launchPlayer(
   BuildContext context,
   Video video, {
   Duration? startAt,
+  List<Video>? queue,
 }) async {
   final navigator = Navigator.of(context);
   try {
+    // Free the card-preview decoder before the real player needs one.
+    await PreviewManager.instance.stopAndWait();
+    if (!context.mounted) return null;
     final playable = await videoRepository.resolveForPlayback(
       video.copyWith(streamUrl: ''),
     );
@@ -26,7 +31,7 @@ Future<String?> launchPlayer(
     }
     await navigator.push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => PlayerPage(video: playable, startAt: startAt),
+        builder: (_) => PlayerPage(video: playable, startAt: startAt, queue: queue),
       ),
     );
     return null;

@@ -6,14 +6,18 @@ import 'error_text.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
-import 'search_results_page.dart';
 import 'video_details_page.dart';
 import 'video_repository.dart';
+import 'widgets/app_sidebar.dart';
 import 'widgets/category_bar.dart';
+import 'widgets/favorites_view.dart';
 import 'widgets/home_hero.dart';
+import 'widgets/search_overlay.dart';
 import 'widgets/state_views.dart';
 import 'widgets/tv_button.dart';
 import 'widgets/video_grid.dart';
+
+enum _Section { home, favorites }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -33,7 +37,9 @@ class _HomePageState extends State<HomePage> {
   // One controller for the whole page: hero, chips and grid scroll together.
   final ScrollController _scroll = ScrollController();
   final FocusNode _heroPlayNode = FocusNode(debugLabel: 'Hero play');
-  final FocusNode _searchNode = FocusNode(debugLabel: 'Search');
+  final FocusNode _sideHomeNode = FocusNode(debugLabel: 'Sidebar home');
+  final FocusNode _sideSearchNode = FocusNode(debugLabel: 'Sidebar search');
+  final FocusNode _sideFavoritesNode = FocusNode(debugLabel: 'Sidebar favorites');
 
   final List<Video> _videos = <Video>[];
   Video? _featured;
@@ -47,6 +53,12 @@ class _HomePageState extends State<HomePage> {
   bool _hasMore = true;
   bool _initialFocusClaimed = false;
   bool _playingFeatured = false;
+  bool _searchOpen = false;
+  _Section _section = _Section.home;
+  FocusNode? _focusBeforeSearch;
+  FocusNode? _lastContentFocus; // Last card / chip / hero button focused.
+  final GlobalKey<SearchOverlayState> _searchKey =
+      GlobalKey<SearchOverlayState>();
   FriendlyError? _error;
   DateTime? _lastBackPress;
 
@@ -56,16 +68,20 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _scroll.addListener(_maybeLoadMore);
+    FocusManager.instance.addListener(_trackContentFocus);
     _loadPage(reset: true);
   }
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_trackContentFocus);
     _scroll
       ..removeListener(_maybeLoadMore)
       ..dispose();
     _heroPlayNode.dispose();
-    _searchNode.dispose();
+    _sideHomeNode.dispose();
+    _sideSearchNode.dispose();
+    _sideFavoritesNode.dispose();
     super.dispose();
   }
 
@@ -157,13 +173,13 @@ class _HomePageState extends State<HomePage> {
   /// long as the viewer hasn't already moved focus somewhere else.
   void _claimInitialFocus() {
     if (_initialFocusClaimed || _featured == null) return;
+    if (_searchOpen || _section != _Section.home) return;
     _initialFocusClaimed = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_isCurrentRoute) return;
+      if (!mounted || !_isCurrentRoute || _searchOpen) return;
       final primary = FocusManager.instance.primaryFocus;
       final unclaimed = primary == null ||
-          primary is FocusScopeNode ||
-          identical(primary, _searchNode);
+          primary is FocusScopeNode;
       if (unclaimed) _heroPlayNode.requestFocus();
     });
   }
@@ -172,10 +188,14 @@ class _HomePageState extends State<HomePage> {
   /// if the route's own focus restoration didn't kick in.
   void _restoreFocusIfLost() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_isCurrentRoute) return;
+      if (!mounted || !_isCurrentRoute || _searchOpen) return;
       final primary = FocusManager.instance.primaryFocus;
       if (primary == null || primary is FocusScopeNode) {
-        (_featured != null ? _heroPlayNode : _searchNode).requestFocus();
+        if (_section == _Section.favorites) {
+          _sideFavoritesNode.requestFocus();
+        } else {
+          (_featured != null ? _heroPlayNode : _sideHomeNode).requestFocus();
+        }
       }
     });
   }
@@ -197,10 +217,19 @@ class _HomePageState extends State<HomePage> {
   /// BACK on the home page: first return to the top, then ask for a second
   /// press before leaving the app.
   void _handleBack() {
+    if (_searchOpen) {
+      _closeSearch();
+      return;
+    }
+    if (_section == _Section.favorites) {
+      _showHome();
+      _sideHomeNode.requestFocus();
+      return;
+    }
     final scrolled = _scroll.hasClients && _scroll.offset > 8;
     if (scrolled) {
       _scrollToTop();
-      (_featured != null ? _heroPlayNode : _searchNode).requestFocus();
+      (_featured != null ? _heroPlayNode : _sideHomeNode).requestFocus();
       return;
     }
 
@@ -214,22 +243,108 @@ class _HomePageState extends State<HomePage> {
     _toast('Press Back again to exit');
   }
 
-  Future<void> _openSearch() async {
+  /// Remembers the last thing focused on the page itself (not the sidebar, not
+  /// the search), so BACK from search can return the viewer to exactly there.
+  void _trackContentFocus() {
+    if (!mounted || _searchOpen || !_isCurrentRoute) return;
+    final node = FocusManager.instance.primaryFocus;
+    if (node == null || node is FocusScopeNode) return;
+    if (identical(node, _sideHomeNode) ||
+        identical(node, _sideSearchNode) ||
+        identical(node, _sideFavoritesNode)) {
+      return;
+    }
+    _lastContentFocus = node;
+  }
+
+  /// Search is an overlay on this page: no route, the page stays underneath.
+  void _openSearch() {
+    if (_searchOpen) {
+      // Search pressed again in the sidebar: just go back to the field.
+      _searchKey.currentState?.focusField();
+      return;
+    }
+    final remembered = _lastContentFocus;
+    _focusBeforeSearch = (remembered != null &&
+            remembered.context != null &&
+            remembered.canRequestFocus)
+        ? remembered
+        : FocusManager.instance.primaryFocus;
+    setState(() => _searchOpen = true);
+  }
+
+  /// Closing returns focus to exactly where it was; scroll never moved.
+  /// With [restoreFocus] false the caller moves focus itself (sidebar jumps).
+  void _closeSearch({bool restoreFocus = true}) {
+    if (!_searchOpen) return;
+    final previous = _focusBeforeSearch;
+    _focusBeforeSearch = null;
+    setState(() => _searchOpen = false);
+    if (!restoreFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isCurrentRoute) return;
+      final anchor = previous?.context;
+      if (previous != null &&
+          anchor != null &&
+          anchor.mounted &&
+          previous.canRequestFocus) {
+        previous.requestFocus();
+        return;
+      }
+      _restoreFocusIfLost();
+    });
+  }
+
+  Future<void> _openDetails(Video video, List<Video> queue) async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const SearchResultsPage()),
+      MaterialPageRoute<void>(
+        builder: (_) => VideoDetailsPage(video: video, queue: queue),
+      ),
     );
     if (!mounted) return;
-    setState(() {}); // Refresh progress bars.
+    setState(() {}); // Refresh progress, watched and favourite marks.
     _restoreFocusIfLost();
   }
 
-  Future<void> _openDetails(Video video) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => VideoDetailsPage(video: video)),
-    );
-    if (!mounted) return;
-    setState(() {});
-    _restoreFocusIfLost();
+  void _showHome() {
+    if (_section == _Section.home) {
+      _scrollToTop();
+      return;
+    }
+    setState(() => _section = _Section.home);
+  }
+
+  void _showFavorites() {
+    if (_section == _Section.favorites) return;
+    setState(() => _section = _Section.favorites);
+  }
+
+  void _onSidebarSelect(SidebarItem item) {
+    // Leaving the search through the sidebar: close it first and land on the
+    // chosen section, with the focus staying on that sidebar button.
+    if (_searchOpen && item != SidebarItem.search) {
+      _closeSearch(restoreFocus: false);
+      if (item == SidebarItem.home) {
+        if (_section != _Section.home) {
+          setState(() => _section = _Section.home);
+        }
+        _sideHomeNode.requestFocus();
+      } else {
+        if (_section != _Section.favorites) {
+          setState(() => _section = _Section.favorites);
+        }
+        _sideFavoritesNode.requestFocus();
+      }
+      return;
+    }
+    switch (item) {
+      case SidebarItem.home:
+        _showHome();
+      case SidebarItem.search:
+        _openSearch();
+      case SidebarItem.favorites:
+        _showFavorites();
+    }
   }
 
   Future<void> _playFeatured() async {
@@ -240,6 +355,7 @@ class _HomePageState extends State<HomePage> {
       context,
       video,
       startAt: PlaybackProgress.instance.resumePosition(video.id),
+      queue: List<Video>.of(_videos),
     );
     if (!mounted) return;
     setState(() => _playingFeatured = false);
@@ -259,7 +375,13 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final margin = context.s(Gaps.screenH);
+    final margin = context.hMargin;
+    final phone = context.isPhone;
+    // TV: sidebar at the right edge. Phone: bar at the bottom.
+    final inset = phone ? 0.0 : context.s(kSidebarWidth);
+    final bottomInset =
+        phone ? context.s(kBottomBarHeight) + context.safe.bottom : 0.0;
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final featured = _featured;
     final showCategories = _categories.length > 1;
     final firstLoad = _videos.isEmpty && _loading;
@@ -274,65 +396,141 @@ class _HomePageState extends State<HomePage> {
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
-        body: CustomScrollView(
-          controller: _scroll,
-          // Build a little beyond the viewport so D-pad navigation can always
-          // find the next row / chip.
-          cacheExtent: MediaQuery.sizeOf(context).height,
-          slivers: [
-            SliverToBoxAdapter(
-              child: HomeHero(
-                video: featured,
-                loading: firstLoad,
-                playLabel: resume != null ? 'Resume' : 'Play',
-                playBusy: _playingFeatured,
-                playNode: _heroPlayNode,
-                searchNode: _searchNode,
-                onPlay: _playFeatured,
-                onDetails: () {
-                  if (featured != null) _openDetails(featured);
-                },
-                onSearch: _openSearch,
-                onChildFocus: _scrollToTop,
-              ),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Content spans the whole screen; the sidebar floats on top of it.
+            // The page below keeps its scroll position and focus, but the
+            // D-pad can't reach it while search is open.
+            ExcludeFocus(
+              excluding: _searchOpen,
+              child: _section == _Section.favorites
+                  ? FavoritesView(
+                      rightInset: inset,
+                      bottomInset: bottomInset,
+                      onOpen: _openDetails,
+                      onBrowse: () {
+                        _showHome();
+                        _sideHomeNode.requestFocus();
+                      },
+                    )
+                  : _buildHome(
+                      margin,
+                      inset,
+                      bottomInset,
+                      featured,
+                      showCategories,
+                      firstLoad,
+                      resume,
+                    ),
             ),
-            if (showCategories)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(top: context.s(Gaps.sm)),
-                  child: CategoryBar(
-                    categories: _categories,
-                    selected: _category,
-                    onSelected: _changeCategory,
-                  ),
+            if (_searchOpen)
+              SearchOverlay(
+                key: _searchKey,
+                rightInset: inset,
+                bottomInset: 0,
+                onClose: _closeSearch,
+                onOpen: _openDetails,
+              ),
+            // Always reachable with the D-pad, also from the search. The blue
+            // mark follows the viewer: Home, Search or Favorites.
+            // Hidden on phones while the keyboard is up (it would ride on it).
+            if (!(phone && keyboardOpen))
+              Positioned(
+                key: const ValueKey<String>('sidebar'),
+                top: phone ? null : 0,
+                right: phone ? 0 : 0,
+                bottom: 0,
+                left: phone ? 0 : null,
+                child: AppSidebar(
+                  selected: _searchOpen
+                      ? SidebarItem.search
+                      : (_section == _Section.favorites
+                          ? SidebarItem.favorites
+                          : SidebarItem.home),
+                  onSelect: _onSidebarSelect,
+                  homeNode: _sideHomeNode,
+                  searchNode: _sideSearchNode,
+                  favoritesNode: _sideFavoritesNode,
                 ),
               ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  margin,
-                  context.s(showCategories ? Gaps.sm : Gaps.md),
-                  margin,
-                  context.s(Gaps.md),
-                ),
-                child: Text(
-                  _category == 'All' ? 'Latest videos' : _category,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.headline,
-                ),
-              ),
-            ),
-            ..._contentSlivers(margin),
-            SliverToBoxAdapter(child: SizedBox(height: context.s(Gaps.xxl))),
           ],
         ),
       ),
     );
   }
 
-  List<Widget> _contentSlivers(double margin) {
-    final gridPadding = EdgeInsets.symmetric(horizontal: margin);
+  Widget _buildHome(
+    double margin,
+    double inset,
+    double bottomInset,
+    Video? featured,
+    bool showCategories,
+    bool firstLoad,
+    Duration? resume,
+  ) {
+    return CustomScrollView(
+      // Restores the scroll position when coming back from Favorites.
+      key: const PageStorageKey<String>('home-scroll'),
+      controller: _scroll,
+      // Build a little beyond the viewport so D-pad navigation can always
+      // find the next row / chip.
+      cacheExtent: MediaQuery.sizeOf(context).height,
+      slivers: [
+        SliverToBoxAdapter(
+          child: HomeHero(
+            video: featured,
+            loading: firstLoad,
+            playLabel: resume != null ? 'Resume' : 'Play',
+            playBusy: _playingFeatured,
+            playNode: _heroPlayNode,
+            onPlay: _playFeatured,
+            onDetails: () {
+              if (featured != null) {
+                _openDetails(featured, List<Video>.of(_videos));
+              }
+            },
+            onChildFocus: _scrollToTop,
+          ),
+        ),
+        if (showCategories)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(top: context.s(Gaps.sm)),
+              child: CategoryBar(
+                categories: _categories,
+                selected: _category,
+                onSelected: _changeCategory,
+                rightInset: inset,
+              ),
+            ),
+          ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              margin,
+              context.s(showCategories ? Gaps.sm : Gaps.md),
+              margin + inset,
+              context.s(Gaps.md),
+            ),
+            child: Text(
+              _category == 'All' ? 'Latest videos' : _category,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.headline,
+            ),
+          ),
+        ),
+        ..._contentSlivers(margin, inset),
+        SliverToBoxAdapter(
+          child: SizedBox(height: context.s(Gaps.xxl) + bottomInset),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _contentSlivers(double margin, double inset) {
+    final gridPadding = EdgeInsets.fromLTRB(margin, 0, margin + inset, 0);
 
     if (_videos.isEmpty && _loading) {
       return [SliverSkeletonGrid(padding: gridPadding)];
@@ -343,12 +541,15 @@ class _HomePageState extends State<HomePage> {
       return [
         SliverFillRemaining(
           hasScrollBody: false,
-          child: TvStatusView(
-            icon: error.icon,
-            title: error.title,
-            message: error.message,
-            actionLabel: 'Retry',
-            onAction: () => _loadPage(reset: true),
+          child: Padding(
+            padding: EdgeInsets.only(right: inset),
+            child: TvStatusView(
+              icon: error.icon,
+              title: error.title,
+              message: error.message,
+              actionLabel: 'Retry',
+              onAction: () => _loadPage(reset: true),
+            ),
           ),
         ),
       ];
@@ -358,14 +559,17 @@ class _HomePageState extends State<HomePage> {
       return [
         SliverFillRemaining(
           hasScrollBody: false,
-          child: TvStatusView(
-            icon: Icons.video_library_outlined,
-            title: 'No videos found',
-            message: _category == 'All'
-                ? 'There is nothing to show right now.'
-                : 'There are no videos in \u201c$_category\u201d yet.',
-            actionLabel: 'Refresh',
-            onAction: () => _loadPage(reset: true),
+          child: Padding(
+            padding: EdgeInsets.only(right: inset),
+            child: TvStatusView(
+              icon: Icons.video_library_outlined,
+              title: 'No videos found',
+              message: _category == 'All'
+                  ? 'There is nothing to show right now.'
+                  : 'There are no videos in \u201c$_category\u201d yet.',
+              actionLabel: 'Refresh',
+              onAction: () => _loadPage(reset: true),
+            ),
           ),
         ),
       ];
@@ -376,7 +580,7 @@ class _HomePageState extends State<HomePage> {
         SliverVideoGrid(
           videos: _gridVideos,
           padding: gridPadding,
-          onOpen: _openDetails,
+          onOpen: (video) => _openDetails(video, List<Video>.of(_videos)),
           onItemFocus: (index) {
             if (index >= _gridVideos.length - 4) _loadPage();
           },
@@ -384,14 +588,14 @@ class _HomePageState extends State<HomePage> {
       if (_loading)
         SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.only(top: context.s(Gaps.lg)),
+            padding: EdgeInsets.only(top: context.s(Gaps.lg), right: inset),
             child: const TvSpinner(size: 32),
           ),
         ),
       if (_error != null)
         SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.only(top: context.s(Gaps.lg)),
+            padding: EdgeInsets.only(top: context.s(Gaps.lg), right: inset),
             child: Center(
               child: TvButton(
                 label: 'Couldn\u2019t load more \u2013 Retry',

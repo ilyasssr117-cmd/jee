@@ -28,6 +28,12 @@ abstract final class AppColors {
 
   static const Color focusRing = Color(0xFFFFFFFF);
   static const Color error = Color(0xFFFF8A80);
+
+  /// Blue focus glow used by search and cards (reference design).
+  static const Color glowBlue = Color(0xFF2E7BFF);
+
+  /// Active favourite star.
+  static const Color star = Color(0xFFFFC857);
 }
 
 // ---------------------------------------------------------------------------
@@ -74,15 +80,36 @@ abstract final class Motion {
 
 const double _designWidth = 1280;
 
+/// Phones are laid out on a ~460 px wide canvas (measured on the short side,
+/// so the player in landscape keeps the same sizes as the portrait screens).
+const double _phoneDesignWidth = 460;
+
 extension TvScale on BuildContext {
-  /// Ratio between the real logical width and the 1280px design canvas.
-  double get tvScale =>
-      (MediaQuery.sizeOf(this).width / _designWidth).clamp(0.5, 2.5)
-          .toDouble();
+  /// iPhone / Android phone (short side under 600 logical px). Tablets and TVs
+  /// keep the 10-foot layout.
+  bool get isPhone => MediaQuery.sizeOf(this).shortestSide < 600;
+
+  /// Ratio between the real logical size and the design canvas.
+  double get tvScale {
+    final size = MediaQuery.sizeOf(this);
+    if (size.shortestSide < 600) {
+      return (size.shortestSide / _phoneDesignWidth).clamp(0.75, 1.3).toDouble();
+    }
+    return (size.width / _designWidth).clamp(0.5, 2.5).toDouble();
+  }
 
   /// Scales a design-canvas value to the current screen.
   double s(double value) => value * tvScale;
+
+  /// Horizontal page margin: a slim fixed one on phones, TV safe-area on TVs.
+  double get hMargin => isPhone ? 16 : s(Gaps.screenH);
+
+  /// Notch / home-indicator insets (all zero on a TV).
+  EdgeInsets get safe => MediaQuery.viewPaddingOf(this);
 }
+
+/// Columns of every video grid: 2 on phones, 4 elsewhere.
+int videoGridColumns(BuildContext context) => context.isPhone ? 2 : 4;
 
 // ---------------------------------------------------------------------------
 // Typography
@@ -193,7 +220,8 @@ ThemeData buildAppTheme() {
         TargetPlatform.linux: TvPageTransitionsBuilder(),
         TargetPlatform.windows: TvPageTransitionsBuilder(),
         TargetPlatform.macOS: TvPageTransitionsBuilder(),
-        TargetPlatform.iOS: TvPageTransitionsBuilder(),
+        // Native iOS push + edge-swipe back gesture.
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
       },
     ),
   );

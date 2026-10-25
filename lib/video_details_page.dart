@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
+import 'favorites_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
 import 'video_repository.dart';
+import 'widgets/back_button.dart';
 import 'widgets/state_views.dart';
 import 'widgets/tv_button.dart';
 import 'widgets/video_artwork.dart';
@@ -13,9 +15,12 @@ import 'widgets/video_grid.dart';
 import 'widgets/video_meta.dart';
 
 class VideoDetailsPage extends StatefulWidget {
-  const VideoDetailsPage({super.key, required this.video});
+  const VideoDetailsPage({super.key, required this.video, this.queue});
 
   final Video video;
+
+  /// The list this video was opened from; Autoplay Next continues through it.
+  final List<Video>? queue;
 
   @override
   State<VideoDetailsPage> createState() => _VideoDetailsPageState();
@@ -53,7 +58,12 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       _preparing = true;
       _playError = null;
     });
-    final error = await launchPlayer(context, widget.video, startAt: startAt);
+    final error = await launchPlayer(
+      context,
+      widget.video,
+      startAt: startAt,
+      queue: widget.queue,
+    );
     if (!mounted) return;
     setState(() {
       _preparing = false;
@@ -65,9 +75,11 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   /// Replaces this page instead of stacking another one on top, so browsing
   /// related videos can't build an unbounded route stack (each holding its own
   /// images and futures) and BACK returns to where the viewer came from.
-  void _openRelated(Video video) {
+  void _openRelated(Video video, List<Video> related) {
     Navigator.of(context).pushReplacement<void, void>(
-      MaterialPageRoute<void>(builder: (_) => VideoDetailsPage(video: video)),
+      MaterialPageRoute<void>(
+        builder: (_) => VideoDetailsPage(video: video, queue: related),
+      ),
     );
   }
 
@@ -91,7 +103,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final margin = context.s(Gaps.screenH);
+    final margin = context.hMargin;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: CustomScrollView(
@@ -99,7 +111,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         slivers: [
           SliverToBoxAdapter(child: _buildHeader(margin)),
           SliverToBoxAdapter(child: _buildRelated(margin)),
-          SliverToBoxAdapter(child: SizedBox(height: context.s(Gaps.xxl))),
+          SliverToBoxAdapter(
+            child: SizedBox(height: context.s(Gaps.xxl) + context.safe.bottom),
+          ),
         ],
       ),
     );
@@ -108,6 +122,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   Widget _buildHeader(double margin) {
     final video = widget.video;
     final size = MediaQuery.sizeOf(context);
+    final phone = context.isPhone;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
     final meta = VideoMetaLine(
       video: video,
@@ -118,19 +133,29 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
 
     return SizedBox(
-      height: size.height * 0.68,
+      height: size.height * (phone ? 0.6 : 0.68),
       child: Stack(
         fit: StackFit.expand,
         children: [
           VideoArtwork(video: video, showLabel: false),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [Color(0xFA0B0D12), Color(0xD10B0D12), Color(0x330B0D12)],
-                stops: [0, 0.5, 1],
-              ),
+              gradient: phone
+                  ? const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x330B0D12), Color(0xE60B0D12)],
+                    )
+                  : const LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        Color(0xFA0B0D12),
+                        Color(0xD10B0D12),
+                        Color(0x330B0D12),
+                      ],
+                      stops: [0, 0.5, 1],
+                    ),
             ),
           ),
           const DecoratedBox(
@@ -146,7 +171,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           Positioned(
             left: margin,
             bottom: context.s(Gaps.lg),
-            width: size.width * 0.52,
+            width: phone ? size.width - margin * 2 : size.width * 0.52,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -163,7 +188,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   video.title,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.display.copyWith(fontSize: 40),
+                  style: AppText.display.copyWith(fontSize: phone ? 28 : 40),
                 ),
                 if (meta.hasContent) ...[
                   SizedBox(height: context.s(12)),
@@ -179,8 +204,11 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   ),
                 ],
                 SizedBox(height: context.s(Gaps.lg)),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+                // Wrap (not Row): Resume + Start over + Favorites can be wider
+                // than this column on smaller screens.
+                Wrap(
+                  spacing: context.s(Gaps.md),
+                  runSpacing: context.s(Gaps.md),
                   children: [
                     TvButton(
                       label: resume != null
@@ -192,15 +220,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       loading: _preparing,
                       onPressed: _play,
                     ),
-                    if (resume != null) ...[
-                      SizedBox(width: context.s(Gaps.md)),
+                    if (resume != null)
                       TvButton(
                         label: 'Start over',
                         icon: Icons.replay_rounded,
                         style: TvButtonStyle.secondary,
                         onPressed: () => _play(fromStart: true),
                       ),
-                    ],
+                    _buildFavoriteButton(),
                   ],
                 ),
                 if (_playError != null) ...[
@@ -225,8 +252,31 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               ],
             ),
           ),
+          // Back: always visible, touch or remote.
+          Positioned(
+            left: margin,
+            top: context.s(Gaps.screenV) + context.safe.top,
+            child: const PageBackButton(),
+          ),
         ],
       ),
+    );
+  }
+
+  /// Star toggle. Active (gold, filled star) when the video is a favourite.
+  Widget _buildFavoriteButton() {
+    return ListenableBuilder(
+      listenable: FavoritesStore.instance,
+      builder: (context, _) {
+        final active = FavoritesStore.instance.isFavorite(widget.video.id);
+        return TvButton(
+          label: active ? 'Favorited' : 'Add to Favorites',
+          icon: active ? Icons.star_rounded : Icons.star_border_rounded,
+          iconColor: active ? AppColors.star : null,
+          style: TvButtonStyle.secondary,
+          onPressed: () => FavoritesStore.instance.toggle(widget.video),
+        );
+      },
     );
   }
 
@@ -242,10 +292,11 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           return const SizedBox.shrink();
         }
 
+        final columns = videoGridColumns(context);
         final gap = context.s(Gaps.lg);
         final width = MediaQuery.sizeOf(context).width;
-        final cardWidth = ((width - margin * 2 - gap * (kVideoGridColumns - 1)) /
-                kVideoGridColumns)
+        final cardWidth = ((width - margin * 2 - gap * (columns - 1)) /
+                columns)
             .clamp(0.0, double.infinity)
             .toDouble();
         final cardHeight = VideoCardMetrics.height(context, cardWidth);
@@ -274,7 +325,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             scrollDirection: Axis.horizontal,
             physics: const NeverScrollableScrollPhysics(),
             padding: EdgeInsets.symmetric(horizontal: margin, vertical: context.s(12)),
-            itemCount: kVideoGridColumns,
+            itemCount: columns,
             separatorBuilder: (_, __) => SizedBox(width: gap),
             itemBuilder: (_, __) =>
                 SizedBox(width: cardWidth, child: const SkeletonCard()),
@@ -293,7 +344,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 child: VideoCard(
                   key: ValueKey<String>(item.id),
                   video: item,
-                  onTap: () => _openRelated(item),
+                  onTap: () => _openRelated(item, related),
                 ),
               );
             },

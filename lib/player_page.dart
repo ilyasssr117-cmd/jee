@@ -7,17 +7,13 @@ import 'package:video_player/video_player.dart';
 
 import 'app_theme.dart';
 import 'models.dart';
+import 'platform_ui.dart';
 import 'playback_progress.dart';
 import 'tv_focusable.dart';
 import 'video_repository.dart';
+import 'res_log.dart';
 import 'widgets/state_views.dart';
-
-// ===============================
-// PUT YOUR COOKIE HERE
-// Example: const String _videoCookie = 'your_cookie_here';
-// ===============================
-const String _videoCookie = 'kt_acctoken=MTg3LjQwLjQxLjE3OCwxMDUuMTU5LjIwMy4xOTM';
-
+import 'widgets/tv_button.dart';
 
 /// Full-screen TV player.
 ///
@@ -27,9 +23,18 @@ const String _videoCookie = 'kt_acctoken=MTg3LjQwLjQxLjE3OCwxMDUuMTU5LjIwMy4xOTM
 ///  * UP / DOWN .............. show controls, move between control rows
 ///  * BACK ................... leave the player
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key, required this.video, this.startAt});
+  const PlayerPage({
+    super.key,
+    required this.video,
+    this.startAt,
+    this.queue,
+  });
 
   final Video video;
+
+  /// The list the video was opened from. When one video ends, Autoplay Next
+  /// continues with the following entry (null / last entry: nothing to play).
+  final List<Video>? queue;
 
   /// Optional position to resume from.
   final Duration? startAt;
@@ -95,11 +100,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Timer? _stallTimer;
   int _autoRetries = 0;
   bool _reconnecting = false;
+  bool _manualReload = false;
+
+  // Vertical (9:16) videos: the screen flips to portrait on phones.
+  bool _portrait = false;
+  bool _orientationForced = false; // The viewer used the rotate button.
+
+  // Autoplay Next. The countdown lives in a ValueNotifier so the one-second
+  // tick rebuilds only the small number label, never the whole page.
+  static const int _autoplaySeconds = 5;
+  final ValueNotifier<int?> _countdown = ValueNotifier<int?>(null);
+  Timer? _autoplayTimer;
+  bool _autoplayCancelled = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Landscape + immersive while watching (phones are portrait elsewhere).
+    unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
     _initializePlayer();
   }
@@ -117,6 +136,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
     _stallTimer?.cancel();
+    _autoplayTimer?.cancel();
+    _countdown.value = null;
     _stalled.value = false;
     _scrubTarget.value = null;
     if (refreshSource && _lastPosition > const Duration(seconds: 3)) {
@@ -186,6 +207,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           : '$pageOrigin/';
 
       debugPrint('[PLAYER] Initializing stream host=${streamUri.host}');
+      ResLog.video(
+        pageUrl: _video.pageUrl,
+        videoUrl: streamUri.toString(),
+      );
       controller = VideoPlayerController.networkUrl(
         streamUri,
         httpHeaders: <String, String>{
@@ -195,7 +220,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           'Referer': referer,
           'Origin': pageOrigin,
           'Accept': '*/*',
-          if (_videoCookie.isNotEmpty) 'Cookie': _videoCookie,
+          'Cookie': 'kt_acctoken=OTQuMTA5LjI4LjI0MSwxNjAuMTc3LjE3Ni44NQ',
         },
       );
       _controller = controller;
@@ -223,9 +248,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
 
       _retryBase = controller.value.position;
+      _applyVideoOrientation(controller);
       setState(() {
         _loading = false;
         _reconnecting = false;
+        _manualReload = false;
       });
       _onControllerChanged();
       _focusSeekBarSoon();
@@ -253,15 +280,40 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       setState(() {
         _loading = false;
         _reconnecting = false;
+        _manualReload = false;
         _problem = _describeProblem(error);
       });
     }
+  }
+
+  /// Phones only: a vertical video (width < height) flips the screen to
+  /// portrait so it fills it; anything else stays landscape. Once the viewer
+  /// presses the rotate button their choice wins for this video.
+  void _applyVideoOrientation(VideoPlayerController controller) {
+    if (!isPhoneDevice || _orientationForced) return;
+    final size = controller.value.size;
+    final vertical = size.width > 0 && size.height > size.width;
+    _setPortrait(vertical);
+  }
+
+  void _setPortrait(bool portrait) {
+    if (_portrait == portrait) return;
+    _portrait = portrait;
+    unawaited(applyPlayerOrientation(portrait: portrait));
+  }
+
+  /// Rotate button: flip between portrait and landscape by hand.
+  void _toggleOrientation() {
+    _orientationForced = true;
+    _setPortrait(!_portrait);
+    _revealControls();
   }
 
   /// Manual reload (Reload button / "Try again"): fresh URL, same position.
   void _reload() {
     _autoRetries = 0;
     _reconnecting = false;
+    _manualReload = true;
     unawaited(_initializePlayer(refreshSource: true));
   }
 
@@ -333,7 +385,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
     _stallTimer?.cancel();
+    _autoplayTimer?.cancel();
     _saveProgress();
+    PlaybackProgress.instance.flush();
 
     final controller = _controller;
     _controller = null;
@@ -391,7 +445,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final value = _controller?.value;
     if (value == null || !value.isInitialized) return;
     PlaybackProgress.instance.save(
-      widget.video.id,
+      _video.id,
       value.position,
       value.duration,
     );
@@ -462,38 +516,128 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
     }
 
+    // The end of the stream: the position reached the duration. Some decoders
+    // keep reporting `isBuffering` (and never `isPlaying`) once they get
+    // there, which used to leave an endless spinner on a finished video.
+    final atEnd = value.isInitialized &&
+        value.duration > Duration.zero &&
+        value.position >= value.duration - const Duration(milliseconds: 800);
+
     _playing.value = value.isPlaying;
-    if (_buffering.value != value.isBuffering) {
-      _buffering.value = value.isBuffering;
+    final buffering = value.isBuffering && !atEnd;
+    if (_buffering.value != buffering) {
+      _buffering.value = buffering;
       _stallTimer?.cancel();
-      if (value.isBuffering) {
+      if (buffering) {
         _stallTimer = Timer(_stallAfter, _onStalled);
       } else {
         _stalled.value = false;
       }
     }
 
-    final finished = value.isInitialized &&
-        value.duration > Duration.zero &&
-        value.position >= value.duration - const Duration(milliseconds: 500) &&
-        !value.isPlaying &&
-        !value.isBuffering;
+    final finished = atEnd && !value.isPlaying;
     if (finished != _completed) {
       setState(() {
         _completed = finished;
         if (finished) {
           _showControls = false;
           _hideTimer?.cancel();
-          PlaybackProgress.instance.clear(widget.video.id);
+          // Reached the end: nothing to resume, and the card shows "watched".
+          PlaybackProgress.instance.markCompleted(_video.id);
         }
       });
+      if (finished) {
+        _startAutoplay();
+      } else {
+        _autoplayTimer?.cancel();
+        _countdown.value = null;
+      }
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Autoplay Next
+  // -------------------------------------------------------------------------
+
+  /// The entry after the current one in [PlayerPage.queue], if any.
+  Video? get _nextVideo {
+    final queue = widget.queue;
+    if (queue == null) return null;
+    final index = queue.indexWhere((video) => video.id == _video.id);
+    if (index < 0 || index + 1 >= queue.length) return null;
+    return queue[index + 1];
+  }
+
+  /// The entry before the current one in [PlayerPage.queue], if any.
+  Video? get _previousVideo {
+    final queue = widget.queue;
+    if (queue == null) return null;
+    final index = queue.indexWhere((video) => video.id == _video.id);
+    if (index <= 0) return null;
+    return queue[index - 1];
+  }
+
+  void _startAutoplay() {
+    _autoplayTimer?.cancel();
+    if (_autoplayCancelled || _nextVideo == null) {
+      _countdown.value = null;
+      return;
+    }
+    _countdown.value = _autoplaySeconds;
+    _autoplayTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _isLeaving) {
+        timer.cancel();
+        return;
+      }
+      final left = (_countdown.value ?? 0) - 1;
+      if (left <= 0) {
+        timer.cancel();
+        _countdown.value = null;
+        unawaited(_playNext());
+      } else {
+        _countdown.value = left;
+      }
+    });
+  }
+
+  /// CANCEL: stay on the "Finished watching" screen instead.
+  void _cancelAutoplay() {
+    _autoplayTimer?.cancel();
+    _countdown.value = null;
+    setState(() => _autoplayCancelled = true);
+  }
+
+  /// Switches this same player to the next video (one controller at a time;
+  /// the old one is released before the new one is created).
+  Future<void> _playNext() => _switchTo(_nextVideo);
+
+  Future<void> _playPrevious() => _switchTo(_previousVideo);
+
+  Future<void> _switchTo(Video? next) async {
+    if (next == null || _isLeaving) return;
+    if (!_completed) _saveProgress(); // Keep where we stopped in this one.
+    _autoplayTimer?.cancel();
+    _countdown.value = null;
+    _autoplayCancelled = false;
+    _video = next;
+    _orientationForced = false;
+    _lastPosition = Duration.zero;
+    _autoRetries = 0;
+    _reconnecting = false;
+    _resumeAt = PlaybackProgress.instance.resumePosition(next.id);
+    await _initializePlayer(refreshSource: true);
   }
 
   /// Buffering for too long: show the controls and put focus on Reload.
   void _onStalled() {
     if (!mounted || _isLeaving || !_buffering.value) return;
     _stalled.value = true;
+    // Still stuck a while later: reconnect on our own with a fresh URL.
+    _stallTimer?.cancel();
+    _stallTimer = Timer(_stallAfter, () {
+      if (!mounted || _isLeaving || !_buffering.value) return;
+      _autoReconnect();
+    });
     _revealControls(focusSeekBar: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _showControls && _stalled.value) {
@@ -639,9 +783,28 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return;
     }
     final value = controller.value;
-    if (_scrubTarget.value == null) _scrubOrigin = value.position;
     final base = _scrubTarget.value ?? value.position;
-    var target = base + Duration(seconds: seconds);
+    _scrubTo(base + Duration(seconds: seconds));
+  }
+
+  /// Touch: tap or drag on the seek bar ([fraction] 0..1 of the duration).
+  void _scrubToFraction(double fraction) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized || _isLeaving) {
+      return;
+    }
+    final total = controller.value.duration;
+    _scrubTo(total * fraction.clamp(0.0, 1.0));
+  }
+
+  void _scrubTo(Duration wanted) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized || _isLeaving) {
+      return;
+    }
+    final value = controller.value;
+    if (_scrubTarget.value == null) _scrubOrigin = value.position;
+    var target = wanted;
     if (target < Duration.zero) target = Duration.zero;
     if (value.duration > Duration.zero && target > value.duration) {
       target = value.duration;
@@ -800,7 +963,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
     _stallTimer?.cancel();
+    _autoplayTimer?.cancel();
     _saveProgress();
+    PlaybackProgress.instance.flush();
     _isLeaving = true;
     ++_initializationGeneration;
     final controller = _controller;
@@ -816,8 +981,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _reloadNode.dispose();
     _stalled.dispose();
     _scrubTarget.dispose();
+    _countdown.dispose();
     _playing.dispose();
     _buffering.dispose();
+    unawaited(applyBrowseOrientation());
     super.dispose();
   }
 
@@ -860,7 +1027,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       child: VideoPlayer(live),
                     ),
                   ),
-                if (live != null) _buildBufferingIndicator(),
+                if (live != null && !_completed) _buildBufferingIndicator(),
                 if (live != null && !_completed) _buildControls(live),
                 if (live != null && !_completed) _buildSeekBadge(),
                 if (_loading) _buildLoading(),
@@ -894,7 +1061,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           Text(
             _reconnecting
                 ? 'Reconnecting\u2026 ($_autoRetries/$_maxAutoRetries)'
-                : 'Preparing video\u2026',
+                : (_manualReload
+                    ? 'Reloading\u2026'
+                    : 'Preparing video\u2026'),
             style: AppText.body,
           ),
         ],
@@ -921,18 +1090,79 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildFinished() {
+    final next = _nextVideo;
+    if (next != null && !_autoplayCancelled) return _buildUpNext(next);
     return FocusScope(
       child: ColoredBox(
         color: const Color(0xCC000000),
         child: TvStatusView(
           icon: Icons.check_circle_outline_rounded,
           title: 'Finished watching',
-          message: widget.video.title,
+          message: _video.title,
           actionLabel: 'Watch again',
           actionIcon: Icons.replay_rounded,
           onAction: () => unawaited(_replay()),
           secondaryLabel: 'Back',
           onSecondary: () => unawaited(_leave()),
+        ),
+      ),
+    );
+  }
+
+  /// "Up next" with a short countdown. CANCEL has focus, so OK stops it.
+  Widget _buildUpNext(Video next) {
+    return FocusScope(
+      child: ColoredBox(
+        color: const Color(0xCC000000),
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(context.s(Gaps.xl)),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: context.s(640)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('UP NEXT', style: AppText.overline),
+                  SizedBox(height: context.s(Gaps.sm + 4)),
+                  Text(
+                    next.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: AppText.headline,
+                  ),
+                  SizedBox(height: context.s(Gaps.sm)),
+                  ValueListenableBuilder<int?>(
+                    valueListenable: _countdown,
+                    builder: (context, left, _) => Text(
+                      left == null ? 'Starting\u2026' : 'Playing in $left\u2026',
+                      style: AppText.body,
+                    ),
+                  ),
+                  SizedBox(height: context.s(Gaps.xl)),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: context.s(Gaps.md),
+                    runSpacing: context.s(Gaps.md),
+                    children: [
+                      TvButton(
+                        label: 'Cancel',
+                        icon: Icons.close_rounded,
+                        autofocus: true,
+                        onPressed: _cancelAutoplay,
+                      ),
+                      TvButton(
+                        label: 'Play now',
+                        icon: Icons.skip_next_rounded,
+                        style: TvButtonStyle.secondary,
+                        onPressed: () => unawaited(_playNext()),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -992,7 +1222,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildControls(VideoPlayerController controller) {
-    final margin = context.s(Gaps.screenH);
+    final margin = context.hMargin;
     return AnimatedOpacity(
       opacity: _showControls ? 1 : 0,
       duration: Motion.scroll,
@@ -1012,10 +1242,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ),
             child: Padding(
               padding: EdgeInsets.fromLTRB(
-                margin,
-                context.s(Gaps.screenV),
-                margin,
-                context.s(Gaps.screenV),
+                margin + context.safe.left,
+                context.s(Gaps.screenV) + context.safe.top,
+                margin + context.safe.right,
+                context.s(Gaps.screenV) + context.safe.bottom,
               ),
               child: Column(
                 children: [
@@ -1034,7 +1264,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              widget.video.title,
+                              _video.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppText.title,
@@ -1056,6 +1286,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         ),
                       ),
                       SizedBox(width: context.s(Gaps.md)),
+                      if (context.isPhone) ...[
+                        _RoundControl(
+                          icon: Icons.screen_rotation_rounded,
+                          label: 'Rotate',
+                          onTap: _toggleOrientation,
+                        ),
+                        SizedBox(width: context.s(Gaps.md)),
+                      ],
                       _RoundControl(
                         icon: Icons.refresh_rounded,
                         label: 'Reload',
@@ -1070,17 +1308,26 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     scrubTarget: _scrubTarget,
                     focusNode: _seekNode,
                     onKey: _onSeekKey,
+                    onSeekFraction: _scrubToFraction,
                   ),
                   SizedBox(height: context.s(Gaps.md)),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      if (_previousVideo != null) ...[
+                        _RoundControl(
+                          icon: Icons.skip_previous_rounded,
+                          label: 'Previous video',
+                          onTap: () => unawaited(_playPrevious()),
+                        ),
+                        SizedBox(width: context.s(context.isPhone ? Gaps.md : Gaps.xl)),
+                      ],
                       _RoundControl(
                         icon: Icons.replay_10_rounded,
                         label: 'Back 10 seconds',
                         onTap: () => _scrubBySeconds(-10),
                       ),
-                      SizedBox(width: context.s(Gaps.xl)),
+                      SizedBox(width: context.s(context.isPhone ? Gaps.md : Gaps.xl)),
                       ValueListenableBuilder<bool>(
                         valueListenable: _playing,
                         builder: (context, playing, _) => _RoundControl(
@@ -1093,12 +1340,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                           onTap: () => unawaited(_togglePlayback()),
                         ),
                       ),
-                      SizedBox(width: context.s(Gaps.xl)),
+                      SizedBox(width: context.s(context.isPhone ? Gaps.md : Gaps.xl)),
                       _RoundControl(
                         icon: Icons.forward_10_rounded,
                         label: 'Forward 10 seconds',
                         onTap: () => _scrubBySeconds(10),
                       ),
+                      if (_nextVideo != null) ...[
+                        SizedBox(width: context.s(context.isPhone ? Gaps.md : Gaps.xl)),
+                        _RoundControl(
+                          icon: Icons.skip_next_rounded,
+                          label: 'Next video',
+                          onTap: () => unawaited(_playNext()),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -1185,8 +1440,10 @@ class _ProgressRow extends StatelessWidget {
     required this.scrubTarget,
     required this.focusNode,
     required this.onKey,
+    required this.onSeekFraction,
   });
 
+  final ValueChanged<double> onSeekFraction;
   final VideoPlayerController controller;
   final ValueNotifier<Duration?> scrubTarget;
   final FocusNode focusNode;
@@ -1242,7 +1499,15 @@ class _ProgressRow extends StatelessWidget {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final width = constraints.maxWidth;
-                        return Stack(
+                        double fractionAt(double dx) =>
+                            width <= 0 ? 0 : (dx / width).clamp(0.0, 1.0);
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapDown: (d) =>
+                              onSeekFraction(fractionAt(d.localPosition.dx)),
+                          onHorizontalDragUpdate: (d) =>
+                              onSeekFraction(fractionAt(d.localPosition.dx)),
+                          child: Stack(
                           alignment: Alignment.centerLeft,
                           clipBehavior: Clip.none,
                           children: [
@@ -1290,6 +1555,7 @@ class _ProgressRow extends StatelessWidget {
                               ),
                             ),
                           ],
+                        ),
                         );
                       },
                     ),

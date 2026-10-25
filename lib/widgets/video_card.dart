@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import '../favorites_store.dart';
 import '../models.dart';
 import '../playback_progress.dart';
 import '../tv_focusable.dart';
 import 'video_artwork.dart';
 import 'video_meta.dart';
+import '../preview_manager.dart';
+import 'video_preview.dart';
 
 /// Layout maths shared by every place that shows [VideoCard]s, so a card's
 /// height is always known up-front (no overflow, no layout jumps).
@@ -57,7 +60,11 @@ class VideoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final radius = context.s(Radii.card);
     final ring = context.s(_ringWidth);
-    final progress = PlaybackProgress.instance.fraction(video.id);
+    final completed = PlaybackProgress.instance.isCompleted(video.id);
+    // A finished video shows the watched badge instead of a progress bar.
+    final progress =
+        completed ? null : PlaybackProgress.instance.fraction(video.id);
+    final favorite = FavoritesStore.instance.isFavorite(video.id);
 
     return TvFocusable(
       focusNode: focusNode,
@@ -66,8 +73,13 @@ class VideoCard extends StatelessWidget {
       onFocus: onFocus,
       scale: 1.05,
       scrollAlignment: 0.38,
+      focusOnHover: true,
+      // Hold OK to add / remove a favourite without opening the video.
+      onLongPress: () => FavoritesStore.instance.toggle(video),
       semanticLabel: [
         video.title,
+        if (completed) 'watched',
+        if (favorite) 'favorite',
         if (video.duration.isNotEmpty) video.duration,
         if (video.likes.isNotEmpty) '${video.likes} liked',
         if (video.views.isNotEmpty) video.views,
@@ -88,6 +100,31 @@ class VideoCard extends StatelessWidget {
                         fit: StackFit.expand,
                         children: [
                           VideoArtwork(video: video),
+                          // Only the focused card mounts a preview (one
+                          // controller app-wide, started after a short dwell).
+                          if (focused ||
+                              PreviewManager.instance.isShowing(video.id))
+                            PreviewLayer(video: video, focused: focused),
+                          if (completed)
+                            Positioned(
+                              left: context.s(8),
+                              top: context.s(8),
+                              child: const _Badge(
+                                icon: Icons.check_rounded,
+                                background: AppColors.accentStrong,
+                                color: Colors.white,
+                              ),
+                            ),
+                          Positioned(
+                            right: context.s(8),
+                            top: context.s(8),
+                            // Only the focused card listens (so a long-press
+                            // shows the star at once); others read on build.
+                            child: _FavoriteBadge(
+                              id: video.id,
+                              live: focused,
+                            ),
+                          ),
                           if (video.duration.isNotEmpty)
                             Positioned(
                               right: context.s(8),
@@ -150,10 +187,61 @@ class VideoCard extends StatelessWidget {
               ),
             ),
             SizedBox(height: context.s(4)),
-            VideoMetaLine(video: video),
+            VideoMetaLine(video: video, showDate: true),
           ],
         );
       },
+    );
+  }
+}
+
+/// Gold star shown while the video is a favourite.
+class _FavoriteBadge extends StatelessWidget {
+  const _FavoriteBadge({required this.id, required this.live});
+
+  final String id;
+  final bool live;
+
+  static const Widget _star = _Badge(
+    icon: Icons.star_rounded,
+    background: Color(0xCC000000),
+    color: AppColors.star,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final store = FavoritesStore.instance;
+    if (!live) return store.isFavorite(id) ? _star : const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) =>
+          store.isFavorite(id) ? _star : const SizedBox.shrink(),
+    );
+  }
+}
+
+/// Small round status marker drawn on the thumbnail corner.
+class _Badge extends StatelessWidget {
+  const _Badge({
+    required this.icon,
+    required this.background,
+    required this.color,
+  });
+
+  final IconData icon;
+  final Color background;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = context.s(26);
+    return DecoratedBox(
+      decoration: BoxDecoration(color: background, shape: BoxShape.circle),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Icon(icon, size: context.s(18), color: color),
+      ),
     );
   }
 }

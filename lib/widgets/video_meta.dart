@@ -73,14 +73,7 @@ class VideoMetaLine extends StatelessWidget {
     if (video.views.isNotEmpty) {
       separator();
       parts.add(
-        Flexible(
-          child: Text(
-            video.views,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: style,
-          ),
-        ),
+        Flexible(child: _IconText(Icons.visibility_outlined, video.views, style)),
       );
     }
 
@@ -88,12 +81,7 @@ class VideoMetaLine extends StatelessWidget {
       separator();
       parts.add(
         Flexible(
-          child: Text(
-            video.date,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: style,
-          ),
+          child: _IconText(Icons.calendar_today_outlined, video.date, style),
         ),
       );
     }
@@ -116,5 +104,37 @@ class VideoMetaLine extends StatelessWidget {
 
     if (parts.isEmpty) return const SizedBox.shrink();
     return Row(mainAxisSize: MainAxisSize.min, children: parts);
+  }
+}
+
+/// Small grey icon followed by one line of text (eye + views, calendar + date).
+class _IconText extends StatelessWidget {
+  const _IconText(this.icon, this.text, this.style);
+
+  final IconData icon;
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: context.s((style.fontSize ?? 15) + 2),
+          color: style.color ?? AppColors.textSecondary,
+        ),
+        SizedBox(width: context.s(5)),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+      ],
+    );
   }
 }

@@ -11,6 +11,7 @@ class Video {
     this.date = '',
     this.category = 'Featured',
     this.pageUrl,
+    this.previewUrl = '',
   });
 
   final String id;
@@ -20,6 +21,10 @@ class Video {
   final String? pageUrl;
   final String description;
   final String? thumbnailUrl;
+
+  /// Short muted preview clip exposed on the list card (`data-preview`).
+  /// Empty when the source doesn't provide one. Not persisted (it can expire).
+  final String previewUrl;
   final String duration;
   final String views;
 
@@ -42,6 +47,7 @@ class Video {
     String? date,
     String? category,
     String? pageUrl,
+    String? previewUrl,
   }) {
     return Video(
       id: id ?? this.id,
@@ -55,6 +61,7 @@ class Video {
       date: date ?? this.date,
       category: category ?? this.category,
       pageUrl: pageUrl ?? this.pageUrl,
+      previewUrl: previewUrl ?? this.previewUrl,
     );
   }
 }

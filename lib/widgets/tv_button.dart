@@ -19,6 +19,7 @@ class TvButton extends StatelessWidget {
     this.onFocus,
     this.loading = false,
     this.scrollAlignment = 0.4,
+    this.iconColor,
   });
 
   final String label;
@@ -30,6 +31,9 @@ class TvButton extends StatelessWidget {
   final VoidCallback? onFocus;
   final bool loading;
   final double? scrollAlignment;
+
+  /// Optional icon colour while the button is not focused (e.g. gold star).
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +82,11 @@ class TvButton extends StatelessWidget {
                   ),
                 )
               else if (icon != null)
-                Icon(icon, size: context.s(26), color: foreground),
+                Icon(
+                  icon,
+                  size: context.s(26),
+                  color: focused ? foreground : (iconColor ?? foreground),
+                ),
               if (loading || icon != null) SizedBox(width: context.s(10)),
               Flexible(
                 child: Text(

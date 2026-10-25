@@ -20,10 +20,8 @@ class HomeHero extends StatelessWidget {
     required this.playLabel,
     required this.playBusy,
     required this.playNode,
-    required this.searchNode,
     required this.onPlay,
     required this.onDetails,
-    required this.onSearch,
     required this.onChildFocus,
   });
 
@@ -33,30 +31,26 @@ class HomeHero extends StatelessWidget {
   final String playLabel;
   final bool playBusy;
   final FocusNode playNode;
-  final FocusNode searchNode;
   final VoidCallback onPlay;
   final VoidCallback onDetails;
-  final VoidCallback onSearch;
   final VoidCallback onChildFocus;
 
   @override
   Widget build(BuildContext context) {
-    final margin = context.s(Gaps.screenH);
-    final topBar = _TopBar(
-      searchNode: searchNode,
-      onSearch: onSearch,
-      onFocus: onChildFocus,
-    );
+    final margin = context.hMargin;
+    final phone = context.isPhone;
+    final topPad = context.s(Gaps.screenV) + context.safe.top;
+    const topBar = _TopBar();
 
     // Error / empty: keep only the brand bar so the status view has room.
     if (video == null && !loading) {
       return Padding(
-        padding: EdgeInsets.fromLTRB(margin, context.s(Gaps.screenV), margin, 0),
+        padding: EdgeInsets.fromLTRB(margin, topPad, margin, 0),
         child: topBar,
       );
     }
 
-    final height = MediaQuery.sizeOf(context).height * 0.58;
+    final height = MediaQuery.sizeOf(context).height * (phone ? 0.46 : 0.58);
     final featured = video;
 
     return SizedBox(
@@ -78,14 +72,25 @@ class HomeHero extends StatelessWidget {
             ),
           // Scrims: left for text, top for the brand bar, bottom to blend into
           // the page background.
-          const DecoratedBox(
+          // Phone: the text spans the full width, so the scrim is vertical.
+          DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [Color(0xF50B0D12), Color(0xC70B0D12), Color(0x260B0D12)],
-                stops: [0, 0.45, 1],
-              ),
+              gradient: phone
+                  ? const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x330B0D12), Color(0xE60B0D12)],
+                    )
+                  : const LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        Color(0xF50B0D12),
+                        Color(0xC70B0D12),
+                        Color(0x260B0D12),
+                      ],
+                      stops: [0, 0.45, 1],
+                    ),
             ),
           ),
           const DecoratedBox(
@@ -111,13 +116,15 @@ class HomeHero extends StatelessWidget {
           Positioned(
             left: margin,
             right: margin,
-            top: context.s(Gaps.screenV),
+            top: topPad,
             child: topBar,
           ),
           Positioned(
             left: margin,
             bottom: context.s(Gaps.xl),
-            width: MediaQuery.sizeOf(context).width * 0.5,
+            width: phone
+                ? MediaQuery.sizeOf(context).width - margin * 2
+                : MediaQuery.sizeOf(context).width * 0.5,
             child: featured == null
                 ? const _HeroSkeleton()
                 : _HeroDetails(
@@ -137,15 +144,7 @@ class HomeHero extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.searchNode,
-    required this.onSearch,
-    required this.onFocus,
-  });
-
-  final FocusNode searchNode;
-  final VoidCallback onSearch;
-  final VoidCallback onFocus;
+  const _TopBar();
 
   @override
   Widget build(BuildContext context) {
@@ -171,16 +170,6 @@ class _TopBar extends StatelessWidget {
             fontWeight: FontWeight.w800,
             letterSpacing: 2,
           ),
-        ),
-        const Spacer(),
-        TvButton(
-          label: 'Search',
-          icon: Icons.search_rounded,
-          style: TvButtonStyle.secondary,
-          focusNode: searchNode,
-          scrollAlignment: null,
-          onFocus: onFocus,
-          onPressed: onSearch,
         ),
       ],
     );
@@ -218,7 +207,9 @@ class _HeroDetails extends StatelessWidget {
           video.title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: AppText.display,
+          style: context.isPhone
+              ? AppText.display.copyWith(fontSize: 30)
+              : AppText.display,
         ),
         SizedBox(height: context.s(12)),
         VideoMetaLine(
@@ -268,9 +259,9 @@ class _HeroSkeleton extends StatelessWidget {
         children: [
           SkeletonBlock(width: context.s(90), height: context.s(14)),
           SizedBox(height: context.s(14)),
-          SkeletonBlock(width: context.s(520), height: context.s(40)),
+          SkeletonBlock(width: context.s(context.isPhone ? 300 : 520), height: context.s(40)),
           SizedBox(height: context.s(12)),
-          SkeletonBlock(width: context.s(300), height: context.s(40)),
+          SkeletonBlock(width: context.s(context.isPhone ? 200 : 300), height: context.s(40)),
           SizedBox(height: context.s(Gaps.lg)),
           SkeletonBlock(width: context.s(190), height: context.s(52), radius: Radii.button),
         ],

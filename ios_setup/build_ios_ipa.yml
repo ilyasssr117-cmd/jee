@@ -1,0 +1,32 @@
+name: Build iOS IPA (unsigned)
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # Fixes "Application not configured for iOS": regenerates ios/ with
+      # `flutter create --platforms=ios` when it is missing or incomplete.
+      # It prints the ls -la listings before and after.
+      - name: Check / repair the iOS platform folder
+        run: bash ios_setup/repair_ios.sh
+
+      - run: flutter clean
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter build ios --release --no-codesign --verbose
+
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -r TVTube.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TVTube-ipa
+          path: TVTube.ipa

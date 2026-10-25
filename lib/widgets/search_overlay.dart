@@ -1,0 +1,588 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../app_theme.dart';
+import '../error_text.dart';
+import '../models.dart';
+import '../search_history.dart';
+import '../touch.dart';
+import '../video_repository.dart';
+import 'app_button.dart';
+import 'state_views.dart';
+import 'video_grid.dart';
+
+/// Full-screen search that lives *on top of* the home page (no route).
+///
+/// * Live search: results follow the text after a short typing pause.
+/// * Recent searches: shown while the field is empty. Plain history only.
+/// * Closing is the owner's job ([onClose]); the page underneath is never
+///   rebuilt or scrolled by this widget.
+class SearchOverlay extends StatefulWidget {
+  const SearchOverlay({
+    super.key,
+    required this.onClose,
+    required this.onOpen,
+    this.bottomInset = 0,
+  });
+
+  /// Space kept free at the bottom (the floating bar).
+  final double bottomInset;
+
+  final VoidCallback onClose;
+
+  /// Opens [video]; [queue] is the current result list (Autoplay Next).
+  final void Function(Video video, List<Video> queue) onOpen;
+
+  @override
+  State<SearchOverlay> createState() => SearchOverlayState();
+}
+
+class SearchOverlayState extends State<SearchOverlay> {
+  /// Wait for a typing pause before hitting the network.
+  static const Duration _debounce = Duration(milliseconds: 450);
+  static const int _pageSize = 12;
+  static const int _maxEmptyPages = 3;
+
+  final TextEditingController _text = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  final FocusNode _fieldNode = FocusNode(debugLabel: 'Search field');
+
+  Timer? _debounceTimer;
+  final List<Video> _videos = <Video>[];
+  String _query = '';
+  bool _hasText = false;
+  bool _awaiting = false; // Text typed, request not started yet.
+  int _page = 0;
+  int _generation = 0;
+  int _emptyPages = 0;
+  bool _loading = false;
+  bool _hasMore = false;
+  FriendlyError? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_maybeLoadMore);
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    _generation++; // Ignore any response that is still in flight.
+    _scroll
+      ..removeListener(_maybeLoadMore)
+      ..dispose();
+    _text.dispose();
+    _fieldNode.dispose();
+    super.dispose();
+  }
+
+  // -------------------------------------------------------------------------
+  // Typing → debounced search
+  // -------------------------------------------------------------------------
+
+  void _onChanged(String raw) {
+    final value = SearchHistory.normalize(raw);
+    _debounceTimer?.cancel();
+
+    if (value.isEmpty) {
+      _clearResults();
+      return;
+    }
+    if (value == _query && !_awaiting) return;
+
+    if (!_hasText || !_awaiting) {
+      setState(() {
+        _hasText = true;
+        _awaiting = true;
+      });
+    }
+    // Only the last keystroke of a burst (c → ca → cat) reaches the network.
+    _debounceTimer = Timer(_debounce, () => _runSearch(value));
+  }
+
+  void _clearResults() {
+    _generation++;
+    setState(() {
+      _query = '';
+      _hasText = false;
+      _awaiting = false;
+      _videos.clear();
+      _page = 0;
+      _emptyPages = 0;
+      _loading = false;
+      _hasMore = false;
+      _error = null;
+    });
+  }
+
+  /// The × inside the field.
+  void _clearField() {
+    _text.clear();
+    _debounceTimer?.cancel();
+    _clearResults();
+    _fieldNode.requestFocus();
+  }
+
+  void _runSearch(String value) {
+    if (!mounted) return;
+    _query = value;
+    _awaiting = false;
+    _loadPage(reset: true);
+  }
+
+  /// The keyboard's Search key: search right now, remember it, hide keyboard.
+  void _submit() {
+    _debounceTimer?.cancel();
+    final value = SearchHistory.normalize(_text.text);
+    if (value.isEmpty) return;
+    SearchHistory.instance.add(value);
+    _fieldNode.unfocus();
+    if (_loading && value == _query) return;
+    setState(() => _hasText = true);
+    _runSearch(value);
+  }
+
+  void _useRecent(String term) {
+    _debounceTimer?.cancel();
+    _text.value = TextEditingValue(
+      text: term,
+      selection: TextSelection.collapsed(offset: term.length),
+    );
+    SearchHistory.instance.add(term); // Becomes the newest entry.
+    _fieldNode.unfocus();
+    setState(() => _hasText = true);
+    _runSearch(term);
+  }
+
+  // -------------------------------------------------------------------------
+  // Loading
+  // -------------------------------------------------------------------------
+
+  void _maybeLoadMore() {
+    if (!_scroll.hasClients || _loading || !_hasMore) return;
+    if (_scroll.position.maxScrollExtent - _scroll.position.pixels < 800) {
+      _loadPage();
+    }
+  }
+
+  Future<void> _loadPage({bool reset = false}) async {
+    if (_loading && !reset) return;
+    final generation = reset ? ++_generation : _generation;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+      if (reset) {
+        _videos.clear();
+        _page = 0;
+        _emptyPages = 0;
+        _hasMore = true;
+      }
+    });
+
+    try {
+      final result = await videoRepository.searchVideos(
+        query: _query,
+        page: _page,
+        pageSize: _pageSize,
+      );
+      if (!mounted || generation != _generation) return;
+
+      final seen = _videos.map((video) => video.id).toSet();
+      final fresh = <Video>[];
+      for (final video in result) {
+        if (seen.add(video.id)) fresh.add(video);
+      }
+
+      setState(() {
+        _videos.addAll(fresh);
+        _page++;
+        _emptyPages = fresh.isEmpty ? _emptyPages + 1 : 0;
+        _hasMore = result.isNotEmpty && _emptyPages < _maxEmptyPages;
+        _loading = false;
+      });
+
+      if (_hasMore) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _loading || !_hasMore || !_scroll.hasClients) return;
+          if (_scroll.position.maxScrollExtent < 120) _loadPage();
+        });
+      }
+    } catch (error) {
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _loading = false;
+        _hasMore = false;
+        _error = describeError(error, subject: 'search results');
+      });
+    }
+  }
+
+  void _openVideo(Video video) {
+    // Opening a result is a clear sign this search was useful: remember it.
+    SearchHistory.instance.add(_query);
+    _fieldNode.unfocus();
+    widget.onOpen(video, List<Video>.of(_videos));
+  }
+
+  // -------------------------------------------------------------------------
+  // Build
+  // -------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final margin = context.hMargin;
+    // Solid page: nothing from the home screen shows through.
+    return ColoredBox(
+      color: AppColors.background,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              margin,
+              context.safe.top + Gaps.sm,
+              margin,
+              Gaps.sm,
+            ),
+            child: _buildSearchBar(),
+          ),
+          Expanded(child: _buildBody(margin)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Row(
+      children: [
+        Expanded(
+          child: ListenableBuilder(
+            listenable: _fieldNode,
+            builder: (context, _) {
+              final focused = _fieldNode.hasFocus;
+              return AnimatedContainer(
+                duration: Motion.normal,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceHigh,
+                  borderRadius: BorderRadius.circular(Radii.field),
+                  border: Border.all(
+                    color: focused
+                        ? AppColors.blue.withValues(alpha: 0.8)
+                        : AppColors.outline,
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      child: Icon(
+                        Icons.search_rounded,
+                        size: 20,
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: _text,
+                        focusNode: _fieldNode,
+                        autofocus: true,
+                        maxLines: 1,
+                        textInputAction: TextInputAction.search,
+                        keyboardAppearance: Brightness.dark,
+                        onChanged: _onChanged,
+                        onSubmitted: (_) => _submit(),
+                        cursorColor: AppColors.blue,
+                        style: AppText.title.copyWith(
+                          fontWeight: FontWeight.w400,
+                        ),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: 'Search videos',
+                          hintStyle: AppText.title.copyWith(
+                            fontWeight: FontWeight.w400,
+                            color: AppColors.textTertiary,
+                          ),
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                    // The × only exists while there is something to clear.
+                    ListenableBuilder(
+                      listenable: _text,
+                      builder: (context, _) => AnimatedSwitcher(
+                        duration: Motion.quick,
+                        child: _text.text.isEmpty
+                            ? const SizedBox(width: 10)
+                            : Pressable(
+                                key: const ValueKey<String>('clear'),
+                                semanticLabel: 'Clear text',
+                                haptic: Haptic.selection,
+                                onTap: _clearField,
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 10),
+                                  child: Icon(
+                                    Icons.cancel_rounded,
+                                    size: 18,
+                                    color: AppColors.textTertiary,
+                                  ),
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: Gaps.sm),
+        Pressable(
+          semanticLabel: 'Close search',
+          haptic: Haptic.selection,
+          onTap: widget.onClose,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: AppColors.blue,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBody(double margin) {
+    if (!_hasText) return _buildRecents(margin);
+
+    final gridPadding = EdgeInsets.fromLTRB(
+      margin,
+      Gaps.xs,
+      margin,
+      Gaps.xl + widget.bottomInset,
+    );
+
+    final waiting = _awaiting || (_loading && _videos.isEmpty);
+    final error = _error;
+
+    final List<Widget> slivers;
+    if (waiting && _videos.isEmpty) {
+      slivers = [SliverSkeletonGrid(padding: gridPadding)];
+    } else if (_videos.isEmpty && error != null) {
+      slivers = [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: StatusView(
+            icon: error.icon,
+            title: error.title,
+            message: error.message,
+            actionLabel: 'Retry',
+            onAction: () => _loadPage(reset: true),
+          ),
+        ),
+      ];
+    } else if (_videos.isEmpty) {
+      slivers = [
+        const SliverFillRemaining(
+          hasScrollBody: false,
+          child: StatusView(
+            icon: Icons.search_off_rounded,
+            title: 'No results found',
+            message: 'Check the spelling or try a different keyword.',
+          ),
+        ),
+      ];
+    } else {
+      slivers = [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(margin, Gaps.xs, margin, Gaps.sm),
+            child: Text(
+              'Results for \u201c$_query\u201d',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.body,
+            ),
+          ),
+        ),
+        SliverVideoGrid(
+          videos: _videos,
+          padding: gridPadding,
+          onOpen: _openVideo,
+        ),
+        if (_loading)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: Gaps.xl),
+              child: Spinner(),
+            ),
+          ),
+        if (_error != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: Gaps.xl),
+              child: Center(
+                child: AppButton(
+                  label: 'Couldn\u2019t load more \u2013 Retry',
+                  icon: Icons.refresh_rounded,
+                  style: AppButtonStyle.secondary,
+                  onPressed: _loadPage,
+                ),
+              ),
+            ),
+          ),
+      ];
+    }
+
+    return CustomScrollView(
+      controller: _scroll,
+      // Swiping the results down hides the keyboard.
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      cacheExtent: MediaQuery.sizeOf(context).height,
+      slivers: slivers,
+    );
+  }
+
+  /// Empty field: recent searches as a simple list (or a quiet hint).
+  Widget _buildRecents(double margin) {
+    return ListenableBuilder(
+      listenable: SearchHistory.instance,
+      builder: (context, _) {
+        final items = SearchHistory.instance.items;
+        if (items.isEmpty) {
+          return const StatusView(
+            icon: Icons.search_rounded,
+            title: 'Search for videos',
+            message: 'Results appear as you type.',
+          );
+        }
+        return ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: EdgeInsets.fromLTRB(
+            margin,
+            Gaps.sm,
+            margin,
+            widget.bottomInset,
+          ),
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Recent',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+                Pressable(
+                  semanticLabel: 'Clear recent searches',
+                  haptic: Haptic.selection,
+                  onTap: SearchHistory.instance.clear,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Clear',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.blue,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            for (final term in items)
+              _RecentRow(
+                key: ValueKey<String>(term),
+                term: term,
+                onSelect: () => _useRecent(term),
+                onDelete: () => SearchHistory.instance.remove(term),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// One recent search: tap the row to search again, × removes only this one.
+class _RecentRow extends StatelessWidget {
+  const _RecentRow({
+    super.key,
+    required this.term,
+    required this.onSelect,
+    required this.onDelete,
+  });
+
+  final String term;
+  final VoidCallback onSelect;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Pressable(
+            semanticLabel: term,
+            haptic: Haptic.selection,
+            pressedScale: 0.98,
+            onTap: onSelect,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.history_rounded,
+                    size: 18,
+                    color: AppColors.textTertiary,
+                  ),
+                  const SizedBox(width: Gaps.md),
+                  Expanded(
+                    child: Text(
+                      term,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.title.copyWith(
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Pressable(
+          semanticLabel: 'Remove $term',
+          haptic: Haptic.light,
+          pressedScale: 0.85,
+          onTap: onDelete,
+          child: const Padding(
+            padding: EdgeInsets.all(10),
+            child: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: AppColors.textTertiary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

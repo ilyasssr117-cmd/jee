@@ -13,7 +13,8 @@ dependencies:
   video_player: ^2.8.6
   http: ^1.2.2
   html: ^0.15.4
-
+dependency_overrides:
+  video_player_avfoundation: 2.8.6
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -11,7 +11,7 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     await LocalStore.init();
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(const FlowApp());
 
     expect(find.byType(MaterialApp), findsOneWidget);
 

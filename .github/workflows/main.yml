@@ -1,0 +1,63 @@
+name: Build TV Tube iOS IPA (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: Show tool versions
+        run: |
+          flutter --version
+          xcodebuild -version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS app without signing
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="build/ios/iphoneos/Runner.app"
+          test -d "$APP_PATH" || { echo "Runner.app not found at $APP_PATH"; exit 1; }
+          mkdir -p build/ios/ipa/Payload
+          rm -rf build/ios/ipa/Payload/Runner.app
+          cp -R "$APP_PATH" build/ios/ipa/Payload/Runner.app
+          cd build/ios/ipa
+          /usr/bin/zip -qry TV-Tube-unsigned.ipa Payload
+          test -s TV-Tube-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-Tube-unsigned-IPA
+          path: build/ios/ipa/TV-Tube-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7

@@ -13,8 +13,11 @@ dependencies:
   video_player: ^2.8.6
   http: ^1.2.2
   html: ^0.15.4
-dependency_overrides:
-  video_player_avfoundation: 2.8.6
+  video_player_media_kit: ^2.0.0
+  window_manager: ^0.5.1
+  media_kit_libs_windows_video: any
+  shared_preferences: ^2.5.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

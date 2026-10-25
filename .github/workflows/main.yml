@@ -35,6 +35,21 @@ jobs:
           flutter --version
           xcodebuild -version
 
+      # The previous run failed because the GitHub checkout did not contain
+      # a Flutter iOS platform project (ios/Runner.xcodeproj).
+      - name: Generate iOS platform files if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d "ios/Runner.xcodeproj" ]; then
+            echo "iOS platform files are missing; generating them now."
+            flutter create --platforms=ios .
+          else
+            echo "Found ios/Runner.xcodeproj; keeping existing iOS configuration."
+          fi
+          test -d "ios/Runner.xcodeproj"
+          test -f "ios/Runner/Info.plist"
+
       - name: Install dependencies
         run: flutter pub get
 

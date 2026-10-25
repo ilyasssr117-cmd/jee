@@ -58,12 +58,15 @@ class HomeHero extends StatelessWidget {
           if (featured != null)
             VideoArtwork(video: featured, showLabel: false)
           else
-            const DecoratedBox(
+            DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF1B2033), AppColors.background],
+                  colors: [
+                    AppColors.surfaceHigh,
+                    AppColors.background,
+                  ],
                 ),
               ),
             ),
@@ -87,7 +90,7 @@ class HomeHero extends StatelessWidget {
               ),
             ),
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
@@ -144,7 +147,7 @@ class _TopBar extends StatelessWidget {
         ),
         const SizedBox(width: Gaps.sm),
         Text(
-          'TV TUBE',
+          'FLOW',
           style: AppText.label.copyWith(
             fontWeight: FontWeight.w800,
             letterSpacing: 1.6,
@@ -177,7 +180,7 @@ class _HeroDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('FEATURED', style: AppText.overline),
+        Text('FEATURED', style: AppText.overline),
         const SizedBox(height: 6),
         Text(
           video.title,

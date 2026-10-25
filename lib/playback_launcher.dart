@@ -4,6 +4,7 @@ import 'app_theme.dart';
 import 'error_text.dart';
 import 'models.dart';
 import 'player_page.dart';
+import 'recent_videos_store.dart';
 import 'preview_manager.dart';
 import 'video_repository.dart';
 
@@ -30,6 +31,7 @@ Future<String?> launchPlayer(
     if (playable.streamUrl.trim().isEmpty) {
       return 'No playable link was found for this video.';
     }
+    RecentVideosStore.instance.record(playable);
     // The screen fades to black and into the player (no sliding).
     await navigator.push<void>(
       FadePageRoute<void>(

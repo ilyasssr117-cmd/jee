@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 ///     video : the stream URL extracted from that page
 ///
 /// The app only *prints* one tagged line per video. An app running on an
-/// emulator or TV cannot write into your project folder, so the companion
+/// a mobile device cannot write into your project folder, so the companion
 /// script `tool/res_logger.dart` (run on the computer) collects these lines
 /// and saves them to `res.txt` in the project root. Nothing is stored on the
 /// device. In release builds this does nothing at all.

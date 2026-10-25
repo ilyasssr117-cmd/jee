@@ -12,7 +12,7 @@ class VideoMetaLine extends StatelessWidget {
   const VideoMetaLine({
     super.key,
     required this.video,
-    this.style = AppText.caption,
+    this.style,
     this.showDuration = false,
     this.showDate = false,
     this.showCategory = false,
@@ -20,7 +20,7 @@ class VideoMetaLine extends StatelessWidget {
   });
 
   final Video video;
-  final TextStyle style;
+  final TextStyle? style;
   final bool showDuration;
   final bool showDate;
   final bool showCategory;
@@ -36,6 +36,7 @@ class VideoMetaLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final style = this.style ?? AppText.caption;
     final parts = <Widget>[];
 
     void separator() {
@@ -113,7 +114,7 @@ class _IconText extends StatelessWidget {
 
   final IconData icon;
   final String text;
-  final TextStyle style;
+  final TextStyle? style;
 
   @override
   Widget build(BuildContext context) {

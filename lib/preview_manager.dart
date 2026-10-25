@@ -107,6 +107,9 @@ class PreviewManager {
     await _disposing;
   }
 
+  /// Drops resolved stream URLs kept only for quick preview restarts.
+  void clearResolvedUrlCache() => _urls.clear();
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------

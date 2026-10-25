@@ -1,38 +1,27 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
+import 'app_settings.dart';
+
 // ---------------------------------------------------------------------------
 // Colours
 // ---------------------------------------------------------------------------
 
-const Color appBackground = Color(0xFF0B0D12);
-const Color panelColor = Color(0xFF151923);
-const Color accentColor = Color(0xFF8B7CFF);
-
 abstract final class AppColors {
-  static const Color background = appBackground;
-  static const Color surface = panelColor;
-  static const Color surfaceHigh = Color(0xFF1E2333);
-  static const Color outline = Color(0x1FFFFFFF);
-
-  /// Brand accent for text / thin lines on dark surfaces.
-  static const Color accent = accentColor;
-
-  /// Darker accent used for filled buttons so white labels stay legible.
-  static const Color accentStrong = Color(0xFF6C5CE7);
-
-  static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFFB7BDCB);
-  static const Color textTertiary = Color(0xFF8E96A8);
-
-  static const Color error = Color(0xFFFF8A80);
-
-  /// Blue used for the active tab and the search cursor.
-  static const Color blue = Color(0xFF4C93FF);
-  static const Color blueSoft = Color(0xFF1B2B4D);
-
-  /// Active favourite star.
-  static const Color star = Color(0xFFFFC857);
+  static bool get _dark => AppSettings.instance.isDark;
+  static Color get background => _dark ? const Color(0xFF0B0D12) : const Color(0xFFF5F6FA);
+  static Color get surface => _dark ? const Color(0xFF151923) : const Color(0xFFFFFFFF);
+  static Color get surfaceHigh => _dark ? const Color(0xFF1E2333) : const Color(0xFFEEF0F6);
+  static Color get outline => _dark ? const Color(0x1FFFFFFF) : const Color(0x180D1424);
+  static Color get accent => _dark ? const Color(0xFF8B7CFF) : const Color(0xFF6556D9);
+  static Color get accentStrong => _dark ? const Color(0xFF6C5CE7) : const Color(0xFF5948C6);
+  static Color get textPrimary => _dark ? const Color(0xFFFFFFFF) : const Color(0xFF171923);
+  static Color get textSecondary => _dark ? const Color(0xFFB7BDCB) : const Color(0xFF535C70);
+  static Color get textTertiary => _dark ? const Color(0xFF8E96A8) : const Color(0xFF707A8D);
+  static Color get error => _dark ? const Color(0xFFFF8A80) : const Color(0xFFB3261E);
+  static Color get blue => _dark ? const Color(0xFF4C93FF) : const Color(0xFF2665D8);
+  static Color get blueSoft => _dark ? const Color(0xFF1B2B4D) : const Color(0xFFE3EBFF);
+  static Color get star => const Color(0xFFFFC857);
 }
 
 // ---------------------------------------------------------------------------
@@ -92,63 +81,37 @@ int videoGridColumns(BuildContext context) => context.isPhone ? 2 : 3;
 // ---------------------------------------------------------------------------
 
 abstract final class AppText {
-  static const TextStyle display = TextStyle(
-    fontSize: 26,
-    height: 1.15,
-    fontWeight: FontWeight.w800,
-    letterSpacing: -0.4,
+  static TextStyle get display => TextStyle(
+    fontSize: 26, height: 1.15, fontWeight: FontWeight.w800,
+    letterSpacing: -0.4, color: AppColors.textPrimary,
+  );
+  static TextStyle get headline => TextStyle(
+    fontSize: 20, height: 1.2, fontWeight: FontWeight.w700,
+    letterSpacing: -0.2, color: AppColors.textPrimary,
+  );
+  static TextStyle get title => TextStyle(
+    fontSize: 16, height: 1.25, fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
   );
-
-  static const TextStyle headline = TextStyle(
-    fontSize: 20,
-    height: 1.2,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.2,
+  static TextStyle get cardTitle => TextStyle(
+    fontSize: 13.5, height: 1.25, fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
   );
-
-  static const TextStyle title = TextStyle(
-    fontSize: 16,
-    height: 1.25,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
-  );
-
-  static const TextStyle cardTitle = TextStyle(
-    fontSize: 13.5,
-    height: 1.25,
-    fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
-  );
-
-  static const TextStyle body = TextStyle(
-    fontSize: 14,
-    height: 1.4,
-    fontWeight: FontWeight.w400,
+  static TextStyle get body => TextStyle(
+    fontSize: 14, height: 1.4, fontWeight: FontWeight.w400,
     color: AppColors.textSecondary,
   );
-
-  static const TextStyle label = TextStyle(
-    fontSize: 14,
-    height: 1.2,
-    fontWeight: FontWeight.w600,
+  static TextStyle get label => TextStyle(
+    fontSize: 14, height: 1.2, fontWeight: FontWeight.w600,
     color: AppColors.textPrimary,
   );
-
-  static const TextStyle caption = TextStyle(
-    fontSize: 12,
-    height: 1.3,
-    fontWeight: FontWeight.w500,
+  static TextStyle get caption => TextStyle(
+    fontSize: 12, height: 1.3, fontWeight: FontWeight.w500,
     color: AppColors.textTertiary,
   );
-
-  static const TextStyle overline = TextStyle(
-    fontSize: 11,
-    height: 1.2,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 1.4,
-    color: AppColors.accent,
+  static TextStyle get overline => TextStyle(
+    fontSize: 11, height: 1.2, fontWeight: FontWeight.w700,
+    letterSpacing: 1.4, color: AppColors.accent,
   );
 }
 
@@ -156,15 +119,21 @@ abstract final class AppText {
 // Theme
 // ---------------------------------------------------------------------------
 
-ThemeData buildAppTheme() {
+ThemeData buildAppTheme({bool dark = true}) {
+  final brightness = dark ? Brightness.dark : Brightness.light;
+  final background = dark ? const Color(0xFF0B0D12) : const Color(0xFFF5F6FA);
+  final surface = dark ? const Color(0xFF151923) : const Color(0xFFFFFFFF);
+  final surfaceHigh = dark ? const Color(0xFF1E2333) : const Color(0xFFEEF0F6);
+  final accent = dark ? const Color(0xFF8B7CFF) : const Color(0xFF6556D9);
+  final textColor = dark ? const Color(0xFFFFFFFF) : const Color(0xFF171923);
   final base = ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
-    scaffoldBackgroundColor: AppColors.background,
+    brightness: brightness,
+    scaffoldBackgroundColor: background,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: AppColors.accent,
-      brightness: Brightness.dark,
-      surface: AppColors.surface,
+      seedColor: accent,
+      brightness: brightness,
+      surface: surface,
     ),
     splashFactory: NoSplash.splashFactory,
     visualDensity: VisualDensity.standard,
@@ -172,16 +141,17 @@ ThemeData buildAppTheme() {
 
   return base.copyWith(
     textTheme: base.textTheme.apply(
-      bodyColor: AppColors.textPrimary,
-      displayColor: AppColors.textPrimary,
+      bodyColor: textColor,
+      displayColor: textColor,
     ),
-    progressIndicatorTheme: const ProgressIndicatorThemeData(
-      color: AppColors.accent,
-    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: accent),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: AppColors.surfaceHigh,
-      contentTextStyle: AppText.body.copyWith(color: AppColors.textPrimary),
+      backgroundColor: surfaceHigh,
+      contentTextStyle: TextStyle(
+        fontSize: 14,
+        color: textColor,
+      ),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Radii.button),
       ),

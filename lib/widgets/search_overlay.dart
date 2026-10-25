@@ -278,8 +278,8 @@ class SearchOverlayState extends State<SearchOverlay> {
                 ),
                 child: Row(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 10),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Icon(
                         Icons.search_rounded,
                         size: 20,
@@ -293,7 +293,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                         autofocus: true,
                         maxLines: 1,
                         textInputAction: TextInputAction.search,
-                        keyboardAppearance: Brightness.dark,
+                        keyboardAppearance: Theme.of(context).brightness,
                         onChanged: _onChanged,
                         onSubmitted: (_) => _submit(),
                         cursorColor: AppColors.blue,
@@ -325,8 +325,8 @@ class SearchOverlayState extends State<SearchOverlay> {
                                 semanticLabel: 'Clear text',
                                 haptic: Haptic.selection,
                                 onTap: _clearField,
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 10),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
                                   child: Icon(
                                     Icons.cancel_rounded,
                                     size: 18,
@@ -347,8 +347,8 @@ class SearchOverlayState extends State<SearchOverlay> {
           semanticLabel: 'Close search',
           haptic: Haptic.selection,
           onTap: widget.onClose,
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
             child: Text(
               'Cancel',
               style: TextStyle(
@@ -478,7 +478,7 @@ class SearchOverlayState extends State<SearchOverlay> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     'Recent',
                     style: TextStyle(
@@ -492,8 +492,8 @@ class SearchOverlayState extends State<SearchOverlay> {
                   semanticLabel: 'Clear recent searches',
                   haptic: Haptic.selection,
                   onTap: SearchHistory.instance.clear,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       'Clear',
                       style: TextStyle(
@@ -547,7 +547,7 @@ class _RecentRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 12),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.history_rounded,
                     size: 18,
                     color: AppColors.textTertiary,
@@ -573,8 +573,8 @@ class _RecentRow extends StatelessWidget {
           haptic: Haptic.light,
           pressedScale: 0.85,
           onTap: onDelete,
-          child: const Padding(
-            padding: EdgeInsets.all(10),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
             child: Icon(
               Icons.close_rounded,
               size: 18,

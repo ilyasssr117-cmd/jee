@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl;
 import 'package:flutter/material.dart';
 
+import 'app_settings.dart';
 import 'app_theme.dart';
 import 'error_text.dart';
 import 'local_store.dart';
@@ -8,6 +9,9 @@ import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
 import 'preview_manager.dart';
+import 'recent_history_view.dart';
+import 'recent_videos_store.dart';
+import 'settings_view.dart';
 import 'video_details_page.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
@@ -19,7 +23,7 @@ import 'widgets/search_overlay.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 
-enum _Section { home, favorites }
+enum _Section { home, favorites, history, settings }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -59,12 +63,18 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    AppSettings.instance.addListener(_onSettingsChanged);
     _scroll.addListener(_maybeLoadMore);
     _loadPage(reset: true);
   }
 
+  void _onSettingsChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    AppSettings.instance.removeListener(_onSettingsChanged);
     _scroll
       ..removeListener(_maybeLoadMore)
       ..dispose();
@@ -188,13 +198,37 @@ class _HomePageState extends State<HomePage> {
       );
   }
 
-  /// System back (Android): close search, then leave Favorites, then exit.
+  /// Return to the main feed before allowing the system to leave the app.
   void _handleBack() {
     if (_searchOpen) {
       _closeSearch();
-    } else if (_section == _Section.favorites) {
+    } else if (_section != _Section.home) {
       setState(() => _section = _Section.home);
     }
+  }
+
+  Future<void> _clearHistory() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear watch history?'),
+        content: const Text('This removes recently played videos and progress.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Clear history'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    RecentVideosStore.instance.clear();
+    PlaybackProgress.instance.clearAll();
+    if (mounted) _toast('Watch history cleared');
   }
 
   void _openSearch() {
@@ -230,11 +264,15 @@ class _HomePageState extends State<HomePage> {
         }
       case AppTab.search:
         _openSearch();
+      case AppTab.history:
+        if (_searchOpen) _closeSearch();
+        setState(() => _section = _Section.history);
       case AppTab.favorites:
         if (_searchOpen) _closeSearch();
-        if (_section != _Section.favorites) {
-          setState(() => _section = _Section.favorites);
-        }
+        setState(() => _section = _Section.favorites);
+      case AppTab.settings:
+        if (_searchOpen) _closeSearch();
+        setState(() => _section = _Section.settings);
     }
   }
 
@@ -290,24 +328,35 @@ class _HomePageState extends State<HomePage> {
             // The page keeps its scroll position while the search is open.
             AnimatedSwitcher(
               duration: Motion.normal,
-              child: _section == _Section.favorites
-                  ? FavoritesView(
-                      key: const ValueKey<String>('favorites'),
-                      bottomInset: bottomInset,
-                      onOpen: _openDetails,
-                      onBrowse: () => setState(() => _section = _Section.home),
-                    )
-                  : KeyedSubtree(
-                      key: const ValueKey<String>('home'),
-                      child: _buildHome(
-                        margin,
-                        bottomInset,
-                        featured,
-                        showCategories,
-                        firstLoad,
-                        resume,
-                      ),
+              child: switch (_section) {
+                _Section.favorites => FavoritesView(
+                    key: const ValueKey<String>('favorites'),
+                    bottomInset: bottomInset,
+                    onOpen: _openDetails,
+                    onBrowse: () => setState(() => _section = _Section.home),
+                  ),
+                _Section.history => RecentHistoryView(
+                    key: const ValueKey<String>('history'),
+                    bottomInset: bottomInset,
+                    onOpen: _openDetails,
+                    onClear: _clearHistory,
+                  ),
+                _Section.settings => SettingsView(
+                    key: const ValueKey<String>('settings'),
+                    bottomInset: bottomInset,
+                  ),
+                _Section.home => KeyedSubtree(
+                    key: const ValueKey<String>('home'),
+                    child: _buildHome(
+                      margin,
+                      bottomInset,
+                      featured,
+                      showCategories,
+                      firstLoad,
+                      resume,
                     ),
+                  ),
+              },
             ),
             // Search fades in and out instead of popping.
             AnimatedSwitcher(
@@ -338,9 +387,12 @@ class _HomePageState extends State<HomePage> {
                     child: AppBottomBar(
                       selected: _searchOpen
                           ? AppTab.search
-                          : (_section == _Section.favorites
-                              ? AppTab.favorites
-                              : AppTab.home),
+                          : switch (_section) {
+                              _Section.home => AppTab.home,
+                              _Section.favorites => AppTab.favorites,
+                              _Section.history => AppTab.history,
+                              _Section.settings => AppTab.settings,
+                            },
                       onSelect: _onTabSelect,
                     ),
                   ),

@@ -140,7 +140,7 @@ class RoundIconButton extends StatelessWidget {
     this.size = 38,
     this.iconSize,
     this.background = const Color(0x8C000000),
-    this.color = AppColors.textPrimary,
+    this.color,
     this.haptic = Haptic.light,
   });
 
@@ -150,7 +150,7 @@ class RoundIconButton extends StatelessWidget {
   final double size;
   final double? iconSize;
   final Color background;
-  final Color color;
+  final Color? color;
   final Haptic haptic;
 
   @override
@@ -168,7 +168,11 @@ class RoundIconButton extends StatelessWidget {
           color: background,
           border: Border.all(color: const Color(0x26FFFFFF)),
         ),
-        child: Icon(icon, size: iconSize ?? size * 0.55, color: color),
+        child: Icon(
+          icon,
+          size: iconSize ?? size * 0.55,
+          color: color ?? AppColors.textPrimary,
+        ),
       ),
     );
   }

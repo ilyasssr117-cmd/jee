@@ -1,5 +1,4 @@
-/// Browser-like headers for native stream requests (same values the full
-/// player uses), shared with the card preview.
+/// Mobile browser headers for native stream requests, shared with the card preview.
 Map<String, String> streamHeaders(Uri streamUri, String? pageUrl) {
   final pageUri = Uri.tryParse(pageUrl?.trim() ?? '');
   final hasPage = pageUri != null &&
@@ -8,11 +7,11 @@ Map<String, String> streamHeaders(Uri streamUri, String? pageUrl) {
   final origin = hasPage ? pageUri.origin : streamUri.origin;
   final referer = hasPage ? pageUri.toString() : '$origin/';
   return <String, String>{
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 '
-        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+        'Mobile/15E148 Safari/604.1',
     'Referer': referer,
     'Origin': origin,
     'Accept': '*/*',
-    'Cookie': 'kt_acctoken=OTQuMTA5LjI4LjI0MSwxNjAuMTc3LjE3Ni44NQ',
   };
 }

@@ -46,7 +46,9 @@ class ScraperConfig {
     this.previewPattern =
         r'''(?:preview_url1?|poster)\s*[:=]\s*["']([^"']+)["']''',
     this.userAgent =
-        'Mozilla/5.0 (Android TV; Android 11) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+        'Mobile/15E148 Safari/604.1',
     this.timeout = const Duration(seconds: 20),
     this.categories = const <String>[],
   });
@@ -606,7 +608,7 @@ class Scraper {
 
   /// Collects every plausible stream URL on a detail page and picks the best:
   /// real videos before previews, then the highest quality up to 1080p (4K is
-  /// ranked just below it because many TV boxes can't decode it smoothly).
+  /// ranked just below it because older phones may not decode it smoothly).
   ({String? best, bool needsDecoding}) _extractStreams(
     String body,
     dom.Document document,
@@ -811,6 +813,6 @@ class _StreamCandidate {
   final bool preview;
 
   /// Higher is better. Unknown quality sorts below any known one; 4K sorts just
-  /// under 1080p so weak TV boxes aren't handed streams they can't decode.
+  /// under 1080p so older phones are not handed streams they may not decode.
   int get score => quality <= 0 ? 1 : (quality > 1080 ? 1000 : quality);
 }

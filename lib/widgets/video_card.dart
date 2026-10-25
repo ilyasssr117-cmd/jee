@@ -80,7 +80,7 @@ class VideoCard extends StatelessWidget {
                   VideoArtwork(video: video),
                   PreviewSlot(video: video),
                   if (completed)
-                    const Positioned(
+                    Positioned(
                       left: 6,
                       top: 6,
                       child: _Badge(
@@ -259,9 +259,9 @@ class _ProgressBar extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: FractionallySizedBox(
             widthFactor: fraction,
-            child: const DecoratedBox(
+            child: DecoratedBox(
               decoration: BoxDecoration(color: AppColors.accent),
-              child: SizedBox.expand(),
+              child: const SizedBox.expand(),
             ),
           ),
         ),

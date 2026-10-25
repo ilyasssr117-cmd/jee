@@ -131,7 +131,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               ),
             ),
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
@@ -203,7 +203,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   const SizedBox(height: Gaps.sm),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.error_outline_rounded,
                         size: 18,
                         color: AppColors.error,
@@ -262,7 +262,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         }
         return Padding(
           padding: EdgeInsets.fromLTRB(margin, Gaps.md, margin, Gaps.md),
-          child: const Text('More like this', style: AppText.headline),
+          child: Text('More like this', style: AppText.headline),
         );
       },
     );
@@ -285,7 +285,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               padding: padding,
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Couldn\u2019t load related videos.',
                       style: AppText.body,

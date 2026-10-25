@@ -171,16 +171,16 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     String? category,
   }) async {
     _ensureConfigured();
-    debugPrint('[WATCH_TUBE] repository: getVideos page=$page category=$category');
+    debugPrint('[FLOW] repository: getVideos page=$page category=$category');
     if (category != null && category.trim().isNotEmpty && category != 'All') {
       final videos = await scraper.category(category, page: page + 1);
-      debugPrint('[WATCH_TUBE] repository: category returned ${videos.length} videos');
+      debugPrint('[FLOW] repository: category returned ${videos.length} videos');
       return videos;
     }
     // The website page itself provides pagination. page 0 is its homepage;
     // page 1 and onwards use pagePathTemplate.
     final videos = await scraper.home(page: page);
-    debugPrint('[WATCH_TUBE] repository: homepage returned ${videos.length} videos');
+    debugPrint('[FLOW] repository: homepage returned ${videos.length} videos');
     return videos;
   }
 
@@ -191,27 +191,27 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     required int pageSize,
   }) async {
     _ensureConfigured();
-    debugPrint('[WATCH_TUBE] repository: search query="$query" page=$page');
+    debugPrint('[FLOW] repository: search query="$query" page=$page');
     final videos = await scraper.search(query, page: page + 1);
-    debugPrint('[WATCH_TUBE] repository: search returned ${videos.length} videos');
+    debugPrint('[FLOW] repository: search returned ${videos.length} videos');
     return videos;
   }
 
   @override
   Future<List<Video>> getRelated(Video video, {int limit = 6}) async {
     _ensureConfigured();
-    debugPrint('[WATCH_TUBE] repository: related videos for ${video.pageUrl}');
+    debugPrint('[FLOW] repository: related videos for ${video.pageUrl}');
     final videos = await scraper.related(video, limit: limit);
-    debugPrint('[WATCH_TUBE] repository: related returned ${videos.length} videos');
+    debugPrint('[FLOW] repository: related returned ${videos.length} videos');
     return videos;
   }
 
   @override
   Future<Video> resolveForPlayback(Video video) async {
     _ensureConfigured();
-    debugPrint('[WATCH_TUBE] repository: resolving playback for ${video.pageUrl}');
+    debugPrint('[FLOW] repository: resolving playback for ${video.pageUrl}');
     final resolved = await scraper.resolveForPlayback(video);
-    debugPrint('[WATCH_TUBE] repository: stream URL resolved=${resolved.streamUrl.isNotEmpty}');
+    debugPrint('[FLOW] repository: stream URL resolved=${resolved.streamUrl.isNotEmpty}');
     return resolved;
   }
 }

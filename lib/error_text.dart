@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'scraper.dart';
 
 /// User-facing description of a failure. Raw exception text never reaches the
-/// TV screen; it is only printed to the debug console.
+/// viewer; it is only printed to the debug console.
 class FriendlyError {
   const FriendlyError({
     required this.title,
@@ -27,7 +27,7 @@ FriendlyError describeError(Object error, {String subject = 'videos'}) {
 
   const offline = FriendlyError(
     title: 'No connection',
-    message: 'Check that your TV is online, then try again.',
+    message: 'Check your internet connection, then try again.',
     icon: Icons.wifi_off_rounded,
     offline: true,
   );

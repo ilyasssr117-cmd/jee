@@ -4,6 +4,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_settings.dart';
 import 'app_theme.dart';
 import 'favorites_store.dart';
 import 'home_page.dart';
@@ -11,6 +12,7 @@ import 'local_store.dart';
 import 'platform_ui.dart';
 import 'playback_progress.dart';
 import 'preview_manager.dart';
+import 'recent_videos_store.dart';
 import 'search_history.dart';
 
 void main() {
@@ -47,7 +49,7 @@ Future<void> _bootstrap() async {
               'Something went wrong\n\n'
               '${message.length > 600 ? message.substring(0, 600) : message}',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: 15,
                 height: 1.4,
@@ -72,47 +74,56 @@ Future<void> _bootstrap() async {
     FavoritesStore.instance.load();
     SearchHistory.instance.load();
     PlaybackProgress.instance.load();
+    RecentVideosStore.instance.load();
+    AppSettings.instance.load();
   } catch (error) {
     debugPrint('[STARTUP] Local data failed to load: $error');
   }
 
-  runApp(const TubeApp());
+  runApp(const FlowApp());
 }
 
-class TubeApp extends StatelessWidget {
-  const TubeApp({super.key});
+class FlowApp extends StatelessWidget {
+  const FlowApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'TV Tube',
-      debugShowCheckedModeBanner: false,
-      theme: buildAppTheme(),
-      scrollBehavior: const AppScrollBehavior(),
-      builder: (context, child) {
-        final media = MediaQuery.of(context);
-        return MediaQuery(
-          // Respect the iPhone's text-size setting, within sane limits.
-          data: media.copyWith(
-            textScaler: media.textScaler.clamp(
-              minScaleFactor: 0.9,
-              maxScaleFactor: 1.25,
-            ),
-          ),
-          // A card preview stops as soon as the finger starts scrolling.
-          child: NotificationListener<ScrollStartNotification>(
-            onNotification: (notification) {
-              if (notification.dragDetails != null &&
-                  PreviewManager.instance.active.value != null) {
-                PreviewManager.instance.stopNow();
-              }
-              return false;
-            },
-            child: child ?? const SizedBox.shrink(),
-          ),
+    return ListenableBuilder(
+      listenable: AppSettings.instance,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Flow',
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(dark: false),
+          darkTheme: buildAppTheme(dark: true),
+          themeMode: AppSettings.instance.themeMode,
+          scrollBehavior: const AppScrollBehavior(),
+          builder: (context, child) {
+            final media = MediaQuery.of(context);
+            return MediaQuery(
+              // Respect the iPhone's text-size setting, within sane limits.
+              data: media.copyWith(
+                textScaler: media.textScaler.clamp(
+                  minScaleFactor: 0.9,
+                  maxScaleFactor: 1.25,
+                ),
+              ),
+              // A card preview stops as soon as the finger starts scrolling.
+              child: NotificationListener<ScrollStartNotification>(
+                onNotification: (notification) {
+                  if (notification.dragDetails != null &&
+                      PreviewManager.instance.active.value != null) {
+                    PreviewManager.instance.stopNow();
+                  }
+                  return false;
+                },
+                child: child ?? const SizedBox.shrink(),
+              ),
+            );
+          },
+          home: const HomePage(),
         );
       },
-      home: const HomePage(),
     );
   }
 }

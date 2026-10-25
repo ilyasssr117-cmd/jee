@@ -42,13 +42,13 @@ class FavoritesView extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.star_rounded,
                       size: 24,
                       color: AppColors.star,
                     ),
                     const SizedBox(width: Gaps.sm),
-                    const Text('Favorites', style: AppText.headline),
+                    Text('Saved videos', style: AppText.headline),
                     if (items.isNotEmpty) ...[
                       const SizedBox(width: Gaps.sm),
                       Text('${items.length}', style: AppText.body),

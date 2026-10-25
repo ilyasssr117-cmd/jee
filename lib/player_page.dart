@@ -9,6 +9,7 @@ import 'app_theme.dart';
 import 'models.dart';
 import 'platform_ui.dart';
 import 'playback_progress.dart';
+import 'recent_videos_store.dart';
 import 'touch.dart';
 import 'video_repository.dart';
 import 'res_log.dart';
@@ -57,7 +58,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // VideoPlayer uses a native decoder/texture. Keep its asynchronous teardown
   // visible to the next player so opening a second video cannot race disposal.
   static final Expando<Future<void>> _disposalFutures =
-      Expando<Future<void>>('tvTubePlayerDisposal');
+      Expando<Future<void>>('flowPlayerDisposal');
   static Future<void> _pendingDisposals = Future<void>.value();
 
   static const Duration _controlsTimeout = Duration(seconds: 4);
@@ -220,12 +221,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         streamUri,
         httpHeaders: <String, String>{
           'User-Agent':
-              'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+              'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+              'Mobile/15E148 Safari/604.1',
           'Referer': referer,
           'Origin': pageOrigin,
           'Accept': '*/*',
-          'Cookie': 'kt_acctoken=MmEwMjpmZjA6MTQwOTpkMzk3OjE5ZWE6NGUzMTo3OTNlOmE3NzIsMTA1LjE1OS4yMDMuMTkz',
+          'Cookie': 'kt_acctoken=NzkuMjAuMTU3LjI0MCwxMDUuNzQuMjAxLjI0NA',
         },
       );
       _controller = controller;
@@ -625,6 +627,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _countdown.value = null;
     _autoplayCancelled = false;
     _video = next;
+    RecentVideosStore.instance.record(next);
     _orientationForced = false;
     _lastPosition = Duration.zero;
     _autoRetries = 0;
@@ -907,7 +910,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Playback speed', style: AppText.title),
+              Text('Playback speed', style: AppText.title),
               const SizedBox(height: Gaps.md),
               Wrap(
                 spacing: Gaps.sm,
@@ -1147,7 +1150,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('UP NEXT', style: AppText.overline),
+                Text('UP NEXT', style: AppText.overline),
                 const SizedBox(height: Gaps.sm),
                 Text(
                   next.title,
@@ -1679,7 +1682,7 @@ class _ProgressRow extends StatelessWidget {
                                 duration: Motion.quick,
                                 width: thumb,
                                 height: thumb,
-                                decoration: const BoxDecoration(
+                                decoration: BoxDecoration(
                                   color: AppColors.textPrimary,
                                   shape: BoxShape.circle,
                                 ),

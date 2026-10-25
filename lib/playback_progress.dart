@@ -128,6 +128,16 @@ class PlaybackProgress {
 
   bool isCompleted(String id) => _completed.contains(id);
 
+  /// Clears every saved progress entry and completed marker.
+  void clearAll() {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    _entries.clear();
+    _completed.clear();
+    _persistProgress();
+    _persistCompleted();
+  }
+
   /// The video reached its end: nothing to resume, and it is marked watched.
   void markCompleted(String id) {
     if (_entries.remove(id) != null) _schedulePersist();

@@ -57,7 +57,7 @@ class VideoArtwork extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            const ColoredBox(color: AppColors.surfaceHigh),
+            ColoredBox(color: AppColors.surfaceHigh),
             Image.network(
               url,
               fit: BoxFit.cover,

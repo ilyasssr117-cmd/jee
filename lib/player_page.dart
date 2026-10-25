@@ -220,7 +220,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           'Referer': referer,
           'Origin': pageOrigin,
           'Accept': '*/*',
-          'Cookie': 'kt_acctoken=OTQuMTA5LjI4LjI0MSwxNjAuMTc3LjE3Ni44NQ',
+          'Cookie': 'kt_acctoken=MmEwMjpmZjA6MTQwOTpkMzk3OjE5ZWE6NGUzMTo3OTNlOmE3NzIsMTA1LjE1OS4yMDMuMTkz',
         },
       );
       _controller = controller;

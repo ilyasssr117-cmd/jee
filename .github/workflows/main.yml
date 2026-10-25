@@ -1,4 +1,4 @@
-name: iOS Diagnostics
+name: iOS IPA
 
 on:
   workflow_dispatch:
@@ -10,43 +10,46 @@ permissions:
   contents: read
 
 jobs:
-  ios-diagnostics:
+  ios-build:
     runs-on: macos-latest
 
     steps:
+      # -----------------------------
+      # 1. Checkout
+      # -----------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+      # -----------------------------
+      # 2. Setup Flutter
+      # -----------------------------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Environment
+      # -----------------------------
+      # 3. Flutter version
+      # -----------------------------
+      - name: Flutter version
         run: |
           flutter --version
           dart --version
           xcodebuild -version
-          pod --version
 
-      - name: Repair iOS
+      # -----------------------------
+      # 4. Repair / regenerate iOS
+      # -----------------------------
+      - name: Repair iOS platform
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
           chmod +x ios_setup/repair_ios.sh
           bash ios_setup/repair_ios.sh
 
-      - name: Check iOS files
-        shell: bash
-        run: |
-          set -x
-
-          echo "=== iOS files ==="
-          find ios -maxdepth 3 -type f | sort
-
-          echo "=== Required files ==="
+          echo "===== iOS CHECK ====="
 
           test -f ios/Runner.xcodeproj/project.pbxproj
           test -f ios/Runner.xcworkspace/contents.xcworkspacedata
@@ -54,91 +57,128 @@ jobs:
           test -f ios/Flutter/Debug.xcconfig
           test -f ios/Flutter/Release.xcconfig
 
-      - name: Flutter pub get
+          echo "iOS platform is valid."
+
+          ls -la ios
+          ls -la ios/Runner
+          ls -la ios/Flutter
+
+      # -----------------------------
+      # 5. Dependencies
+      # -----------------------------
+      - name: Flutter dependencies
         run: |
           flutter pub get
 
-      # لا يوقف الـworkflow عند وجود analyzer errors
-      - name: Flutter Analyze
+      # -----------------------------
+      # 6. CocoaPods
+      # -----------------------------
+      - name: Install CocoaPods dependencies
         shell: bash
         run: |
-          set +e
+          set -e
 
-          flutter analyze --no-pub 2>&1 | tee flutter-analyze.log
+          cd ios
 
-          ANALYZE_EXIT=${PIPESTATUS[0]}
+          pod repo update
 
-          echo ""
-          echo "================================"
-          echo "Flutter Analyze exit code: $ANALYZE_EXIT"
-          echo "================================"
+          pod install --verbose
 
-          exit 0
+          cd ..
 
-      # اختبار compilation بدون signing
-      - name: Flutter Build iOS Diagnostic
-        shell: bash
+      # -----------------------------
+      # 7. Analyze
+      # -----------------------------
+      - name: Flutter analyze
         run: |
-          set +e
+          flutter analyze --no-pub
+        continue-on-error: true
 
+      # -----------------------------
+      # 8. Clean
+      # -----------------------------
+      - name: Flutter clean
+        run: |
           flutter clean
           flutter pub get
 
-          flutter build ios \
-            --release \
-            --no-codesign \
-            --verbose \
-            2>&1 | tee ios-build.log
-
-          BUILD_EXIT=${PIPESTATUS[0]}
-
-          echo ""
-          echo "================================"
-          echo "iOS Build exit code: $BUILD_EXIT"
-          echo "================================"
-
-          exit 0
-
-      # استخراج الأخطاء المهمة من الـlogs
-      - name: Extract errors
+      # -----------------------------
+      # 9. Build unsigned iOS
+      # -----------------------------
+      - name: Build iOS unsigned
         shell: bash
         run: |
-          {
-            echo "========================================"
-            echo "FLUTTER ANALYZE ERRORS"
-            echo "========================================"
+          set -e
 
-            grep -Ei \
-              "error •|ERROR|Error:|error:" \
-              flutter-analyze.log || true
+          flutter build ios \
+            --release \
+            --no-codesign
 
-            echo ""
-            echo "========================================"
-            echo "IOS BUILD ERRORS"
-            echo "========================================"
+      # -----------------------------
+      # 10. Verify Runner.app
+      # -----------------------------
+      - name: Verify iOS app
+        shell: bash
+        run: |
+          set -e
 
-            grep -Ei \
-              "error:|error •|failed|Failed|failure|Swift Compiler Error|Provisioning|Signing|Development Team|not configured" \
-              ios-build.log || true
+          if [ ! -d "build/ios/iphoneos/Runner.app" ]; then
+            echo "Runner.app was not created."
+            exit 1
+          fi
 
-            echo ""
-            echo "========================================"
-            echo "LAST 150 BUILD LOG LINES"
-            echo "========================================"
+          echo "Runner.app found:"
+          du -sh build/ios/iphoneos/Runner.app
 
-            tail -n 150 ios-build.log
+          ls -la build/ios/iphoneos/
 
-          } | tee diagnostic-summary.txt
+      # -----------------------------
+      # 11. Create unsigned IPA
+      # -----------------------------
+      - name: Create IPA
+        shell: bash
+        run: |
+          set -e
 
-      # رفع كل الملفات حتى لو حصل error
-      - name: Upload diagnostics
+          rm -rf Payload
+          rm -f TV-Tube-unsigned.ipa
+
+          mkdir -p Payload
+
+          cp -R \
+            build/ios/iphoneos/Runner.app \
+            Payload/Runner.app
+
+          zip -r \
+            TV-Tube-unsigned.ipa \
+            Payload
+
+          rm -rf Payload
+
+          echo "===== IPA CREATED ====="
+          ls -lh TV-Tube-unsigned.ipa
+
+      # -----------------------------
+      # 12. Upload IPA Artifact
+      # -----------------------------
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-Tube-IPA
+          path: TV-Tube-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      # -----------------------------
+      # 13. Upload build diagnostics
+      # -----------------------------
+      - name: Upload iOS build files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-diagnostics
+          name: TV-Tube-iOS-build
           path: |
-            flutter-analyze.log
-            ios-build.log
-            diagnostic-summary.txt
+            build/ios/
+            ios/Pods/Manifest.lock
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7

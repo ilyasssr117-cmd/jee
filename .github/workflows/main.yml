@@ -1,4 +1,3 @@
-
 name: iOS Build Diagnostics
 
 on:
@@ -18,22 +17,60 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      # =========================================================
+      # CHECKOUT
+      # =========================================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # =========================================================
+      # FLUTTER
+      # =========================================================
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
+      # =========================================================
+      # ENVIRONMENT
+      # =========================================================
       - name: Show environment versions
         shell: bash
         run: |
+          echo "=========================================="
+          echo "ENVIRONMENT"
+          echo "=========================================="
+
           flutter --version
+
+          echo ""
+          echo "Xcode:"
           xcodebuild -version
+
+          echo ""
+          echo "Xcode path:"
+          xcode-select -p
+
+          echo ""
+          echo "CocoaPods:"
           pod --version
 
+          echo ""
+          echo "Ruby:"
+          ruby --version
+
+          echo ""
+          echo "macOS:"
+          sw_vers
+
+          echo ""
+          echo "Architecture:"
+          uname -m
+
+      # =========================================================
+      # DEPENDENCIES
+      # =========================================================
       - name: Get dependencies
         id: dependencies
         shell: bash
@@ -41,13 +78,24 @@ jobs:
           set +e
           set -o pipefail
 
-          flutter pub get --verbose 2>&1 | tee pub-get.log
-          result=${PIPESTATUS[0]}
+          echo "=========================================="
+          echo "FLUTTER PUB GET"
+          echo "=========================================="
 
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-          echo "Dependency resolution exit code: $result"
+          flutter pub get --verbose 2>&1 | tee pub-get.log
+
+          RESULT=${PIPESTATUS[0]}
+
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "flutter pub get exit code: $RESULT"
+
           exit 0
 
+      # =========================================================
+      # ANALYZE
+      # =========================================================
       - name: Analyze Dart code
         id: analyze
         shell: bash
@@ -55,59 +103,202 @@ jobs:
           set +e
           set -o pipefail
 
-          flutter analyze --no-pub 2>&1 | tee flutter-analyze.log
-          result=${PIPESTATUS[0]}
+          echo "=========================================="
+          echo "FLUTTER ANALYZE"
+          echo "=========================================="
 
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-          echo "Flutter analyze exit code: $result"
+          flutter analyze --no-pub 2>&1 | tee flutter-analyze.log
+
+          RESULT=${PIPESTATUS[0]}
+
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "flutter analyze exit code: $RESULT"
+
           exit 0
 
-      - name: Build iOS with verbose diagnostics
+      # =========================================================
+      # POD INSTALL
+      # =========================================================
+      - name: Prepare iOS Pods
+        id: pods
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+
+          echo "=========================================="
+          echo "IOS POD INSTALL"
+          echo "=========================================="
+
+          if [ -d "ios" ]; then
+            cd ios
+
+            pod install --verbose 2>&1 | tee ../pod-install.log
+
+            RESULT=${PIPESTATUS[0]}
+
+            echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+            echo ""
+            echo "pod install exit code: $RESULT"
+
+            cd ..
+          else
+            echo "ios directory does not exist."
+            echo "result=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          exit 0
+
+      # =========================================================
+      # IOS BUILD
+      # =========================================================
+      - name: Build iOS - full diagnostics
         id: ios_build
         shell: bash
         run: |
           set +e
           set -o pipefail
 
-          flutter build ios --release --no-codesign --verbose 2>&1 | tee ios-build.log
-          result=${PIPESTATUS[0]}
+          echo "=========================================="
+          echo "FLUTTER IOS BUILD"
+          echo "=========================================="
 
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-          echo "iOS build exit code: $result"
+          flutter clean
+
+          echo ""
+          echo "Running flutter pub get..."
+          flutter pub get
+
+          echo ""
+          echo "Running iOS build..."
+          echo ""
+
+          flutter build ios \
+            --release \
+            --no-codesign \
+            --verbose \
+            2>&1 | tee ios-build-full.log
+
+          RESULT=${PIPESTATUS[0]}
+
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "=========================================="
+          echo "IOS BUILD EXIT CODE: $RESULT"
+          echo "=========================================="
+
+          # IMPORTANT:
+          # Do NOT exit 1 here.
+          # We want the following diagnostic steps to run.
+
           exit 0
 
-      - name: Print actual errors
+      # =========================================================
+      # FIND REAL ERROR
+      # =========================================================
+      - name: Extract real build errors
         if: always()
         shell: bash
         run: |
           echo ""
-          echo "=========================================="
-          echo "          DIAGNOSTIC SUMMARY"
-          echo "=========================================="
+          echo "############################################################"
+          echo "#                 REAL IOS BUILD ERRORS                   #"
+          echo "############################################################"
+          echo ""
 
-          for file in pub-get.log flutter-analyze.log ios-build.log; do
+          if [ ! -f "ios-build-full.log" ]; then
+            echo "ios-build-full.log does not exist."
+            exit 0
+          fi
+
+          echo "Searching for compiler/build errors..."
+          echo ""
+
+          grep -n -i -E \
+            'Exception:|error:|fatal error:|Swift Compiler Error|SwiftCompile|CompileSwift|CompileSwiftSources|PhaseScriptExecution|No such module|Undefined symbols|linker command failed|BUILD FAILED|Command .* failed|CocoaPods|pod install|xcodebuild.*failed|Provisioning profile|CodeSign|ARCHIVE FAILED' \
+            ios-build-full.log \
+            | tail -n 150 \
+            || true
+
+      # =========================================================
+      # SHOW ERROR CONTEXT
+      # =========================================================
+      - name: Show context around errors
+        if: always()
+        shell: bash
+        run: |
+          echo ""
+          echo "############################################################"
+          echo "#                 ERROR CONTEXT                            #"
+          echo "############################################################"
+          echo ""
+
+          if [ ! -f "ios-build-full.log" ]; then
+            echo "ios-build-full.log does not exist."
+            exit 0
+          fi
+
+          ERROR_LINES=$(
+            grep -n -i -E \
+              'Exception:|error:|fatal error:|Swift Compiler Error|SwiftCompile|CompileSwift|PhaseScriptExecution|No such module|Undefined symbols|linker command failed|BUILD FAILED|Command .* failed|CocoaPods|pod install|xcodebuild.*failed|Provisioning profile|CodeSign|ARCHIVE FAILED' \
+              ios-build-full.log \
+              | cut -d: -f1 \
+              | tail -n 20 \
+              || true
+          )
+
+          if [ -z "$ERROR_LINES" ]; then
+            echo "No matching error line found."
             echo ""
-            echo "========== $file: ERROR SUMMARY =========="
+            echo "Showing last 300 lines instead:"
+            tail -n 300 ios-build-full.log
+            exit 0
+          fi
 
-            if [ ! -f "$file" ]; then
-              echo "Log file not found."
-              continue
+          for LINE in $ERROR_LINES; do
+            START=$((LINE - 20))
+            END=$((LINE + 40))
+
+            if [ "$START" -lt 1 ]; then
+              START=1
             fi
 
-            matches=$(grep -n -i -E \
-              'error •|warning •|error:|fatal error:|Error:|Swift Compiler Error|FAILURE:|Exception|Because |Target .* failed|Command .* failed|Could not resolve|Could not build|No such module|Undefined symbols|BUILD FAILED|Encountered error' \
-              "$file" || true)
+            echo ""
+            echo "============================================================"
+            echo "LINES $START-$END"
+            echo "============================================================"
 
-            if [ -n "$matches" ]; then
-              printf '%s\n' "$matches" | tail -n 150
-            else
-              echo "No matching error patterns found."
-              echo "Last 50 lines:"
-              tail -n 50 "$file"
-            fi
+            sed -n "${START},${END}p" ios-build-full.log
           done
 
-      - name: Upload diagnostic logs
+      # =========================================================
+      # SHOW LAST 300 LINES
+      # =========================================================
+      - name: Show final build output
+        if: always()
+        shell: bash
+        run: |
+          echo ""
+          echo "############################################################"
+          echo "#                 LAST 300 LINES                           #"
+          echo "############################################################"
+          echo ""
+
+          if [ -f "ios-build-full.log" ]; then
+            tail -n 300 ios-build-full.log
+          else
+            echo "ios-build-full.log not found."
+          fi
+
+      # =========================================================
+      # UPLOAD EVERYTHING
+      # =========================================================
+      - name: Upload all diagnostic logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -115,28 +306,71 @@ jobs:
           path: |
             pub-get.log
             flutter-analyze.log
-            ios-build.log
+            pod-install.log
+            ios-build-full.log
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
 
+      # =========================================================
+      # FINAL STATUS
+      # =========================================================
       - name: Report final status
         if: always()
         shell: bash
         env:
           DEPENDENCIES_RESULT: ${{ steps.dependencies.outputs.result }}
           ANALYZE_RESULT: ${{ steps.analyze.outputs.result }}
+          PODS_RESULT: ${{ steps.pods.outputs.result }}
           BUILD_RESULT: ${{ steps.ios_build.outputs.result }}
         run: |
-          echo "Dependencies: ${DEPENDENCIES_RESULT:-NOT RUN}"
-          echo "Dart analysis: ${ANALYZE_RESULT:-NOT RUN}"
-          echo "iOS build: ${BUILD_RESULT:-NOT RUN}"
+          echo ""
+          echo "============================================================"
+          echo "                    FINAL STATUS"
+          echo "============================================================"
 
-          if [[ "$DEPENDENCIES_RESULT" != "0" ||
-                "$ANALYZE_RESULT" != "0" ||
-                "$BUILD_RESULT" != "0" ]]; then
-            echo "::error::Build or diagnostics failed."
-            echo "Download ios-build-diagnostics from the workflow Artifacts."
+          echo ""
+          echo "Dependencies: ${DEPENDENCIES_RESULT:-NOT RUN}"
+          echo "Analyzer:     ${ANALYZE_RESULT:-NOT RUN}"
+          echo "Pods:         ${PODS_RESULT:-NOT RUN}"
+          echo "iOS Build:    ${BUILD_RESULT:-NOT RUN}"
+
+          echo ""
+          echo "============================================================"
+
+          FAILED=0
+
+          if [[ "${DEPENDENCIES_RESULT:-1}" != "0" ]]; then
+            echo "❌ Flutter dependencies failed"
+            FAILED=1
+          else
+            echo "✅ Flutter dependencies OK"
+          fi
+
+          if [[ "${ANALYZE_RESULT:-1}" != "0" ]]; then
+            echo "⚠️ Flutter analyzer returned issues"
+          else
+            echo "✅ Flutter analyzer OK"
+          fi
+
+          if [[ "${PODS_RESULT:-1}" != "0" ]]; then
+            echo "❌ CocoaPods failed"
+            FAILED=1
+          else
+            echo "✅ CocoaPods OK"
+          fi
+
+          if [[ "${BUILD_RESULT:-1}" != "0" ]]; then
+            echo "❌ iOS build FAILED"
+            FAILED=1
+          else
+            echo "✅ iOS build SUCCESS"
+          fi
+
+          echo ""
+
+          if [[ "$FAILED" != "0" ]]; then
+            echo "::error::The actual iOS build failed. Download ios-build-diagnostics and inspect ios-build-full.log."
             exit 1
           fi
 
-          echo "All diagnostics and the iOS build succeeded."
+          echo "🎉 Everything succeeded."

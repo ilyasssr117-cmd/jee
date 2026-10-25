@@ -1,23 +1,19 @@
-name: Build TV Tube iOS IPA (unsigned)
+
+name: iOS Build Diagnostics
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
-concurrency:
-  group: ios-build-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-ios:
-    name: Build unsigned IPA
-    runs-on: macos-15
-    timeout-minutes: 60
+  ios-build:
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
@@ -26,53 +22,72 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.47.7'
           channel: stable
           cache: true
 
-      - name: Show tool versions
+      - name: Show environment versions
         run: |
           flutter --version
           xcodebuild -version
+          pod --version
 
-      # The previous run failed because the GitHub checkout did not contain
-      # a Flutter iOS platform project (ios/Runner.xcodeproj).
-      - name: Generate iOS platform files if missing
+      - name: Get dependencies
+        id: dependencies
         shell: bash
         run: |
-          set -euo pipefail
-          if [ ! -d "ios/Runner.xcodeproj" ]; then
-            echo "iOS platform files are missing; generating them now."
-            flutter create --platforms=ios .
-          else
-            echo "Found ios/Runner.xcodeproj; keeping existing iOS configuration."
-          fi
-          test -d "ios/Runner.xcodeproj"
-          test -f "ios/Runner/Info.plist"
+          set +e
+          set -o pipefail
+          flutter pub get --verbose 2>&1 | tee pub-get.log
+          result=${PIPESTATUS[0]}
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          exit 0
 
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build iOS app without signing
-        run: flutter build ios --release --no-codesign
-
-      - name: Package unsigned IPA
+      - name: Analyze Dart code
+        id: analyze
         shell: bash
         run: |
-          set -euo pipefail
-          APP_PATH="build/ios/iphoneos/Runner.app"
-          test -d "$APP_PATH" || { echo "Runner.app not found at $APP_PATH"; exit 1; }
-          mkdir -p build/ios/ipa/Payload
-          rm -rf build/ios/ipa/Payload/Runner.app
-          cp -R "$APP_PATH" build/ios/ipa/Payload/Runner.app
-          cd build/ios/ipa
-          /usr/bin/zip -qry TV-Tube-unsigned.ipa Payload
-          test -s TV-Tube-unsigned.ipa
+          set +e
+          set -o pipefail
+          flutter analyze --no-pub 2>&1 | tee flutter-analyze.log
+          result=${PIPESTATUS[0]}
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          exit 0
 
-      - name: Upload IPA artifact
+      - name: Build iOS with detailed logs
+        id: ios_build
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          flutter build ios --release --no-codesign --verbose 2>&1 | tee ios-build.log
+          result=${PIPESTATUS[0]}
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload diagnostic logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TV-Tube-unsigned-IPA
-          path: build/ios/ipa/TV-Tube-unsigned.ipa
-          if-no-files-found: error
+          name: ios-build-diagnostics
+          path: |
+            pub-get.log
+            flutter-analyze.log
+            ios-build.log
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: Report final status
+        if: always()
+        shell: bash
+        env:
+          DEPENDENCIES_RESULT: ${{ steps.dependencies.outputs.result }}
+          ANALYZE_RESULT: ${{ steps.analyze.outputs.result }}
+          BUILD_RESULT: ${{ steps.ios_build.outputs.result }}
+        run: |
+          if [[ "$DEPENDENCIES_RESULT" != "0" ||
+                "$ANALYZE_RESULT" != "0" ||
+                "$BUILD_RESULT" != "0" ]]; then
+            echo "Build or diagnostics failed. Download ios-build-diagnostics to inspect logs."
+            exit 1
+          fi
+          echo "All diagnostics and the iOS build succeeded."

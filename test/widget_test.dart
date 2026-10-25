@@ -1,30 +1,43 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:watch_tube/main.dart';
+// Relative import so the test works whatever the package is called in
+// pubspec.yaml (replace it with package:<your_package>/... if you prefer).
+import '../lib/app_theme.dart';
+import '../lib/home_page.dart';
+import '../lib/local_store.dart';
+import '../lib/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('iOS uses the native Cupertino page transition', () {
+    final builders = buildAppTheme().pageTransitionsTheme.builders;
+    expect(
+      builders[TargetPlatform.iOS],
+      isA<CupertinoPageTransitionsBuilder>(),
+    );
+    expect(builders[TargetPlatform.android], isA<TvPageTransitionsBuilder>());
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('TvTubeApp starts on the home page', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    await LocalStore.init();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    await tester.pumpWidget(const TvTubeApp());
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.byType(MaterialApp), findsOneWidget);
+    expect(find.byType(HomePage), findsOneWidget);
+
+    // The test environment blocks real HTTP (every request answers 400), so
+    // the first page load fails. Let that finish in real time, then render
+    // the resulting state instead of leaving the load pending.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(HomePage), findsOneWidget);
   });
 }

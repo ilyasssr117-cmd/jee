@@ -11,7 +11,6 @@ import 'widgets/state_views.dart';
 import 'widgets/tv_button.dart';
 import 'widgets/video_artwork.dart';
 import 'widgets/video_card.dart';
-import 'widgets/video_grid.dart';
 import 'widgets/video_meta.dart';
 
 class VideoDetailsPage extends StatefulWidget {

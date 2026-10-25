@@ -4,9 +4,11 @@ name: iOS Build Diagnostics
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -26,6 +28,7 @@ jobs:
           cache: true
 
       - name: Show environment versions
+        shell: bash
         run: |
           flutter --version
           xcodebuild -version
@@ -37,9 +40,12 @@ jobs:
         run: |
           set +e
           set -o pipefail
+
           flutter pub get --verbose 2>&1 | tee pub-get.log
           result=${PIPESTATUS[0]}
+
           echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "Dependency resolution exit code: $result"
           exit 0
 
       - name: Analyze Dart code
@@ -48,21 +54,58 @@ jobs:
         run: |
           set +e
           set -o pipefail
+
           flutter analyze --no-pub 2>&1 | tee flutter-analyze.log
           result=${PIPESTATUS[0]}
+
           echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "Flutter analyze exit code: $result"
           exit 0
 
-      - name: Build iOS with detailed logs
+      - name: Build iOS with verbose diagnostics
         id: ios_build
         shell: bash
         run: |
           set +e
           set -o pipefail
+
           flutter build ios --release --no-codesign --verbose 2>&1 | tee ios-build.log
           result=${PIPESTATUS[0]}
+
           echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "iOS build exit code: $result"
           exit 0
+
+      - name: Print actual errors
+        if: always()
+        shell: bash
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "          DIAGNOSTIC SUMMARY"
+          echo "=========================================="
+
+          for file in pub-get.log flutter-analyze.log ios-build.log; do
+            echo ""
+            echo "========== $file: ERROR SUMMARY =========="
+
+            if [ ! -f "$file" ]; then
+              echo "Log file not found."
+              continue
+            fi
+
+            matches=$(grep -n -i -E \
+              'error •|warning •|error:|fatal error:|Error:|Swift Compiler Error|FAILURE:|Exception|Because |Target .* failed|Command .* failed|Could not resolve|Could not build|No such module|Undefined symbols|BUILD FAILED|Encountered error' \
+              "$file" || true)
+
+            if [ -n "$matches" ]; then
+              printf '%s\n' "$matches" | tail -n 150
+            else
+              echo "No matching error patterns found."
+              echo "Last 50 lines:"
+              tail -n 50 "$file"
+            fi
+          done
 
       - name: Upload diagnostic logs
         if: always()
@@ -84,10 +127,16 @@ jobs:
           ANALYZE_RESULT: ${{ steps.analyze.outputs.result }}
           BUILD_RESULT: ${{ steps.ios_build.outputs.result }}
         run: |
+          echo "Dependencies: ${DEPENDENCIES_RESULT:-NOT RUN}"
+          echo "Dart analysis: ${ANALYZE_RESULT:-NOT RUN}"
+          echo "iOS build: ${BUILD_RESULT:-NOT RUN}"
+
           if [[ "$DEPENDENCIES_RESULT" != "0" ||
                 "$ANALYZE_RESULT" != "0" ||
                 "$BUILD_RESULT" != "0" ]]; then
-            echo "Build or diagnostics failed. Download ios-build-diagnostics to inspect logs."
+            echo "::error::Build or diagnostics failed."
+            echo "Download ios-build-diagnostics from the workflow Artifacts."
             exit 1
           fi
+
           echo "All diagnostics and the iOS build succeeded."

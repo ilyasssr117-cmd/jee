@@ -33,6 +33,15 @@ jobs:
           cache: true
 
       # =========================================================
+      # REPAIR / REGENERATE IOS PLATFORM
+      # =========================================================
+      - name: Repair iOS platform
+        shell: bash
+        run: |
+          chmod +x ios_setup/repair_ios.sh
+          bash ios_setup/repair_ios.sh
+
+      # =========================================================
       # ENVIRONMENT
       # =========================================================
       - name: Show environment versions
@@ -42,6 +51,8 @@ jobs:
           echo "ENVIRONMENT"
           echo "=========================================="
 
+          echo ""
+          echo "Flutter:"
           flutter --version
 
           echo ""
@@ -91,6 +102,7 @@ jobs:
           echo ""
           echo "flutter pub get exit code: $RESULT"
 
+          # Do not stop diagnostics here.
           exit 0
 
       # =========================================================
@@ -116,6 +128,7 @@ jobs:
           echo ""
           echo "flutter analyze exit code: $RESULT"
 
+          # Do not stop diagnostics here.
           exit 0
 
       # =========================================================
@@ -151,6 +164,7 @@ jobs:
             exit 0
           fi
 
+          # Do not stop diagnostics here.
           exit 0
 
       # =========================================================
@@ -245,7 +259,7 @@ jobs:
 
           ERROR_LINES=$(
             grep -n -i -E \
-              'Exception:|error:|fatal error:|Swift Compiler Error|SwiftCompile|CompileSwift|PhaseScriptExecution|No such module|Undefined symbols|linker command failed|BUILD FAILED|Command .* failed|CocoaPods|pod install|xcodebuild.*failed|Provisioning profile|CodeSign|ARCHIVE FAILED' \
+              'Exception:|error:|fatal error:|Swift Compiler Error|SwiftCompile|CompileSwift|CompileSwiftSources|PhaseScriptExecution|No such module|Undefined symbols|linker command failed|BUILD FAILED|Command .* failed|CocoaPods|pod install|xcodebuild.*failed|Provisioning profile|CodeSign|ARCHIVE FAILED' \
               ios-build-full.log \
               | cut -d: -f1 \
               | tail -n 20 \

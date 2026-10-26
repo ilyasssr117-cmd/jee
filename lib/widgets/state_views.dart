@@ -177,18 +177,18 @@ class SkeletonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SkeletonPulse(
+    return const SkeletonPulse(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AspectRatio(
+          AspectRatio(
             aspectRatio: 16 / 9,
             child: SkeletonBlock(radius: Radii.card, width: double.infinity),
           ),
-          const SizedBox(height: 10),
-          const SkeletonBlock(height: 12, width: double.infinity),
-          const SizedBox(height: 6),
-          const SkeletonBlock(height: 12, width: 90),
+          SizedBox(height: 10),
+          SkeletonBlock(height: 12, width: double.infinity),
+          SizedBox(height: 6),
+          SkeletonBlock(height: 12, width: 90),
         ],
       ),
     );

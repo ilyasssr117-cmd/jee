@@ -128,7 +128,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       backgroundColor: AppColors.background,
       body: CustomScrollView(
         controller: _scroll,
-        cacheExtent: MediaQuery.sizeOf(context).height,
+        scrollCacheExtent: ScrollCacheExtent.pixels(
+          MediaQuery.sizeOf(context).height,
+        ),
         slivers: [
           SliverToBoxAdapter(child: _buildHeader(margin)),
           SliverToBoxAdapter(child: _buildRelatedTitle(margin)),

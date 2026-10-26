@@ -326,7 +326,7 @@ class _Toggle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Switch.adaptive(
       value: value,
-      activeColor: AppColors.accentStrong,
+      activeTrackColor: AppColors.accentStrong,
       onChanged: (next) {
         Haptics.play(Haptic.selection);
         onChanged(next);

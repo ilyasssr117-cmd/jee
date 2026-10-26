@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import 'app_settings.dart';
@@ -343,12 +342,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final validPageUri = pageUri != null &&
         (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
         pageUri.host.isNotEmpty;
-    final pageOrigin = validPageUri ? pageUri!.origin : streamUri.origin;
-    final referer = validPageUri ? pageUri!.toString() : '$pageOrigin/';
+    final pageOrigin = validPageUri ? pageUri.origin : streamUri.origin;
+    final referer = validPageUri ? pageUri.toString() : '$pageOrigin/';
 
     final cookieHeader = await videoRepository.getPlaybackCookieHeader(
       streamUri: streamUri,
-      pageUrl: validPageUri ? pageUri!.toString() : null,
+      pageUrl: validPageUri ? pageUri.toString() : null,
       userAgent: _userAgent,
     );
     if (!mounted || generation != _initializationGeneration || _isLeaving) {
@@ -1097,7 +1096,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _lastTapAt = now;
     _lastTapSide = side;
 
-    if (isDouble && side != null) {
+    if (isDouble) {
       _skip(side == _Side.left ? -_seekStepSeconds : _seekStepSeconds, side);
       return;
     }

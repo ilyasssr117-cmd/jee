@@ -304,7 +304,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                 child: Row(
                   children: [
                     Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Icon(
                         Icons.search_rounded,
                         size: 20,
@@ -352,7 +352,9 @@ class SearchOverlayState extends State<SearchOverlay> {
                                 haptic: Haptic.selection,
                                 onTap: _clearField,
                                 child: Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                  ),
                                   child: Icon(
                                     Icons.cancel_rounded,
                                     size: 18,
@@ -508,7 +510,9 @@ class SearchOverlayState extends State<SearchOverlay> {
       controller: _scroll,
       // Swiping the results down hides the keyboard.
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      cacheExtent: MediaQuery.sizeOf(context).height,
+      scrollCacheExtent: ScrollCacheExtent.pixels(
+        MediaQuery.sizeOf(context).height,
+      ),
       slivers: slivers,
     );
   }
@@ -633,7 +637,7 @@ class _RecentRow extends StatelessWidget {
           pressedScale: 0.85,
           onTap: onDelete,
           child: Padding(
-            padding: EdgeInsets.all(10),
+            padding: const EdgeInsets.all(10),
             child: Icon(
               Icons.close_rounded,
               size: 18,

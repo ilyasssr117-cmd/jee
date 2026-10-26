@@ -141,7 +141,7 @@ class _Placeholder extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
+              const Icon(
                 Icons.play_circle_outline_rounded,
                 size: 36,
                 color: Colors.white24,

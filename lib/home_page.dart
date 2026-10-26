@@ -460,7 +460,9 @@ class _HomePageState extends State<HomePage> {
       physics: const ClampingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
-      cacheExtent: MediaQuery.sizeOf(context).height,
+      scrollCacheExtent: ScrollCacheExtent.pixels(
+        MediaQuery.sizeOf(context).height,
+      ),
       slivers: [
         SliverToBoxAdapter(
           child: HomeHero(

@@ -137,7 +137,9 @@ class _LibraryViewState extends State<LibraryView> {
           );
         }
         return CustomScrollView(
-          cacheExtent: MediaQuery.sizeOf(context).height,
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            MediaQuery.sizeOf(context).height,
+          ),
           slivers: [
             SliverVideoGrid(
               videos: items,
@@ -244,7 +246,9 @@ class _LibraryViewState extends State<LibraryView> {
         }
 
         return ListView(
-          cacheExtent: MediaQuery.sizeOf(context).height,
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            MediaQuery.sizeOf(context).height,
+          ),
           padding: EdgeInsets.fromLTRB(
             margin,
             0,
@@ -326,7 +330,9 @@ class _LibraryViewState extends State<LibraryView> {
           );
         }
         return ListView(
-          cacheExtent: MediaQuery.sizeOf(context).height,
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            MediaQuery.sizeOf(context).height,
+          ),
           padding: EdgeInsets.fromLTRB(
             margin,
             Gaps.xs,

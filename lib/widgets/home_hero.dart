@@ -170,7 +170,7 @@ class _HeroDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('FEATURED', style: darkText.overline),
+        Text('FEATURED', style: darkText.overline),
         const SizedBox(height: 6),
         Text(
           video.title,

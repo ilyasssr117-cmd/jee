@@ -158,7 +158,9 @@ class DownloadStore extends ChangeNotifier {
     if (dir == null) return;
     try {
       for (final entity in dir.listSync()) {
-        if (entity is File && entity.path.endsWith('.part')) entity.deleteSync();
+        if (entity is File && entity.path.endsWith('.part')) {
+          entity.deleteSync();
+        }
       }
     } catch (_) {}
   }

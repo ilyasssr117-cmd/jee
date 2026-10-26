@@ -934,7 +934,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Playback speed', style: darkText.title),
+              Text('Playback speed', style: darkText.title),
               const SizedBox(height: Gaps.md),
               Wrap(
                 spacing: Gaps.sm,
@@ -1181,7 +1181,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('UP NEXT', style: darkText.overline),
+                Text('UP NEXT', style: darkText.overline),
                 const SizedBox(height: Gaps.sm),
                 Text(
                   next.title,

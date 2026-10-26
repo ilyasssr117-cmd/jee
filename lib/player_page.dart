@@ -16,14 +16,6 @@ import 'res_log.dart';
 import 'widgets/app_button.dart';
 import 'widgets/state_views.dart';
 
-/// Full-screen touch player.
-///
-///  * Tap ............... show / hide the controls (they fade)
-///  * Double-tap sides .. skip 10 s back / forward
-///  * Hold the screen ... 2x speed while held
-///  * Drag the bar ...... scrub
-///  * Speed button ...... 0.5x – 2x
-
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
@@ -33,19 +25,13 @@ class PlayerPage extends StatefulWidget {
   });
 
   final Video video;
-
-  /// The list the video was opened from. When one video ends, Autoplay Next
-  /// continues with the following entry (null / last entry: nothing to play).
   final List<Video>? queue;
-
-  /// Optional position to resume from.
   final Duration? startAt;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-/// A playback problem described for the viewer.
 class _PlaybackProblem {
   const _PlaybackProblem(this.title, this.message, this.icon);
 
@@ -55,8 +41,6 @@ class _PlaybackProblem {
 }
 
 class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
-  // VideoPlayer uses a native decoder/texture. Keep its asynchronous teardown
-  // visible to the next player so opening a second video cannot race disposal.
   static final Expando<Future<void>> _disposalFutures =
       Expando<Future<void>>('flowPlayerDisposal');
   static Future<void> _pendingDisposals = Future<void>.value();
@@ -64,8 +48,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static const Duration _controlsTimeout = Duration(seconds: 4);
   static const Duration _scrubCommitDelay = Duration(milliseconds: 350);
   static const Duration _initTimeout = Duration(seconds: 30);
+  static const String _userAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+      'Mobile/15E148 Safari/604.1';
 
-  /// Pending seek target while the viewer is scrubbing (null otherwise).
   final ValueNotifier<Duration?> _scrubTarget = ValueNotifier<Duration?>(null);
   final ValueNotifier<bool> _playing = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _buffering = ValueNotifier<bool>(false);
@@ -73,10 +60,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   VideoPlayerController? _controller;
   Timer? _hideTimer;
   Timer? _scrubTimer;
-  bool _scrubBadge = true; // Centre badge for bar drags / buttons only.
+  bool _scrubBadge = true;
   String _scrubText = '';
   double _speed = 1.0;
-  bool _boosting = false; // Holding the screen: temporary 2x.
+  bool _boosting = false;
   final ValueNotifier<bool> _boost = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _dragging = ValueNotifier<bool>(false);
   final ValueNotifier<_SeekFlash?> _flash = ValueNotifier<_SeekFlash?>(null);
@@ -94,11 +81,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   _PlaybackProblem? _problem;
   int _initializationGeneration = 0;
 
-  // Reload / reconnect state.
   static const int _maxAutoRetries = 2;
   static const Duration _stallAfter = Duration(seconds: 12);
   final ValueNotifier<bool> _stalled = ValueNotifier<bool>(false);
-  late Video _video = widget.video; // May be replaced by a fresh stream URL.
+  late Video _video = widget.video;
   Duration? _resumeAt;
   Duration _lastPosition = Duration.zero;
   Duration _scrubOrigin = Duration.zero;
@@ -108,12 +94,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _reconnecting = false;
   bool _manualReload = false;
 
-  // Vertical (9:16) videos: the screen flips to portrait on phones.
   bool _portrait = false;
-  bool _orientationForced = false; // The viewer used the rotate button.
+  bool _orientationForced = false;
 
-  // Autoplay Next. The countdown lives in a ValueNotifier so the one-second
-  // tick rebuilds only the small number label, never the whole page.
   static const int _autoplaySeconds = 5;
   final ValueNotifier<int?> _countdown = ValueNotifier<int?>(null);
   Timer? _autoplayTimer;
@@ -123,19 +106,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Landscape + immersive while watching (phones are portrait elsewhere).
     unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
     _initializePlayer();
   }
 
-  // -------------------------------------------------------------------------
-  // Initialisation & teardown
-  // -------------------------------------------------------------------------
-
-  /// Starts (or restarts) playback. With [refreshSource] the detail page is
-  /// re-read first, because stream URLs can expire, and playback resumes from
-  /// where it stopped instead of from the beginning.
   Future<void> _initializePlayer({bool refreshSource = false}) async {
     if (_isLeaving) return;
     final generation = ++_initializationGeneration;
@@ -175,7 +150,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         );
         if (fresh.streamUrl.trim().isNotEmpty) _video = fresh;
       } catch (error) {
-        // Fall back to the URL we already have; init will report real errors.
         debugPrint('[PLAYER] Source refresh failed; reusing the current stream.');
       }
       if (!mounted || generation != _initializationGeneration || _isLeaving) {
@@ -196,20 +170,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         throw const FormatException('Invalid video stream URL.');
       }
 
-      // Some sources/CDNs reject native ExoPlayer requests without the same
-      // browser-like headers used to open the detail page. Prefer that page as
-      // the Referer, and only fall back to the stream origin when unavailable.
       final pageUri = Uri.tryParse(_video.pageUrl?.trim() ?? '');
-      final pageOrigin = pageUri != null &&
-              (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
-              pageUri.host.isNotEmpty
-          ? pageUri.origin
-          : streamUri.origin;
-      final referer = pageUri != null &&
-              (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
-              pageUri.host.isNotEmpty
-          ? pageUri.toString()
-          : '$pageOrigin/';
+      final validPageUri = pageUri != null &&
+          (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
+          pageUri.host.isNotEmpty;
+      final pageOrigin = validPageUri ? pageUri!.origin : streamUri.origin;
+      final referer = validPageUri ? pageUri!.toString() : '$pageOrigin/';
+
+      final cookieHeader = await videoRepository.getPlaybackCookieHeader(
+        streamUri: streamUri,
+        pageUrl: validPageUri ? pageUri!.toString() : null,
+        userAgent: _userAgent,
+      );
+      if (!mounted || generation != _initializationGeneration || _isLeaving) {
+        return;
+      }
 
       debugPrint('[PLAYER] Initializing stream host=${streamUri.host}');
       ResLog.video(
@@ -219,13 +194,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       controller = VideoPlayerController.networkUrl(
         streamUri,
         httpHeaders: <String, String>{
-          'User-Agent':
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
-              'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
-              'Mobile/15E148 Safari/604.1',
+          'User-Agent': _userAgent,
           'Referer': referer,
           'Origin': pageOrigin,
           'Accept': '*/*',
+          if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
         },
       );
       _controller = controller;
@@ -291,9 +264,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Phones only: a vertical video (width < height) flips the screen to
-  /// portrait so it fills it; anything else stays landscape. Once the viewer
-  /// presses the rotate button their choice wins for this video.
   void _applyVideoOrientation(VideoPlayerController controller) {
     if (_orientationForced) return;
     final size = controller.value.size;
@@ -307,14 +277,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(applyPlayerOrientation(portrait: portrait));
   }
 
-  /// Rotate button: flip between portrait and landscape by hand.
   void _toggleOrientation() {
     _orientationForced = true;
     _setPortrait(!_portrait);
     _revealControls();
   }
 
-  /// Manual reload (Reload button / "Try again"): fresh URL, same position.
   void _reload() {
     _autoRetries = 0;
     _reconnecting = false;
@@ -322,10 +290,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(_initializePlayer(refreshSource: true));
   }
 
-  /// Automatic recovery from a stream that dropped mid-playback.
   void _autoReconnect() {
     if (!mounted || _isLeaving) return;
-    // Stop reacting to the broken controller while it is being replaced.
     _controller?.removeListener(_onControllerChanged);
     if (_autoRetries >= _maxAutoRetries) {
       setState(() {
@@ -348,8 +314,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final existing = _disposalFutures[controller];
     if (existing != null) return existing;
 
-    // Serialize native teardown so two platform decoders are never being
-    // released at the same time during rapid video changes.
     final disposal = _pendingDisposals.then(
       (_) => _disposeControllerSafely(controller),
     );
@@ -362,13 +326,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     VideoPlayerController controller,
   ) async {
     try {
-      // Bounded: a stuck native release must never block every later player
-      // (or the exit path) behind it.
       await controller.dispose().timeout(const Duration(seconds: 5));
-    } catch (_) {
-      // A native player may already have been released while a route was
-      // closing. Never let cleanup failures prevent opening another video.
-    }
+    } catch (_) {}
   }
 
   static Future<void> _waitForPendingDisposals() async {
@@ -380,7 +339,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<bool> _releaseBeforeExit() {
-    // Multiple fast Back presses share one awaited release operation.
     return _releaseTask ??= _releaseControllerBeforeExit();
   }
 
@@ -400,18 +358,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       controller.removeListener(_onControllerChanged);
       try {
         if (controller.value.isInitialized) await controller.pause();
-      } catch (_) {
-        // The native player can already be stopping as the route is popped.
-      }
+      } catch (_) {}
       await _disposeController(controller);
     }
     await _waitForPendingDisposals();
     return true;
   }
 
-  /// BACK: if the controls are on screen, hide them first; BACK again leaves.
   void _handleBack() {
-    if (_popping) return; // Already leaving: ignore extra BACK presses.
+    if (_popping) return;
     final canHideControls = _showControls &&
         _problem == null &&
         !_loading &&
@@ -424,12 +379,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(_leave());
   }
 
-  /// Leaves the player after the native decoder has been released.
-  ///
-  /// `Navigator.pop` does not consult [PopScope] (only `maybePop` / the system
-  /// BACK key do), so popping here is safe even with `canPop: false`. The
-  /// release is bounded and wrapped in try/finally so a stuck or failing
-  /// native player can never leave BACK dead.
   Future<void> _leave() async {
     if (_popping) return;
     _popping = true;
@@ -456,22 +405,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Errors
-  // -------------------------------------------------------------------------
-
   _PlaybackProblem _describeProblem(Object error) {
     if (error is _MissingStreamException) {
       return const _PlaybackProblem(
         'No video link',
-        'This video doesn\u2019t have a playable link right now.',
+        'This video doesn’t have a playable link right now.',
         Icons.link_off_rounded,
       );
     }
     if (error is FormatException) {
       return const _PlaybackProblem(
         'Invalid video link',
-        'The link for this video isn\u2019t valid, so it can\u2019t be played.',
+        'The link for this video isn’t valid, so it can’t be played.',
         Icons.link_off_rounded,
       );
     }
@@ -480,25 +425,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         error is HttpException) {
       return const _PlaybackProblem(
         'Connection problem',
-        'The video server didn\u2019t respond. Check your network and try again.',
+        'The video server didn’t respond. Check your network and try again.',
         Icons.wifi_off_rounded,
       );
     }
     return const _PlaybackProblem(
       'Playback failed',
-      'This video couldn\u2019t be played. Try again, or go back and pick another.',
+      'This video couldn’t be played. Try again, or go back and pick another.',
       Icons.error_outline_rounded,
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Controller events
-  // -------------------------------------------------------------------------
-
   void _onControllerChanged() {
-    // Cheap by design: this fires several times a second. Only state that the
-    // page itself depends on triggers setState; position updates are rendered
-    // by small ListenableBuilders.
     if (!mounted || _isLeaving) return;
     final controller = _controller;
     if (controller == null) return;
@@ -514,16 +452,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
     if (value.isInitialized) {
       _lastPosition = value.position;
-      // Playback is healthy again once it has advanced a little.
       if (_autoRetries > 0 &&
           value.position - _retryBase > const Duration(seconds: 10)) {
         _autoRetries = 0;
       }
     }
 
-    // The end of the stream: the position reached the duration. Some decoders
-    // keep reporting `isBuffering` (and never `isPlaying`) once they get
-    // there, which used to leave an endless spinner on a finished video.
     final atEnd = value.isInitialized &&
         value.duration > Duration.zero &&
         value.position >= value.duration - const Duration(milliseconds: 800);
@@ -547,7 +481,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (finished) {
           _showControls = false;
           _hideTimer?.cancel();
-          // Reached the end: nothing to resume, and the card shows "watched".
           PlaybackProgress.instance.markCompleted(_video.id);
         }
       });
@@ -560,11 +493,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Autoplay Next
-  // -------------------------------------------------------------------------
-
-  /// The entry after the current one in [PlayerPage.queue], if any.
   Video? get _nextVideo {
     final queue = widget.queue;
     if (queue == null) return null;
@@ -573,7 +501,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return queue[index + 1];
   }
 
-  /// The entry before the current one in [PlayerPage.queue], if any.
   Video? get _previousVideo {
     final queue = widget.queue;
     if (queue == null) return null;
@@ -605,22 +532,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  /// CANCEL: stay on the "Finished watching" screen instead.
   void _cancelAutoplay() {
     _autoplayTimer?.cancel();
     _countdown.value = null;
     setState(() => _autoplayCancelled = true);
   }
 
-  /// Switches this same player to the next video (one controller at a time;
-  /// the old one is released before the new one is created).
   Future<void> _playNext() => _switchTo(_nextVideo);
 
   Future<void> _playPrevious() => _switchTo(_previousVideo);
 
   Future<void> _switchTo(Video? next) async {
     if (next == null || _isLeaving) return;
-    if (!_completed) _saveProgress(); // Keep where we stopped in this one.
+    if (!_completed) _saveProgress();
     _autoplayTimer?.cancel();
     _countdown.value = null;
     _autoplayCancelled = false;
@@ -634,11 +558,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     await _initializePlayer(refreshSource: true);
   }
 
-  /// Buffering for too long: show the controls and put focus on Reload.
   void _onStalled() {
     if (!mounted || _isLeaving || !_buffering.value) return;
     _stalled.value = true;
-    // Still stuck a while later: reconnect on our own with a fresh URL.
     _stallTimer?.cancel();
     _stallTimer = Timer(_stallAfter, () {
       if (!mounted || _isLeaving || !_buffering.value) return;
@@ -669,14 +591,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Future<void> _safeControllerAction(Future<void> Function() action) async {
     try {
       await action();
-    } catch (_) {
-      // Ignore late platform callbacks during app pause/resume.
-    }
+    } catch (_) {}
   }
-
-  // -------------------------------------------------------------------------
-  // Controls visibility
-  // -------------------------------------------------------------------------
 
   void _scheduleHide() {
     _hideTimer?.cancel();
@@ -686,7 +602,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (!mounted || _isLeaving || !_showControls) return;
       if (!(_controller?.value.isPlaying ?? false)) return;
       if (_scrubTarget.value != null || _stalled.value) {
-        _scheduleHide(); // Still scrubbing / stalled: try again later.
+        _scheduleHide();
         return;
       }
       _hideControls();
@@ -698,16 +614,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     setState(() => _showControls = false);
   }
 
-  /// Shows the controls (if hidden) and restarts the auto-hide timer.
   void _revealControls() {
     if (!mounted) return;
     if (!_showControls) setState(() => _showControls = true);
     _scheduleHide();
   }
-
-  // -------------------------------------------------------------------------
-  // Playback actions
-  // -------------------------------------------------------------------------
 
   Future<void> _togglePlayback() async {
     final controller = _controller;
@@ -753,11 +664,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Every skip step is exactly 10 seconds.
   static const int _seekStepSeconds = 10;
 
-  /// Moves the (debounced) seek target by [seconds]. The actual `seekTo` is
-  /// only issued once the viewer pauses, so holding a key stays smooth.
   void _scrubBySeconds(int seconds, {bool badge = true}) {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized || _isLeaving) {
@@ -768,7 +676,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scrubTo(base + Duration(seconds: seconds), reveal: badge);
   }
 
-  /// Touch: tap or drag on the seek bar ([fraction] 0..1 of the duration).
   void _scrubToFraction(double fraction) {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized || _isLeaving) {
@@ -807,20 +714,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     } catch (error) {
       debugPrint('[PLAYER] Seek failed: $error');
     }
-    // The page may have been closed while the seek was running.
     if (!mounted || _isLeaving) return;
-    // A newer scrub may have started while this seek was running.
     if (_scrubTimer?.isActive ?? false) return;
     _scrubTarget.value = null;
     _scheduleHide();
   }
 
-  // -------------------------------------------------------------------------
-  // Touch gestures
-  // -------------------------------------------------------------------------
-
-  /// Tap: show / hide the controls. Two quick taps on the left or right side
-  /// of the screen: skip 10 s back / forward.
   void _onScreenTap(TapUpDetails details, double width) {
     if (_problem != null || _loading || _completed) return;
     final x = details.localPosition.dx;
@@ -861,7 +760,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  /// Holding the screen plays at 2x until the finger lifts.
   void _startBoost() {
     final controller = _controller;
     if (controller == null ||
@@ -936,10 +834,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scheduleHide();
   }
 
-  // -------------------------------------------------------------------------
-  // Lifecycle
-  // -------------------------------------------------------------------------
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -970,14 +864,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // -------------------------------------------------------------------------
-  // Build
-  // -------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    // Non-null only while there is a healthy, initialised controller.
     final VideoPlayerController? live =
         (controller != null && controller.value.isInitialized && _problem == null)
             ? controller
@@ -996,7 +885,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             return Stack(
               fit: StackFit.expand,
               children: [
-                // The picture fades in once it is ready.
                 if (live != null)
                   Positioned.fill(
                     child: _FadeIn(
@@ -1011,7 +899,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
-                // Touch layer: tap, double-tap sides, hold for 2x.
                 Positioned.fill(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -1027,7 +914,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 _buildScrubBadge(),
                 if (live != null) _buildControls(live),
                 _buildLoading(),
-                // Error / finished / up-next cross-fade in and out.
                 AnimatedSwitcher(
                   duration: Motion.fade,
                   child: _buildOverlay() ??
@@ -1042,8 +928,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildBuffering() {
-    // Keep buffering feedback clear of the central play/pause button. The
-    // upper-centre placement is especially important on landscape iPhones.
     return Align(
       alignment: const Alignment(0, -0.42),
       child: IgnorePointer(
@@ -1080,8 +964,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   Widget _buildLoading() {
     final text = _reconnecting
-        ? 'Reconnecting\u2026 ($_autoRetries/$_maxAutoRetries)'
-        : (_manualReload ? 'Reloading\u2026' : 'Preparing video\u2026');
+        ? 'Reconnecting… ($_autoRetries/$_maxAutoRetries)'
+        : (_manualReload ? 'Reloading…' : 'Preparing video…');
     return IgnorePointer(
       ignoring: !_loading,
       child: AnimatedOpacity(
@@ -1119,7 +1003,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Error, "Finished watching" or "Up next" (null while playing).
   Widget? _buildOverlay() {
     final problem = _problem;
     if (problem != null) {
@@ -1159,7 +1042,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// "Up next" with a short countdown.
   Widget _buildUpNext(Video next) {
     return ColoredBox(
       key: const ValueKey<String>('upnext'),
@@ -1185,7 +1067,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 ValueListenableBuilder<int?>(
                   valueListenable: _countdown,
                   builder: (context, left, _) => Text(
-                    left == null ? 'Starting\u2026' : 'Playing in $left\u2026',
+                    left == null ? 'Starting…' : 'Playing in $left…',
                     style: AppText.body,
                   ),
                 ),
@@ -1216,7 +1098,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Centre pill shown while the bar is dragged or a skip button is pending.
   Widget _buildScrubBadge() {
     return IgnorePointer(
       child: ValueListenableBuilder<Duration?>(
@@ -1226,7 +1107,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             final delta = target - _scrubOrigin;
             final forward = !delta.isNegative;
             final seconds = delta.inSeconds.abs();
-            final deltaText = '${forward ? '+' : '\u2212'}'
+            final deltaText = '${forward ? '+' : '−'}'
                 '${seconds >= 60 ? _formatDuration(Duration(seconds: seconds)) : '${seconds}s'}';
             _scrubText = '$deltaText   ${_formatDuration(target)}';
           }
@@ -1243,7 +1124,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// "2x" badge while the screen is held.
   Widget _buildBoostBadge() {
     return IgnorePointer(
       child: ValueListenableBuilder<bool>(
@@ -1272,7 +1152,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Fading "10s" marks on the side that was double-tapped.
   Widget _buildSeekFlash(double width) {
     return IgnorePointer(
       child: ValueListenableBuilder<_SeekFlash?>(
@@ -1335,7 +1214,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !visible,
-        // Slow, soft fade in and out (never a sudden pop).
         child: AnimatedOpacity(
           opacity: visible ? 1 : 0,
           duration: Duration(milliseconds: visible ? 260 : 420),
@@ -1474,7 +1352,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     ? Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
-                          'Connection is slow \u2013 tap reload',
+                          'Connection is slow – tap reload',
                           style: AppText.caption.copyWith(color: AppColors.error),
                         ),
                       )
@@ -1551,7 +1429,6 @@ const TextStyle _pillText = TextStyle(
   fontFeatures: [FontFeature.tabularFigures()],
 );
 
-/// Dark rounded badge used for "+10s", "2x" and the scrub time.
 class _Pill extends StatelessWidget {
   const _Pill({required this.child});
 
@@ -1572,7 +1449,6 @@ class _Pill extends StatelessWidget {
   }
 }
 
-/// Fades its child from transparent to opaque the first time it appears.
 class _FadeIn extends StatelessWidget {
   const _FadeIn({super.key, required this.child});
 
@@ -1591,7 +1467,6 @@ class _FadeIn extends StatelessWidget {
   }
 }
 
-/// Seek bar with elapsed / total time. Tap or drag to seek.
 class _ProgressRow extends StatelessWidget {
   const _ProgressRow({
     required this.controller,
@@ -1651,12 +1526,12 @@ class _ProgressRow extends StatelessWidget {
               ),
               Expanded(
                 child: SizedBox(
-                  height: 40, // Big, forgiving touch target.
+                  height: 40,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final width = constraints.maxWidth;
                       double fractionAt(double dx) =>
-                          width <= 0 ? 0 : (dx / width).clamp(0.0, 1.0);
+                          width <= 0 ? 0.0 : (dx / width).clamp(0.0, 1.0).toDouble();
                       return GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTapDown: (d) =>

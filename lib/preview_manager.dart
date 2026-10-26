@@ -144,7 +144,7 @@ class PreviewManager {
       await _play(video, url, generation);
     } catch (error) {
       // A preview is a nicety: on any failure the thumbnail simply stays.
-      debugPrint('[PREVIEW] ${video.id}: $error');
+      debugPrint('[PREVIEW] ${video.id}: request failed (${error.runtimeType}).')
     } finally {
       if (generation == _generation) {
         loading.value = false;
@@ -199,7 +199,7 @@ class PreviewManager {
       });
       return true;
     } catch (error) {
-      debugPrint('[PREVIEW] ${video.id} $url: $error');
+      debugPrint('[PREVIEW] ${video.id}: preview failed (${error.runtimeType}).');
       _initializing = null;
       if (controller != null && !identical(_live, controller)) {
         unawaited(_scheduleDispose(controller));

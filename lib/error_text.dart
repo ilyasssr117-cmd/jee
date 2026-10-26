@@ -23,7 +23,7 @@ class FriendlyError {
 /// Converts any thrown object into something a viewer can act on.
 /// [subject] completes the title, e.g. "Unable to load videos".
 FriendlyError describeError(Object error, {String subject = 'videos'}) {
-  debugPrint('[ERROR] $subject: $error');
+  debugPrint('[ERROR] $subject: ${error.runtimeType}');
 
   const offline = FriendlyError(
     title: 'No connection',

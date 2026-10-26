@@ -7,6 +7,18 @@ import 'package:http/http.dart' as http;
 
 import 'models.dart';
 
+/// Logs only a host origin; query strings and signed media URLs stay private.
+String _safeOriginForLog(String raw) {
+  final uri = Uri.tryParse(raw);
+  if (uri == null ||
+      !uri.hasAuthority ||
+      uri.host.isEmpty ||
+      (uri.scheme != 'http' && uri.scheme != 'https')) {
+    return '[non-http-url]';
+  }
+  return uri.origin;
+}
+
 /// HTML catalogue configuration for a source you own or are authorized to use.
 /// Selectors and paths are configurable because each website has its own markup.
 class ScraperConfig {
@@ -176,11 +188,11 @@ class Scraper {
 
   Future<String> _getOnce(Uri uri) async {
     try {
-      debugPrint('[SCRAPER] GET $uri');
+      debugPrint('[SCRAPER] GET ${uri.origin}');
       final response = await _client
           .get(uri, headers: _headers)
           .timeout(config.timeout);
-      debugPrint('[SCRAPER] HTTP ${response.statusCode} from $uri');
+      debugPrint('[SCRAPER] HTTP ${response.statusCode} from ${uri.origin}');
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ScraperException(
           'Source request failed with HTTP ${response.statusCode}.',
@@ -202,8 +214,8 @@ class Scraper {
     } on ScraperException {
       rethrow;
     } on Exception catch (error) {
-      debugPrint('[SCRAPER] Request failed for $uri: $error');
-      throw ScraperException('Could not reach the video source: $error');
+      debugPrint('[SCRAPER] Request failed for ${uri.origin} (${error.runtimeType}).');
+      throw const ScraperException('Could not reach the video source.');
     }
   }
 
@@ -229,7 +241,7 @@ class Scraper {
     final videos = <Video>[];
     final seen = <String>{};
     final cards = document.querySelectorAll(selector);
-    debugPrint('[SCRAPER] Selector "$selector" matched ${cards.length} cards at $uri');
+    debugPrint('[SCRAPER] Selector "$selector" matched ${cards.length} cards at ${uri.origin}');
     for (final element in cards) {
       try {
         final video = _parseCard(element, uri);
@@ -243,7 +255,7 @@ class Scraper {
       }
     }
     debugPrint(
-      '[SCRAPER] Parsed ${videos.length} videos from $uri '
+      '[SCRAPER] Parsed ${videos.length} videos from ${uri.origin} '
       '(${cards.length - videos.length} cards skipped: albums / duplicates)',
     );
     return videos;
@@ -711,7 +723,7 @@ class Scraper {
     for (final c in unique) {
       debugPrint(
         '[SCRAPER] stream candidate rank=${c.rank} q=${c.quality} '
-        'preview=${c.preview} ${c.url}',
+        'preview=${c.preview} ${_safeOriginForLog(c.url)}',
       );
     }
     return (

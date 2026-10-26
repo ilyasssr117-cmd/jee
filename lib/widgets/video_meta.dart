@@ -114,7 +114,7 @@ class _IconText extends StatelessWidget {
 
   final IconData icon;
   final String text;
-  final TextStyle style;
+  final TextStyle? style;
 
   @override
   Widget build(BuildContext context) {

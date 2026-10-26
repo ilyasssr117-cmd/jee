@@ -102,11 +102,11 @@ class _Placeholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF232A40), Color(0xFF151923)],
+          colors: [AppColors.surfaceHigh, AppColors.background],
         ),
       ),
       child: Center(
@@ -118,7 +118,7 @@ class _Placeholder extends StatelessWidget {
               Icon(
                 Icons.play_circle_outline_rounded,
                 size: 36,
-                color: Colors.white24,
+                color: AppColors.textTertiary,
               ),
               if (showLabel) ...[
                 const SizedBox(height: 6),
@@ -127,7 +127,7 @@ class _Placeholder extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: AppText.caption.copyWith(color: Colors.white38),
+                  style: AppText.caption.copyWith(color: AppColors.textSecondary),
                 ),
               ],
             ],

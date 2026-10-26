@@ -107,6 +107,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   Widget _buildHeader(double margin) {
     final video = widget.video;
     final size = MediaQuery.sizeOf(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
     final meta = VideoMetaLine(
       video: video,
@@ -122,12 +123,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         fit: StackFit.expand,
         children: [
           VideoArtwork(video: video, showLabel: false),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0x330B0D12), Color(0xE60B0D12)],
+                colors: dark
+                    ? const [Color(0x330B0D12), Color(0xE60B0D12)]
+                    : const [Color(0x18FFFFFF), Color(0xEEF5F6FA)],
               ),
             ),
           ),
@@ -136,8 +139,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0x000B0D12), AppColors.background],
-                stops: [0.55, 1],
+                colors: dark
+                    ? const [Color(0x000B0D12), Color(0xFF0B0D12)]
+                    : const [Color(0x00F5F6FA), Color(0xFFF5F6FA)],
+                stops: const [0.55, 1],
               ),
             ),
           ),

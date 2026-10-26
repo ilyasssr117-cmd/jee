@@ -64,6 +64,11 @@ class SearchOverlayState extends State<SearchOverlay> {
   void initState() {
     super.initState();
     _scroll.addListener(_maybeLoadMore);
+    // Paint the search surface first; presenting the keyboard in the same
+    // frame can make a quick search-tap feel like it did nothing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fieldNode.requestFocus();
+    });
   }
 
   @override
@@ -290,7 +295,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                       child: TextField(
                         controller: _text,
                         focusNode: _fieldNode,
-                        autofocus: true,
+                        autofocus: false,
                         maxLines: 1,
                         textInputAction: TextInputAction.search,
                         keyboardAppearance: Theme.of(context).brightness,

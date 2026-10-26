@@ -36,6 +36,7 @@ class HomeHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final margin = context.hMargin;
     final topPad = context.safe.top + Gaps.sm;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     const topBar = _TopBar();
 
     // Error / empty: keep only the brand bar so the status view has room.
@@ -47,7 +48,11 @@ class HomeHero extends StatelessWidget {
     }
 
     final size = MediaQuery.sizeOf(context);
-    final height = math.min(size.height * 0.42, 380.0);
+    // In landscape, height is no longer tied to the short screen dimension:
+    // the featured title, metadata, and buttons get enough room to breathe.
+    final height = size.width > size.height
+        ? math.min(size.width * 0.40, 440.0)
+        : math.min(size.height * 0.42, 380.0);
     final featured = video;
 
     return SizedBox(
@@ -71,22 +76,14 @@ class HomeHero extends StatelessWidget {
               ),
             ),
           // Scrims: top for the brand bar, bottom to blend into the page.
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0x330B0D12), Color(0xE60B0D12)],
-              ),
-            ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xB30B0D12), Color(0x000B0D12)],
-                stops: [0, 0.3],
+                colors: dark
+                    ? const [Color(0x330B0D12), Color(0xE60B0D12)]
+                    : const [Color(0x18FFFFFF), Color(0xEEF5F6FA)],
               ),
             ),
           ),
@@ -95,8 +92,22 @@ class HomeHero extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0x000B0D12), AppColors.background],
-                stops: [0.6, 1],
+                colors: dark
+                    ? const [Color(0xB30B0D12), Color(0x000B0D12)]
+                    : const [Color(0xCCFFFFFF), Color(0x00FFFFFF)],
+                stops: const [0, 0.3],
+              ),
+            ),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: dark
+                    ? const [Color(0x000B0D12), Color(0xFF0B0D12)]
+                    : const [Color(0x00F5F6FA), Color(0xFFF5F6FA)],
+                stops: const [0.6, 1],
               ),
             ),
           ),
@@ -107,6 +118,23 @@ class HomeHero extends StatelessWidget {
             bottom: Gaps.md,
             child: AnimatedSwitcher(
               duration: Motion.fade,
+              transitionBuilder: (child, animation) {
+                final curved = CurvedAnimation(
+                  parent: animation,
+                  curve: Motion.curve,
+                  reverseCurve: Curves.easeIn,
+                );
+                return FadeTransition(
+                  opacity: curved,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.035),
+                      end: Offset.zero,
+                    ).animate(curved),
+                    child: child,
+                  ),
+                );
+              },
               child: featured == null
                   ? const _HeroSkeleton(key: ValueKey<String>('skeleton'))
                   : _HeroDetails(

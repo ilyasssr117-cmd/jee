@@ -65,7 +65,7 @@ class AppButton extends StatelessWidget {
               Icon(
                 icon,
                 size: 18,
-                color: iconColor ?? AppColors.textPrimary,
+                color: iconColor ?? (primary ? Colors.white : AppColors.textPrimary),
               ),
             if (loading || icon != null) const SizedBox(width: 6),
             Flexible(
@@ -73,7 +73,9 @@ class AppButton extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.label,
+                style: AppText.label.copyWith(
+                  color: primary ? Colors.white : AppColors.textPrimary,
+                ),
               ),
             ),
           ],
@@ -123,6 +125,7 @@ class AppChip extends StatelessWidget {
           style: AppText.label.copyWith(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            color: selected ? Colors.white : AppColors.textPrimary,
           ),
         ),
       ),

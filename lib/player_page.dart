@@ -176,7 +176,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (fresh.streamUrl.trim().isNotEmpty) _video = fresh;
       } catch (error) {
         // Fall back to the URL we already have; init will report real errors.
-        debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
+        debugPrint('[PLAYER] Source refresh failed; reusing the current stream.');
       }
       if (!mounted || generation != _initializationGeneration || _isLeaving) {
         return;
@@ -186,7 +186,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     VideoPlayerController? controller;
     try {
       final rawUrl = _video.streamUrl.trim();
-      debugPrint('[PLAYER] URL attempting to play: $rawUrl');
       if (rawUrl.isEmpty) {
         throw const _MissingStreamException();
       }
@@ -227,7 +226,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           'Referer': referer,
           'Origin': pageOrigin,
           'Accept': '*/*',
-          'Cookie': 'kt_acctoken=NzkuMjAuMTU3LjI0MCwxMDUuNzQuMjAxLjI0NA',
         },
       );
       _controller = controller;
@@ -265,7 +263,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _onControllerChanged();
       _scheduleHide();
     } catch (error, stackTrace) {
-      debugPrint('[PLAYER] Initialization failed: $error');
+      debugPrint('[PLAYER] Initialization failed (${error.runtimeType}).');
       debugPrintStack(stackTrace: stackTrace);
       if (controller != null) {
         controller.removeListener(_onControllerChanged);
@@ -1044,13 +1042,37 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildBuffering() {
-    return IgnorePointer(
-      child: ValueListenableBuilder<bool>(
-        valueListenable: _buffering,
-        builder: (context, buffering, _) => AnimatedOpacity(
-          opacity: buffering && !_completed && !_loading ? 1 : 0,
-          duration: const Duration(milliseconds: 250),
-          child: const Spinner(size: 40),
+    // Keep buffering feedback clear of the central play/pause button. The
+    // upper-centre placement is especially important on landscape iPhones.
+    return Align(
+      alignment: const Alignment(0, -0.42),
+      child: IgnorePointer(
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _buffering,
+          builder: (context, buffering, _) => AnimatedOpacity(
+            opacity: buffering && !_completed && !_loading ? 1 : 0,
+            duration: Motion.fade,
+            curve: Motion.curve,
+            child: AnimatedScale(
+              scale: buffering ? 1 : 0.88,
+              duration: Motion.normal,
+              curve: Motion.curve,
+              child: Container(
+                width: 48,
+                height: 48,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0x99000000),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0x2EFFFFFF)),
+                ),
+                child: const CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

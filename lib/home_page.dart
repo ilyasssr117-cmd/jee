@@ -328,6 +328,23 @@ class _HomePageState extends State<HomePage> {
             // The page keeps its scroll position while the search is open.
             AnimatedSwitcher(
               duration: Motion.normal,
+              transitionBuilder: (child, animation) {
+                final curved = CurvedAnimation(
+                  parent: animation,
+                  curve: Motion.curve,
+                  reverseCurve: Curves.easeIn,
+                );
+                return FadeTransition(
+                  opacity: curved,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.018),
+                      end: Offset.zero,
+                    ).animate(curved),
+                    child: child,
+                  ),
+                );
+              },
               child: switch (_section) {
                 _Section.favorites => FavoritesView(
                     key: const ValueKey<String>('favorites'),
@@ -360,7 +377,25 @@ class _HomePageState extends State<HomePage> {
             ),
             // Search fades in and out instead of popping.
             AnimatedSwitcher(
-              duration: Motion.normal,
+              duration: const Duration(milliseconds: 150),
+              reverseDuration: const Duration(milliseconds: 120),
+              transitionBuilder: (child, animation) {
+                final curved = CurvedAnimation(
+                  parent: animation,
+                  curve: Motion.curve,
+                  reverseCurve: Curves.easeIn,
+                );
+                return FadeTransition(
+                  opacity: curved,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.025),
+                      end: Offset.zero,
+                    ).animate(curved),
+                    child: child,
+                  ),
+                );
+              },
               child: _searchOpen
                   ? SearchOverlay(
                       key: const ValueKey<String>('search'),

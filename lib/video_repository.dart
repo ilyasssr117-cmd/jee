@@ -28,7 +28,7 @@ abstract class VideoCatalogRepository {
 /// with --dart-define=VIDEO_SOURCE_BASE_URL=https://your-source.example.
 const String sourceBaseUrl = String.fromEnvironment(
   'VIDEO_SOURCE_BASE_URL',
-  defaultValue: 'https://x-fetish.tube',
+  defaultValue: 'https://mynae.com',
 );
 
 List<String> _parseCommaSeparated(String value) => value
@@ -200,7 +200,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   @override
   Future<List<Video>> getRelated(Video video, {int limit = 6}) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: related videos for ${video.pageUrl}');
+    debugPrint('[FLOW] repository: related videos for video=${video.id}');
     final videos = await scraper.related(video, limit: limit);
     debugPrint('[FLOW] repository: related returned ${videos.length} videos');
     return videos;
@@ -209,7 +209,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   @override
   Future<Video> resolveForPlayback(Video video) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: resolving playback for ${video.pageUrl}');
+    debugPrint('[FLOW] repository: resolving playback for video=${video.id}');
     final resolved = await scraper.resolveForPlayback(video);
     debugPrint('[FLOW] repository: stream URL resolved=${resolved.streamUrl.isNotEmpty}');
     return resolved;

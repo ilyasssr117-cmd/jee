@@ -1,15 +1,8 @@
 import 'package:flutter/foundation.dart';
 
-/// Debug-only trace of every video that is opened and played:
-///
-///     page  : the video page URL (it contains the video number and title)
-///     video : the stream URL extracted from that page
-///
-/// The app only *prints* one tagged line per video. An app running on an
-/// a mobile device cannot write into your project folder, so the companion
-/// script `tool/res_logger.dart` (run on the computer) collects these lines
-/// and saves them to `res.txt` in the project root. Nothing is stored on the
-/// device. In release builds this does nothing at all.
+/// Debug-only playback trace. Only origins are logged: full media URLs can
+/// contain expiring signatures or access tokens and must not be written to logs.
+/// In release builds this does nothing at all.
 abstract final class ResLog {
   static const String tag = '[RES]';
 
@@ -17,10 +10,17 @@ abstract final class ResLog {
 
   static void video({required String? pageUrl, required String videoUrl}) {
     if (!kDebugMode) return;
-    final page = (pageUrl ?? '').trim();
-    final video = videoUrl.trim();
-    if (page.isEmpty || video.isEmpty) return;
-    final line = '$tag $page | $video';
+    final page = Uri.tryParse((pageUrl ?? '').trim());
+    final video = Uri.tryParse(videoUrl.trim());
+    if (page == null ||
+        video == null ||
+        !page.hasAuthority ||
+        !video.hasAuthority ||
+        (page.scheme != 'http' && page.scheme != 'https') ||
+        (video.scheme != 'http' && video.scheme != 'https')) {
+      return;
+    }
+    final line = '$tag ${page.origin} | ${video.origin}';
     if (line == _last) return; // Same video re-initialised (retry / resume).
     _last = line;
     debugPrint(line);

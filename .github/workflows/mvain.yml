@@ -1,4 +1,3 @@
-
 name: Add iOS Platform
 
 on:
@@ -26,15 +25,17 @@ jobs:
           architecture: arm64
           cache: true
 
-      - name: Check iOS
+      - name: Check iOS platform
         shell: bash
         run: |
           if [ -d "ios" ]; then
             echo "ios/ already exists."
+            echo "Nothing to do."
             exit 0
           fi
 
-          echo "ios/ does not exist. Creating iOS platform..."
+          echo "ios/ does not exist."
+          echo "Creating iOS platform..."
 
       - name: Create iOS platform
         shell: bash
@@ -48,34 +49,54 @@ jobs:
               .
           fi
 
-      - name: Verify iOS files
+      - name: Verify iOS platform
         shell: bash
         run: |
+          set -e
+
           test -d ios
           test -f ios/Podfile
           test -f ios/Runner.xcodeproj/project.pbxproj
           test -f ios/Runner/Info.plist
 
-          echo "iOS platform successfully added."
+          echo "iOS platform successfully created."
 
       - name: Configure iOS deployment target
         shell: bash
         run: |
-          if grep -q "^platform :ios" ios/Podfile; then
-            sed -i '' "s/^platform :ios.*/platform :ios, '15.0'/" ios/Podfile
-          else
-            sed -i '' "1i\\
-platform :ios, '15.0'\\
-" ios/Podfile
-          fi
+          python3 <<'PY'
+          from pathlib import Path
 
-      - name: Get dependencies
+          podfile = Path("ios/Podfile")
+          text = podfile.read_text()
+
+          if "platform :ios" in text:
+              lines = text.splitlines()
+              lines = [
+                  "platform :ios, '15.0'"
+                  if line.strip().startswith("platform :ios")
+                  else line
+                  for line in lines
+              ]
+              text = "\n".join(lines) + "\n"
+          else:
+              text = "platform :ios, '15.0'\n\n" + text
+
+          podfile.write_text(text)
+          PY
+
+          echo "Configured iOS deployment target:"
+          head -5 ios/Podfile
+
+      - name: Get Flutter dependencies
         run: |
           flutter pub get
 
       - name: Commit iOS platform
         shell: bash
         run: |
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -91,6 +112,5 @@ platform :ios, '15.0'\\
       - name: Push iOS platform
         shell: bash
         run: |
+          set -e
           git push origin HEAD:main
-
-

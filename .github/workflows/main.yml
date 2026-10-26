@@ -1,4 +1,4 @@
-name: iOS IPA
+name: Build TV Tube iOS IPA
 
 on:
   workflow_dispatch:
@@ -6,179 +6,63 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-
 jobs:
-  ios-build:
+  build-ios:
     runs-on: macos-latest
 
     steps:
-      # -----------------------------
-      # 1. Checkout
-      # -----------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-      # -----------------------------
-      # 2. Setup Flutter
-      # -----------------------------
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.8'
           channel: stable
+          architecture: arm64
           cache: true
 
-      # -----------------------------
-      # 3. Flutter version
-      # -----------------------------
       - name: Flutter version
+        run: flutter --version
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Build iOS
         run: |
-          flutter --version
-          dart --version
-          xcodebuild -version
-
-      # -----------------------------
-      # 4. Repair / regenerate iOS
-      # -----------------------------
-      - name: Repair iOS platform
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          chmod +x ios_setup/repair_ios.sh
-          bash ios_setup/repair_ios.sh
-
-          echo "===== iOS CHECK ====="
-
-          test -f ios/Runner.xcodeproj/project.pbxproj
-          test -f ios/Runner.xcworkspace/contents.xcworkspacedata
-          test -f ios/Runner/Info.plist
-          test -f ios/Flutter/Debug.xcconfig
-          test -f ios/Flutter/Release.xcconfig
-
-          echo "iOS platform is valid."
-
-          ls -la ios
-          ls -la ios/Runner
-          ls -la ios/Flutter
-
-      # -----------------------------
-      # 5. Dependencies
-      # -----------------------------
-      - name: Flutter dependencies
-        run: |
-          flutter pub get
-
-      # -----------------------------
-      # 6. CocoaPods
-      # -----------------------------
-      - name: Install CocoaPods dependencies
-        shell: bash
-        run: |
-          set -e
-
-          cd ios
-
-          pod repo update
-
-          pod install --verbose
-
-          cd ..
-
-      # -----------------------------
-      # 7. Analyze
-      # -----------------------------
-      - name: Flutter analyze
-        run: |
-          flutter analyze --no-pub
-        continue-on-error: true
-
-      # -----------------------------
-      # 8. Clean
-      # -----------------------------
-      - name: Flutter clean
-        run: |
-          flutter clean
-          flutter pub get
-
-      # -----------------------------
-      # 9. Build unsigned iOS
-      # -----------------------------
-      - name: Build iOS unsigned
-        shell: bash
-        run: |
-          set -e
-
           flutter build ios \
             --release \
             --no-codesign
 
-      # -----------------------------
-      # 10. Verify Runner.app
-      # -----------------------------
-      - name: Verify iOS app
-        shell: bash
-        run: |
-          set -e
-
-          if [ ! -d "build/ios/iphoneos/Runner.app" ]; then
-            echo "Runner.app was not created."
-            exit 1
-          fi
-
-          echo "Runner.app found:"
-          du -sh build/ios/iphoneos/Runner.app
-
-          ls -la build/ios/iphoneos/
-
-      # -----------------------------
-      # 11. Create unsigned IPA
-      # -----------------------------
       - name: Create IPA
         shell: bash
         run: |
           set -e
 
           rm -rf Payload
-          rm -f TV-Tube-unsigned.ipa
+          rm -f TV-Tube.ipa
 
           mkdir -p Payload
 
-          cp -R \
-            build/ios/iphoneos/Runner.app \
-            Payload/Runner.app
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
 
-          zip -r \
-            TV-Tube-unsigned.ipa \
-            Payload
+          cd Payload
+          zip -r -q ../TV-Tube.ipa Runner.app
+          cd ..
 
-          rm -rf Payload
+          echo "IPA created:"
+          ls -lh TV-Tube.ipa
 
-          echo "===== IPA CREATED ====="
-          ls -lh TV-Tube-unsigned.ipa
-
-      # -----------------------------
-      # 12. Upload IPA Artifact
-      # -----------------------------
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: TV-Tube-IPA
-          path: TV-Tube-unsigned.ipa
+          path: TV-Tube.ipa
           if-no-files-found: error
-          retention-days: 14
-
-      # -----------------------------
-      # 13. Upload build diagnostics
-      # -----------------------------
-      - name: Upload iOS build files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: TV-Tube-iOS-build
-          path: |
-            build/ios/
-            ios/Pods/Manifest.lock
-          if-no-files-found: ignore
-          retention-days: 7

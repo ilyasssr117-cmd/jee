@@ -1,4 +1,4 @@
-```yaml
+
 name: Fix Flutter + Build iOS IPA
 
 on:
@@ -103,4 +103,3 @@ jobs:
           name: TV-Tube-IPA
           path: TV-Tube.ipa
           if-no-files-found: error
-```

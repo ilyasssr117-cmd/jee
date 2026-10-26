@@ -1,4 +1,4 @@
-```yaml
+
 name: Add iOS Platform
 
 on:
@@ -92,4 +92,5 @@ platform :ios, '15.0'\\
         shell: bash
         run: |
           git push origin HEAD:main
-```
+
+

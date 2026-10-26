@@ -1,9 +1,12 @@
+
+
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import 'models.dart';
 import 'scraper.dart';
 
-/// Widgets depend on this contract while the app uses the HTML scraper only.
 abstract class VideoCatalogRepository {
   List<String> get categories;
 
@@ -22,10 +25,14 @@ abstract class VideoCatalogRepository {
   Future<List<Video>> getRelated(Video video, {int limit = 6});
 
   Future<Video> resolveForPlayback(Video video);
+
+  Future<String> getPlaybackCookieHeader({
+    required Uri streamUri,
+    String? pageUrl,
+    required String userAgent,
+  });
 }
 
-/// Base URL used by the HTML scraper. You can override it at build/run time
-/// with --dart-define=VIDEO_SOURCE_BASE_URL=https://your-source.example.
 const String sourceBaseUrl = String.fromEnvironment(
   'VIDEO_SOURCE_BASE_URL',
   defaultValue: 'https://x-fetish.tube',
@@ -133,16 +140,16 @@ final ScraperConfig _scraperConfig = ScraperConfig(
   ),
 );
 
-/// The only catalogue provider in this app: all pages use the HTML scraper.
 final VideoCatalogRepository videoRepository = HtmlScraperVideoRepository(
   Scraper(_scraperConfig),
 );
 
-/// Adapter that keeps HTML parsing and networking outside the Flutter widgets.
 class HtmlScraperVideoRepository implements VideoCatalogRepository {
   HtmlScraperVideoRepository(this.scraper);
 
   final Scraper scraper;
+  final Map<String, _RepositoryCookie> _cookieJar =
+      <String, _RepositoryCookie>{};
 
   @override
   List<String> get categories => scraper.config.categories;
@@ -177,8 +184,6 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       debugPrint('[FLOW] repository: category returned ${videos.length} videos');
       return videos;
     }
-    // The website page itself provides pagination. page 0 is its homepage;
-    // page 1 and onwards use pagePathTemplate.
     final videos = await scraper.home(page: page);
     debugPrint('[FLOW] repository: homepage returned ${videos.length} videos');
     return videos;
@@ -213,5 +218,193 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     final resolved = await scraper.resolveForPlayback(video);
     debugPrint('[FLOW] repository: stream URL resolved=${resolved.streamUrl.isNotEmpty}');
     return resolved;
+  }
+
+  @override
+  Future<String> getPlaybackCookieHeader({
+    required Uri streamUri,
+    String? pageUrl,
+    required String userAgent,
+  }) async {
+    _ensureConfigured();
+    final configuredUri = Uri.parse(scraper.config.baseUrl.trim());
+    final configuredRoot = configuredUri.resolve('/');
+    final parsedPage = Uri.tryParse(pageUrl?.trim() ?? '');
+    final validPage = parsedPage != null &&
+        (parsedPage.scheme == 'http' || parsedPage.scheme == 'https') &&
+        parsedPage.host.isNotEmpty &&
+        _sameConfiguredSite(parsedPage.host, configuredUri.host);
+
+    await _fetchCookieResponse(configuredRoot, userAgent);
+    if (validPage && parsedPage != null && parsedPage.toString() != configuredRoot.toString()) {
+      await _fetchCookieResponse(parsedPage, userAgent);
+    }
+
+    return _cookieHeaderForUri(streamUri);
+  }
+
+  Future<void> _fetchCookieResponse(Uri initialUri, String userAgent) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15);
+    var currentUri = initialUri;
+
+    try {
+      for (var redirectCount = 0; redirectCount <= 5; redirectCount++) {
+        final request = await client
+            .getUrl(currentUri)
+            .timeout(const Duration(seconds: 15));
+        request.followRedirects = false;
+        request.headers.set(HttpHeaders.userAgentHeader, userAgent);
+        request.headers.set(HttpHeaders.acceptHeader, '*/*');
+
+        final existingCookies = _cookieHeaderForUri(currentUri);
+        if (existingCookies.isNotEmpty) {
+          request.headers.set(HttpHeaders.cookieHeader, existingCookies);
+        }
+
+        final response = await request
+            .close()
+            .timeout(const Duration(seconds: 15));
+
+        for (final cookie in response.cookies) {
+          _storeCookie(cookie, currentUri);
+        }
+
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (response.statusCode >= 300 &&
+            response.statusCode < 400 &&
+            location != null &&
+            redirectCount < 5) {
+          await response.drain<void>().timeout(const Duration(seconds: 10));
+          final nextUri = currentUri.resolve(location);
+          if ((nextUri.scheme != 'http' && nextUri.scheme != 'https') ||
+              nextUri.host.isEmpty) {
+            break;
+          }
+          currentUri = nextUri;
+          continue;
+        }
+
+        await response.drain<void>().timeout(const Duration(seconds: 10));
+        break;
+      }
+    } catch (error) {
+      debugPrint('[FLOW] Cookie response fetch failed (${error.runtimeType}).');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  void _storeCookie(Cookie cookie, Uri responseUri) {
+    final rawDomain = cookie.domain?.trim().toLowerCase();
+    final hostOnly = rawDomain == null || rawDomain.isEmpty;
+    final domain = hostOnly
+        ? responseUri.host.toLowerCase()
+        : rawDomain!.replaceFirst(RegExp(r'^\.'), '');
+    final responseHost = responseUri.host.toLowerCase();
+
+    if (domain.isEmpty ||
+        !(responseHost == domain || responseHost.endsWith('.$domain'))) {
+      return;
+    }
+
+    final path = cookie.path != null && cookie.path!.startsWith('/')
+        ? cookie.path!
+        : _defaultCookiePath(responseUri.path);
+    final key = '$domain|$path|${cookie.name}';
+    final now = DateTime.now();
+
+    if ((cookie.maxAge != null && cookie.maxAge! <= 0) ||
+        (cookie.expires != null && !cookie.expires!.isAfter(now))) {
+      _cookieJar.remove(key);
+      return;
+    }
+
+    _cookieJar[key] = _RepositoryCookie(
+      name: cookie.name,
+      value: cookie.value,
+      domain: domain,
+      path: path,
+      hostOnly: hostOnly,
+      secure: cookie.secure,
+      expires: cookie.expires,
+      maxAge: cookie.maxAge,
+      receivedAt: now,
+    );
+  }
+
+  String _cookieHeaderForUri(Uri uri) {
+    final now = DateTime.now();
+    _cookieJar.removeWhere((_, cookie) => cookie.isExpired(now));
+    final matching = _cookieJar.values
+        .where((cookie) => cookie.matches(uri, now))
+        .toList()
+      ..sort((a, b) => b.path.length.compareTo(a.path.length));
+    return matching.map((cookie) => '${cookie.name}=${cookie.value}').join('; ');
+  }
+
+  static bool _sameConfiguredSite(String host, String configuredHost) {
+    String normalize(String value) => value.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final candidate = normalize(host);
+    final configured = normalize(configuredHost);
+    return candidate == configured || candidate.endsWith('.$configured');
+  }
+
+  static String _defaultCookiePath(String requestPath) {
+    if (requestPath.isEmpty || !requestPath.startsWith('/') || requestPath == '/') {
+      return '/';
+    }
+    final lastSlash = requestPath.lastIndexOf('/');
+    if (lastSlash <= 0) return '/';
+    return requestPath.substring(0, lastSlash);
+  }
+}
+
+class _RepositoryCookie {
+  const _RepositoryCookie({
+    required this.name,
+    required this.value,
+    required this.domain,
+    required this.path,
+    required this.hostOnly,
+    required this.secure,
+    required this.expires,
+    required this.maxAge,
+    required this.receivedAt,
+  });
+
+  final String name;
+  final String value;
+  final String domain;
+  final String path;
+  final bool hostOnly;
+  final bool secure;
+  final DateTime? expires;
+  final int? maxAge;
+  final DateTime receivedAt;
+
+  bool isExpired(DateTime now) {
+    if (expires != null && !expires!.isAfter(now)) return true;
+    if (maxAge != null &&
+        !receivedAt.add(Duration(seconds: maxAge!)).isAfter(now)) {
+      return true;
+    }
+    return false;
+  }
+
+  bool matches(Uri uri, DateTime now) {
+    if (isExpired(now)) return false;
+    if (secure && uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    final domainMatches = hostOnly
+        ? host == domain
+        : host == domain || host.endsWith('.$domain');
+    if (!domainMatches) return false;
+    final requestPath = uri.path.isEmpty ? '/' : uri.path;
+    return requestPath == path ||
+        (requestPath.startsWith(path) &&
+            (path.endsWith('/') ||
+                (requestPath.length > path.length &&
+                    requestPath[path.length] == '/')));
   }
 }

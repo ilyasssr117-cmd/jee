@@ -9,6 +9,7 @@ import 'favorites_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
+import 'request_cache.dart';
 import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
@@ -44,7 +45,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   @override
   void initState() {
     super.initState();
-    _relatedFuture = videoRepository.getRelated(widget.video);
+    _relatedFuture = _loadRelated();
     _scroll.addListener(() {
       final over = !_scroll.hasClients || _scroll.offset < _headerLimit;
       if (over != _overHeader.value) _overHeader.value = over;
@@ -58,8 +59,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     super.dispose();
   }
 
+  Future<List<Video>> _loadRelated() => relatedCache.fetch(
+        widget.video.id,
+        () => videoRepository.getRelated(widget.video),
+      );
+
   void _reloadRelated() {
-    setState(() => _relatedFuture = videoRepository.getRelated(widget.video));
+    relatedCache.clear();
+    setState(() => _relatedFuture = _loadRelated());
   }
 
   Future<void> _play({bool fromStart = false}) async {
@@ -279,7 +286,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  /// Download / progress / saved button (plain MP4 links only).
+  /// Download / pause / resume / saved buttons (plain MP4 links only).
   Widget _buildDownloadButton() {
     return ListenableBuilder(
       listenable: DownloadStore.instance,
@@ -288,9 +295,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         final id = widget.video.id;
         final item = store.item(id);
 
-        if (item == null || item.status == DownloadStatus.failed) {
+        if (item == null) {
           return AppButton(
-            label: item == null ? 'Download' : 'Retry download',
+            label: 'Download',
             icon: Icons.download_rounded,
             style: AppButtonStyle.secondary,
             onDark: true,
@@ -302,41 +309,81 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         }
 
         if (item.status == DownloadStatus.done) {
-          return AppButton(
-            label: 'Downloaded',
-            icon: Icons.download_done_rounded,
-            iconColor: const Color(0xFFB8AEFF),
-            style: AppButtonStyle.secondary,
-            onDark: true,
-            onPressed: () async {
-              final ok = await confirmDialog(
-                context,
-                title: 'Delete this download?',
-                message: 'The video will be removed from your phone.',
-                confirmLabel: 'Delete',
-              );
-              if (ok) await store.remove(id);
-            },
+          return Wrap(
+            spacing: Gaps.sm,
+            runSpacing: Gaps.sm,
+            children: [
+              AppButton(
+                label: 'Downloaded',
+                icon: Icons.download_done_rounded,
+                iconColor: const Color(0xFFB8AEFF),
+                style: AppButtonStyle.secondary,
+                onDark: true,
+                onPressed: () async {
+                  final ok = await confirmDialog(
+                    context,
+                    title: 'Delete this download?',
+                    message: 'The video will be removed from your phone.',
+                    confirmLabel: 'Delete',
+                  );
+                  if (ok) await store.remove(id);
+                },
+              ),
+              // "Add to device": Save Video (Photos) or Save to Files.
+              AppButton(
+                label: 'Save to phone',
+                icon: Icons.ios_share_rounded,
+                style: AppButtonStyle.secondary,
+                onDark: true,
+                onPressed: () async {
+                  final ok = await store.shareFile(id);
+                  if (!ok && context.mounted) {
+                    showToast(
+                      context,
+                      'Couldn\u2019t open the share sheet.',
+                      aboveBar: false,
+                    );
+                  }
+                },
+              ),
+            ],
           );
         }
 
-        // Queued or downloading: live percentage, tap to cancel.
+        // Saving / waiting / paused / failed: live percentage.
         return ValueListenableBuilder<int>(
           valueListenable: item.bytes,
           builder: (context, _, __) {
             final fraction = item.progress;
-            final label = item.status == DownloadStatus.queued
-                ? 'Waiting\u2026'
-                : (fraction != null
-                    ? '${(fraction * 100).round()}%'
-                    : 'Downloading\u2026');
-            return AppButton(
-              label: label,
-              icon: Icons.close_rounded,
-              style: AppButtonStyle.secondary,
-              onDark: true,
-              onPressed: () => store.remove(id),
-            );
+            final percent = fraction == null ? '' : ' ${(fraction * 100).round()}%';
+            switch (item.status) {
+              case DownloadStatus.downloading:
+                return AppButton(
+                  label: fraction == null ? 'Downloading\u2026' : '${(fraction * 100).round()}%',
+                  icon: Icons.pause_rounded,
+                  style: AppButtonStyle.secondary,
+                  onDark: true,
+                  onPressed: () => store.pause(id),
+                );
+              case DownloadStatus.queued:
+                return AppButton(
+                  label: 'Waiting\u2026',
+                  icon: Icons.pause_rounded,
+                  style: AppButtonStyle.secondary,
+                  onDark: true,
+                  onPressed: () => store.pause(id),
+                );
+              case DownloadStatus.paused:
+              case DownloadStatus.failed:
+              case DownloadStatus.done:
+                return AppButton(
+                  label: item.hasPartial ? 'Resume$percent' : 'Retry download',
+                  icon: Icons.play_arrow_rounded,
+                  style: AppButtonStyle.secondary,
+                  onDark: true,
+                  onPressed: () => store.resume(id),
+                );
+            }
           },
         );
       },

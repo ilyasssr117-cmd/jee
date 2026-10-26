@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import 'app_settings.dart';
 import 'models.dart';
 import 'stream_headers.dart';
+import 'stream_resolver.dart';
 import 'video_repository.dart';
 
 /// The one live card preview.
@@ -121,13 +122,18 @@ class PreviewManager {
   Future<void> _start(Video video, int generation) async {
     if (generation != _generation) return;
     try {
-      // 1. The short clip the site puts on the card itself (data-preview):
-      //    tiny, no extra page request, cheap for the decoder.
+      final wantSound = AppSettings.instance.previewSound;
       final clip = video.previewUrl.trim();
-      if (clip.isNotEmpty && await _play(video, clip, generation)) return;
+
+      // 1. Sound off: the short clip the site puts on the card (data-preview)
+      //    is tiny and cheap. With sound on we skip it, because those clips
+      //    are very often silent.
+      if (!wantSound && clip.isNotEmpty && await _play(video, clip, generation)) {
+        return;
+      }
       if (generation != _generation) return;
 
-      // 2. Fallback: resolve the real stream and play it.
+      // 2. The real stream (with sound), resolved once and remembered.
       var url = video.streamUrl.trim();
       if (url.isEmpty) {
         url = _urls.remove(video.id) ?? '';
@@ -144,8 +150,14 @@ class PreviewManager {
           }
         }
       }
-      if (generation != _generation || url.isEmpty) return;
-      await _play(video, url, generation);
+      if (generation != _generation) return;
+      if (url.isNotEmpty && await _play(video, url, generation, real: true)) {
+        return;
+      }
+      if (generation != _generation) return;
+
+      // 3. Last resort: the clip, even if it may be silent.
+      if (wantSound && clip.isNotEmpty) await _play(video, clip, generation);
     } catch (error) {
       // A preview is a nicety: on any failure the thumbnail simply stays.
       debugPrint('[PREVIEW] ${video.id}: $error');
@@ -161,7 +173,12 @@ class PreviewManager {
   /// Plays [url] in a fresh controller. Returns true when the attempt is
   /// finished (playing, or no longer wanted) and false when [url] failed and
   /// the caller may try something else.
-  Future<bool> _play(Video video, String url, int generation) async {
+  Future<bool> _play(
+    Video video,
+    String url,
+    int generation, {
+    bool real = false,
+  }) async {
     final uri = Uri.tryParse(url);
     if (uri == null ||
         (uri.scheme != 'http' && uri.scheme != 'https') ||
@@ -169,11 +186,35 @@ class PreviewManager {
       return false;
     }
 
+    var headers = streamHeaders(uri, video.pageUrl);
+    var playUri = uri;
+    if (real) {
+      // The real video needs the same cookie as the player (from the
+      // repository) and talks to its final server directly.
+      try {
+        final page = Uri.tryParse(video.pageUrl?.trim() ?? '');
+        final validPage = page != null &&
+            (page.scheme == 'http' || page.scheme == 'https') &&
+            page.host.isNotEmpty;
+        final cookie = await videoRepository.getPlaybackCookieHeader(
+          streamUri: uri,
+          pageUrl: validPage ? page.toString() : null,
+          userAgent: headers['User-Agent'] ?? '',
+        );
+        if (cookie.isNotEmpty) {
+          headers = <String, String>{...headers, 'Cookie': cookie};
+        }
+      } catch (_) {}
+      if (generation != _generation) return true;
+      playUri = await resolveFinalStreamUri(uri, headers);
+      if (generation != _generation) return true;
+    }
+
     VideoPlayerController? controller;
     try {
       controller = VideoPlayerController.networkUrl(
-        uri,
-        httpHeaders: streamHeaders(uri, video.pageUrl),
+        playUri,
+        httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(
           // With sound it plays like a normal video (works with the silent
           // switch on); without sound it never interrupts the viewer's music.
@@ -191,7 +232,13 @@ class PreviewManager {
       }
       await controller.setVolume(AppSettings.instance.previewSound ? 1.0 : 0.0);
       await controller.setLooping(true);
+      // A long video previews from a little way in (skips logos / intros).
+      final length = controller.value.duration;
+      if (real && length > const Duration(seconds: 90)) {
+        await controller.seekTo(length * 0.12);
+      }
       await controller.play();
+      if (AppSettings.instance.previewSound) await controller.setVolume(1.0);
       if (generation != _generation) {
         unawaited(_scheduleDispose(controller));
         return true;

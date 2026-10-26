@@ -169,28 +169,23 @@ class Scraper {
       };
 
   Future<String> _get(Uri uri) async {
-  ScraperException? lastError;
-
-  // One automatic retry for network hiccups and 5xx responses.
-  for (var attempt = 0; attempt < 2; attempt++) {
-    try {
-      return await _getOnce(uri);
-    } on ScraperException catch (error) {
-      final status = error.statusCode;
-
-      if (status != null && status < 500) {
-        rethrow;
+    ScraperException? lastError;
+    // One automatic retry for network hiccups and 5xx responses.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _getOnce(uri);
+      } on ScraperException catch (error) {
+        final status = error.statusCode;
+        if (status != null && status < 500) {
+          rethrow; // 4xx: retrying is useless.
+        }
+        lastError = error;
       }
-
-      lastError = error;
+      if (attempt == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+      }
     }
-
-    if (attempt == 0) {
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-    }
-  }
-
-  throw lastError ?? const ScraperException('The source could not be read.');
+    throw lastError ?? const ScraperException('The source could not be read.');
   }
 
   Future<String> _getOnce(Uri uri) async {

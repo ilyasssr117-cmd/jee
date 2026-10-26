@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../error_text.dart';
 import '../models.dart';
+import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
 import '../video_repository.dart';
@@ -42,6 +43,9 @@ class SearchOverlayState extends State<SearchOverlay> {
   /// Wait for a typing pause before hitting the network.
   static const Duration _debounce = Duration(milliseconds: 450);
   static const int _pageSize = 12;
+
+  /// No request is sent for a single letter.
+  static const int _minLength = 2;
   static const int _maxEmptyPages = 3;
 
   final TextEditingController _text = TextEditingController();
@@ -91,6 +95,20 @@ class SearchOverlayState extends State<SearchOverlay> {
       return;
     }
     if (value == _query && !_awaiting) return;
+    if (value.length < _minLength) {
+      // Too short to search: wait for more letters, show matching recents.
+      _generation++;
+      setState(() {
+        _hasText = true;
+        _awaiting = true;
+        _query = '';
+        _videos.clear();
+        _loading = false;
+        _hasMore = false;
+        _error = null;
+      });
+      return;
+    }
 
     if (!_hasText || !_awaiting) {
       setState(() {
@@ -183,10 +201,17 @@ class SearchOverlayState extends State<SearchOverlay> {
     });
 
     try {
-      final result = await videoRepository.searchVideos(
-        query: _query,
-        page: _page,
-        pageSize: _pageSize,
+      // The same search (and its next pages) is answered from memory for a
+      // few minutes, and two identical requests never run together.
+      final searchText = _query;
+      final pageIndex = _page;
+      final result = await listingCache.fetch(
+        'search|${searchText.toLowerCase()}|$pageIndex',
+        () => videoRepository.searchVideos(
+          query: searchText,
+          page: pageIndex,
+          pageSize: _pageSize,
+        ),
       );
       if (!mounted || generation != _generation) return;
 
@@ -376,9 +401,42 @@ class SearchOverlayState extends State<SearchOverlay> {
 
     final waiting = _awaiting || (_loading && _videos.isEmpty);
     final error = _error;
+    final typed = SearchHistory.normalize(_text.text).toLowerCase();
+    final suggestions = typed.isEmpty
+        ? const <String>[]
+        : SearchHistory.instance.items
+            .where((term) => term.toLowerCase().startsWith(typed) &&
+                term.toLowerCase() != typed)
+            .take(5)
+            .toList();
 
     final List<Widget> slivers;
-    if (waiting && _videos.isEmpty) {
+    if (waiting && _videos.isEmpty && (suggestions.isNotEmpty || typed.length < _minLength)) {
+      // Typing: matching recent searches (or a hint) instead of a skeleton.
+      slivers = [
+        SliverList(
+          delegate: SliverChildListDelegate([
+            for (final term in suggestions)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: margin),
+                child: _RecentRow(
+                  term: term,
+                  onSelect: () => _useRecent(term),
+                  onDelete: () => SearchHistory.instance.remove(term),
+                ),
+              ),
+            if (suggestions.isEmpty)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: margin, vertical: Gaps.xl),
+                child: Text(
+                  'Keep typing\u2026 (at least $_minLength letters)',
+                  style: AppText.body,
+                ),
+              ),
+          ]),
+        ),
+      ];
+    } else if (waiting && _videos.isEmpty) {
       slivers = [SliverSkeletonGrid(padding: gridPadding)];
     } else if (_videos.isEmpty && error != null) {
       slivers = [

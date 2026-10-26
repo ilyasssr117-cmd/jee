@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -10,12 +11,15 @@ import 'app_theme.dart';
 import 'download_store.dart';
 import 'history_store.dart';
 import 'models.dart';
+import 'native_bridge.dart';
 import 'platform_ui.dart';
 import 'playback_progress.dart';
+import 'stream_resolver.dart';
 import 'touch.dart';
 import 'video_repository.dart';
 import 'res_log.dart';
 import 'widgets/app_button.dart';
+import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
 
 /// Full-screen touch player.
@@ -84,6 +88,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   VideoPlayerController? _controller;
   Timer? _hideTimer;
   Timer? _scrubTimer;
+  // Reload in place: the old picture stays while a fresh connection prepares.
+  final ValueNotifier<bool> _reloading = ValueNotifier<bool>(false);
+  int _reloadToken = 0;
+  Timer? _spinnerTimer;
+  Duration _lastSeen = Duration.zero;
+  Timer? _sleepTimer;
+  int? _sleepMinutes;
+  bool _pipBusy = false;
+
+  // What the active controller is playing (Picture in Picture continues it).
+  String? _activeUrl;
+  Map<String, String>? _activeHeaders;
+  bool _activeIsFile = false;
+
   bool _scrubBadge = true; // Centre badge for bar drags / buttons only.
   String _scrubText = '';
   double _speed = 1.0;
@@ -106,8 +124,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int _initializationGeneration = 0;
 
   // Reload / reconnect state.
-  static const int _maxAutoRetries = 2;
-  static const Duration _stallAfter = Duration(seconds: 12);
+  static const int _maxAutoRetries = 3;
+  static const Duration _stallAfter = Duration(seconds: 8);
   final ValueNotifier<bool> _stalled = ValueNotifier<bool>(false);
   late Video _video = widget.video; // May be replaced by a fresh stream URL.
   late String? _localPath = widget.localPath;
@@ -198,56 +216,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
     VideoPlayerController? controller;
     try {
-      final localPath = _localPath;
-      if (localPath != null && File(localPath).existsSync()) {
-        // Saved on the phone: no network needed.
-        controller = VideoPlayerController.file(File(localPath));
-      } else {
-        _localPath = null;
-        final rawUrl = _video.streamUrl.trim();
-        debugPrint('[PLAYER] URL attempting to play: $rawUrl');
-        if (rawUrl.isEmpty) {
-          throw const _MissingStreamException();
-        }
-        final streamUri = Uri.tryParse(rawUrl);
-        if (streamUri == null ||
-            (streamUri.scheme != 'http' && streamUri.scheme != 'https') ||
-            streamUri.host.isEmpty) {
-          throw const FormatException('Invalid video stream URL.');
-        }
-
-        final pageUri = Uri.tryParse(_video.pageUrl?.trim() ?? '');
-        final validPageUri = pageUri != null &&
-            (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
-            pageUri.host.isNotEmpty;
-        final pageOrigin = validPageUri ? pageUri!.origin : streamUri.origin;
-        final referer = validPageUri ? pageUri!.toString() : '$pageOrigin/';
-
-        final cookieHeader = await videoRepository.getPlaybackCookieHeader(
-          streamUri: streamUri,
-          pageUrl: validPageUri ? pageUri!.toString() : null,
-          userAgent: _userAgent,
-        );
-        if (!mounted || generation != _initializationGeneration || _isLeaving) {
-          return;
-        }
-
-        debugPrint('[PLAYER] Initializing stream host=${streamUri.host}');
-        ResLog.video(
-          pageUrl: _video.pageUrl,
-          videoUrl: streamUri.toString(),
-        );
-        controller = VideoPlayerController.networkUrl(
-          streamUri,
-          httpHeaders: <String, String>{
-            'User-Agent': _userAgent,
-            'Referer': referer,
-            'Origin': pageOrigin,
-            'Accept': '*/*',
-            if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
-          },
-        );
-      }
+      controller = await _createController(generation);
+      if (controller == null) return;
       _controller = controller;
       await controller.initialize().timeout(_initTimeout);
       if (!mounted || generation != _initializationGeneration || _isLeaving) {
@@ -338,8 +308,248 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _revealControls();
   }
 
-  /// Manual reload (Reload button / "Try again"): fresh URL, same position.
+  /// Builds (but does not initialise) a controller for the current video.
+  ///
+  /// The cookie comes from the repository, exactly as before. The stream link
+  /// is resolved once to its final address with the same headers, so the
+  /// player talks to the final server directly (no redirect on every range
+  /// request, and the cookie reaches that server). Returns null when this
+  /// attempt is no longer wanted.
+  Future<VideoPlayerController?> _createController(int generation) async {
+    final localPath = _localPath;
+    if (localPath != null && File(localPath).existsSync()) {
+      // Saved on the phone: no network needed.
+      _activeUrl = localPath;
+      _activeIsFile = true;
+      _activeHeaders = null;
+      return VideoPlayerController.file(File(localPath));
+    }
+    _localPath = null;
+    _activeIsFile = false;
+
+    final rawUrl = _video.streamUrl.trim();
+    debugPrint('[PLAYER] URL attempting to play: $rawUrl');
+    if (rawUrl.isEmpty) {
+      throw const _MissingStreamException();
+    }
+    final streamUri = Uri.tryParse(rawUrl);
+    if (streamUri == null ||
+        (streamUri.scheme != 'http' && streamUri.scheme != 'https') ||
+        streamUri.host.isEmpty) {
+      throw const FormatException('Invalid video stream URL.');
+    }
+
+    final pageUri = Uri.tryParse(_video.pageUrl?.trim() ?? '');
+    final validPageUri = pageUri != null &&
+        (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
+        pageUri.host.isNotEmpty;
+    final pageOrigin = validPageUri ? pageUri!.origin : streamUri.origin;
+    final referer = validPageUri ? pageUri!.toString() : '$pageOrigin/';
+
+    final cookieHeader = await videoRepository.getPlaybackCookieHeader(
+      streamUri: streamUri,
+      pageUrl: validPageUri ? pageUri!.toString() : null,
+      userAgent: _userAgent,
+    );
+    if (!mounted || generation != _initializationGeneration || _isLeaving) {
+      return null;
+    }
+
+    final headers = <String, String>{
+      'User-Agent': _userAgent,
+      'Referer': referer,
+      'Origin': pageOrigin,
+      'Accept': '*/*',
+      if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
+    };
+
+    final finalUri = await resolveFinalStreamUri(streamUri, headers);
+    if (!mounted || generation != _initializationGeneration || _isLeaving) {
+      return null;
+    }
+
+    debugPrint('[PLAYER] Initializing stream host=${finalUri.host}');
+    ResLog.video(pageUrl: _video.pageUrl, videoUrl: finalUri.toString());
+    _activeUrl = finalUri.toString();
+    _activeHeaders = headers;
+    return VideoPlayerController.networkUrl(finalUri, httpHeaders: headers);
+  }
+
+  /// Reload without a black screen. The current picture stays, and the
+  /// play/pause button turns into a spinner while a fresh connection is
+  /// prepared in the background. Tap the button (or pause) to cancel; when
+  /// the new connection is ready it takes over at the exact same moment.
+  Future<void> _reloadInPlace({bool auto = false}) async {
+    final old = _controller;
+    if (old == null || !old.value.isInitialized || _isLeaving) return;
+    if (_reloading.value) return;
+
+    final token = ++_reloadToken;
+    final generation = _initializationGeneration;
+    final wasPlaying = old.value.isPlaying;
+    _reloading.value = true;
+    if (!auto) Haptics.play(Haptic.light);
+    _stallTimer?.cancel();
+    _stalled.value = false;
+
+    bool cancelled() =>
+        token != _reloadToken ||
+        !mounted ||
+        _isLeaving ||
+        generation != _initializationGeneration;
+
+    VideoPlayerController? fresh;
+    try {
+      if (_localPath == null) {
+        try {
+          final next = await videoRepository.resolveForPlayback(
+            _video.copyWith(streamUrl: ''),
+          );
+          if (next.streamUrl.trim().isNotEmpty) _video = next;
+        } catch (error) {
+          debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
+        }
+      }
+      if (cancelled()) return;
+
+      fresh = await _createController(generation);
+      if (fresh == null || cancelled()) {
+        if (fresh != null) await _disposeController(fresh);
+        return;
+      }
+      await fresh.initialize().timeout(_initTimeout);
+      if (cancelled()) {
+        await _disposeController(fresh);
+        return;
+      }
+      await fresh.setLooping(false);
+      final target = old.value.position;
+      if (target > Duration.zero) await fresh.seekTo(target);
+      if (_speed != 1.0) await fresh.setPlaybackSpeed(_speed);
+      if (wasPlaying) await fresh.play();
+      if (cancelled()) {
+        await _disposeController(fresh);
+        return;
+      }
+
+      // Swap: the new connection takes over where the old one was.
+      old.removeListener(_onControllerChanged);
+      fresh.addListener(_onControllerChanged);
+      _controller = fresh;
+      _retryBase = fresh.value.position;
+      _buffering.value = false;
+      _stalled.value = false;
+      _spinnerTimer?.cancel();
+      _spinnerTimer = null;
+      if (mounted) setState(() => _problem = null);
+      unawaited(_disposeController(old));
+      _onControllerChanged();
+      fresh = null;
+    } catch (error) {
+      debugPrint('[PLAYER] Reload in place failed: ${error.runtimeType}');
+      if (fresh != null) await _disposeController(fresh);
+      if (!cancelled() && mounted) {
+        showToast(
+          context,
+          'Couldn\u2019t reconnect. Try again in a moment.',
+          aboveBar: false,
+        );
+      }
+    } finally {
+      if (token == _reloadToken && mounted) _reloading.value = false;
+    }
+  }
+
+  /// The viewer tapped the spinner / paused: stop reloading, keep the video
+  /// paused where it is.
+  void _cancelReload() {
+    if (!_reloading.value) return;
+    _reloadToken++;
+    _reloading.value = false;
+    Haptics.play(Haptic.light);
+    final controller = _controller;
+    if (controller != null && controller.value.isInitialized) {
+      unawaited(_safeControllerAction(controller.pause));
+    }
+  }
+
+  /// Picture in Picture: a second native player continues from the exact
+  /// position, this screen closes (nothing stays on screen), and closing the
+  /// PiP window releases everything.
+  Future<void> _enterPip() async {
+    final controller = _controller;
+    final url = _activeUrl;
+    if (controller == null ||
+        url == null ||
+        !controller.value.isInitialized ||
+        _isLeaving ||
+        _pipBusy ||
+        _reloading.value) {
+      return;
+    }
+    _pipBusy = true;
+    final position = controller.value.position;
+    try {
+      await controller.pause(); // The sound must never play twice.
+      final started = await NativeBridge.instance.startPip(
+        video: _video,
+        url: url,
+        isFile: _activeIsFile,
+        headers: _activeHeaders ?? const <String, String>{},
+        position: position,
+        rate: _speed,
+        queue: widget.queue,
+      );
+      if (!mounted || _isLeaving) return;
+      if (started) {
+        await _leave();
+        return;
+      }
+      showToast(
+        context,
+        'Picture in Picture isn\u2019t available right now.',
+        aboveBar: false,
+      );
+      await controller.play();
+    } catch (_) {
+      try {
+        await controller.play();
+      } catch (_) {}
+    } finally {
+      _pipBusy = false;
+    }
+  }
+
+  void _setSleepTimer(int? minutes) {
+    _sleepTimer?.cancel();
+    setState(() => _sleepMinutes = minutes);
+    if (minutes == null) return;
+    _sleepTimer = Timer(Duration(minutes: minutes), () {
+      if (!mounted || _isLeaving) return;
+      final controller = _controller;
+      if (controller != null && controller.value.isInitialized) {
+        unawaited(_safeControllerAction(controller.pause));
+      }
+      setState(() => _sleepMinutes = null);
+      showToast(context, 'Sleep timer: paused', aboveBar: false);
+    });
+  }
+
+  /// Manual reload (Reload button / "Try again"). A healthy player reloads in
+  /// place (no black screen); a broken one restarts at the same position.
   void _reload() {
+    if (_reloading.value) {
+      _cancelReload();
+      return;
+    }
+    final controller = _controller;
+    if (controller != null &&
+        controller.value.isInitialized &&
+        _problem == null &&
+        !_loading) {
+      unawaited(_reloadInPlace());
+      return;
+    }
     _autoRetries = 0;
     _reconnecting = false;
     _manualReload = true;
@@ -348,10 +558,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   /// Automatic recovery from a stream that dropped mid-playback.
   void _autoReconnect() {
-    if (!mounted || _isLeaving) return;
-    // Stop reacting to the broken controller while it is being replaced.
-    _controller?.removeListener(_onControllerChanged);
+    if (!mounted || _isLeaving || _reloading.value) return;
     if (_autoRetries >= _maxAutoRetries) {
+      _controller?.removeListener(_onControllerChanged);
       setState(() {
         _reconnecting = false;
         _loading = false;
@@ -364,6 +573,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return;
     }
     _autoRetries++;
+    final controller = _controller;
+    if (controller != null && controller.value.isInitialized && !_loading) {
+      // Quietly: the picture stays and the play button shows the spinner.
+      unawaited(_reloadInPlace(auto: true));
+      return;
+    }
+    controller?.removeListener(_onControllerChanged);
     setState(() => _reconnecting = true);
     unawaited(_initializePlayer(refreshSource: true));
   }
@@ -414,7 +630,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
     _stallTimer?.cancel();
+    _spinnerTimer?.cancel();
+    _sleepTimer?.cancel();
     _autoplayTimer?.cancel();
+    ++_reloadToken;
     _saveProgress();
     PlaybackProgress.instance.flush();
 
@@ -529,7 +748,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final value = controller.value;
 
     if (value.hasError) {
-      if (_problem == null && !_loading) {
+      if (_problem == null && !_loading && !_reloading.value) {
         debugPrint('[PLAYER] Controller error: ${value.errorDescription}');
         _autoReconnect();
       }
@@ -553,15 +772,32 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         value.position >= value.duration - const Duration(milliseconds: 800);
 
     _playing.value = value.isPlaying;
-    final buffering = value.isBuffering && !atEnd;
-    if (_buffering.value != buffering) {
-      _buffering.value = buffering;
-      _stallTimer?.cancel();
-      if (buffering) {
-        _stallTimer = Timer(_stallAfter, _onStalled);
-      } else {
+
+    // The spinner only appears when playback has really stopped. AVPlayer
+    // flips `isBuffering` for a moment even while the picture is moving, which
+    // used to flash the spinner on a healthy video. Moving position = healthy.
+    final moving = value.position != _lastSeen && value.isPlaying;
+    _lastSeen = value.position;
+    final buffering = value.isBuffering && !atEnd && !moving;
+    if (!buffering) {
+      _spinnerTimer?.cancel();
+      _spinnerTimer = null;
+      if (_buffering.value) {
+        _buffering.value = false;
+        _stallTimer?.cancel();
         _stalled.value = false;
       }
+    } else if (!_buffering.value && _spinnerTimer == null) {
+      _spinnerTimer = Timer(const Duration(milliseconds: 700), () {
+        _spinnerTimer = null;
+        final current = _controller;
+        if (!mounted || _isLeaving || current == null) return;
+        if (current.value.isBuffering && !_completed && !_buffering.value) {
+          _buffering.value = true;
+          _stallTimer?.cancel();
+          _stallTimer = Timer(_stallAfter, _onStalled);
+        }
+      });
     }
 
     final finished = atEnd && !value.isPlaying;
@@ -949,6 +1185,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     ),
                 ],
               ),
+              const SizedBox(height: Gaps.lg),
+              Text('Sleep timer', style: darkText.title),
+              const SizedBox(height: Gaps.md),
+              Wrap(
+                spacing: Gaps.sm,
+                runSpacing: Gaps.sm,
+                children: [
+                  for (final minutes in const <int?>[null, 15, 30, 60])
+                    AppChip(
+                      label: minutes == null ? 'Off' : '$minutes min',
+                      selected: _sleepMinutes == minutes,
+                      onDark: true,
+                      onPressed: () {
+                        _setSleepTimer(minutes);
+                        Navigator.of(sheetContext).pop();
+                      },
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -975,6 +1230,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _stallTimer?.cancel();
     _autoplayTimer?.cancel();
     _flashTimer?.cancel();
+    _spinnerTimer?.cancel();
+    _sleepTimer?.cancel();
+    ++_reloadToken;
     _saveProgress();
     PlaybackProgress.instance.flush();
     _isLeaving = true;
@@ -991,6 +1249,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _playing.dispose();
     _buffering.dispose();
     _boost.dispose();
+    _reloading.dispose();
     _dragging.dispose();
     _flash.dispose();
     unawaited(applyBrowseOrientation());
@@ -1400,17 +1659,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     ),
                     SizedBox(width: gap),
                     ValueListenableBuilder<bool>(
-                      valueListenable: _playing,
-                      builder: (context, playing, _) => RoundIconButton(
-                        icon: playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        label: playing ? 'Pause' : 'Play',
-                        size: 64,
-                        iconSize: 40,
-                        background: const Color(0x4DFFFFFF),
-                        onTap: () => unawaited(_togglePlayback()),
-                      ),
+                      valueListenable: _reloading,
+                      builder: (context, reloading, _) {
+                        if (reloading) {
+                          return _ReloadingButton(onTap: _cancelReload);
+                        }
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: _playing,
+                          builder: (context, playing, _) => RoundIconButton(
+                            icon: playing
+                                ? Icons.pause_rounded
+                                : Icons.play_arrow_rounded,
+                            label: playing ? 'Pause' : 'Play',
+                            size: 64,
+                            iconSize: 40,
+                            background: const Color(0x4DFFFFFF),
+                            onTap: () => unawaited(_togglePlayback()),
+                          ),
+                        );
+                      },
                     ),
                     SizedBox(width: gap),
                     RoundIconButton(
@@ -1514,6 +1781,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ),
           ),
         ),
+        if (NativeBridge.instance.pipSupported) ...[
+          const SizedBox(width: 8),
+          RoundIconButton(
+            icon: Icons.picture_in_picture_alt_rounded,
+            label: 'Picture in Picture',
+            onTap: () => unawaited(_enterPip()),
+          ),
+        ],
         const SizedBox(width: 8),
         RoundIconButton(
           icon: Icons.screen_rotation_rounded,
@@ -1739,6 +2014,34 @@ class _ProgressRow extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Replaces the play/pause button while a reload runs. Tap = cancel + pause.
+class _ReloadingButton extends StatelessWidget {
+  const _ReloadingButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      semanticLabel: 'Cancel reload',
+      pressedScale: 0.9,
+      onTap: onTap,
+      child: Container(
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0x4DFFFFFF),
+          border: Border.all(color: const Color(0x26FFFFFF)),
+        ),
+        child: const Center(
+          child: CupertinoActivityIndicator(radius: 14, color: Colors.white),
+        ),
+      ),
     );
   }
 }

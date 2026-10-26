@@ -7,6 +7,7 @@ import '../download_store.dart';
 import '../history_store.dart';
 import '../playback_progress.dart';
 import '../preview_manager.dart';
+import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
 import 'dialogs.dart';
@@ -28,6 +29,7 @@ class _SettingsViewState extends State<SettingsView> {
       ..clear()
       ..clearLiveImages();
     PreviewManager.instance.clearCaches();
+    clearRequestCaches();
     setState(() {});
     showToast(context, 'Cache cleared');
   }
@@ -149,7 +151,7 @@ class _SettingsViewState extends State<SettingsView> {
                   icon: Icons.cleaning_services_rounded,
                   color: const Color(0xFFF29900),
                   title: 'Clear cache',
-                  subtitle: 'Images and previews \u00b7 ${formatBytes(cacheBytes)}',
+                  subtitle: 'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
                   onTap: _clearImageCache,
                 ),
                 _Row(

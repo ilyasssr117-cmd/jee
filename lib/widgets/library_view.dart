@@ -555,6 +555,22 @@ class _DownloadRow extends StatelessWidget {
   final DownloadItem item;
   final VoidCallback? onTap;
 
+  static Widget _bar(DownloadItem item, {required bool waiting}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(2),
+      child: LinearProgressIndicator(
+        minHeight: 3,
+        value: waiting ? 0 : item.progress,
+        color: AppColors.accent,
+        backgroundColor: AppColors.surfaceHigh,
+      ),
+    );
+  }
+
+  static String _amount(DownloadItem item, int done) => item.bytesTotal > 0
+      ? '${formatBytes(done)} of ${formatBytes(item.bytesTotal)}'
+      : formatBytes(done);
+
   @override
   Widget build(BuildContext context) {
     final store = DownloadStore.instance;
@@ -567,27 +583,44 @@ class _DownloadRow extends StatelessWidget {
           title: video.title,
           subtitle: '${formatBytes(item.bytesTotal)} \u00b7 Saved offline',
           onTap: onTap,
-          trailing: const Padding(
-            padding: EdgeInsets.all(6),
-            child: Icon(
-              Icons.download_done_rounded,
-              size: 20,
-              color: AppColors.accent,
+          // "Add to device": the iOS share sheet (Save Video / Save to Files).
+          trailing: _IconAction(
+            icon: Icons.ios_share_rounded,
+            label: 'Save to phone',
+            onTap: () async {
+              final ok = await store.shareFile(video.id);
+              if (!ok && context.mounted) {
+                showToast(context, 'Couldn\u2019t open the share sheet.');
+              }
+            },
+          ),
+        );
+
+      case DownloadStatus.failed:
+      case DownloadStatus.paused:
+        final paused = item.status == DownloadStatus.paused;
+        return ValueListenableBuilder<int>(
+          valueListenable: item.bytes,
+          builder: (context, done, _) => _VideoRow(
+            video: video,
+            title: video.title,
+            subtitle: paused
+                ? (item.hasPartial
+                    ? 'Paused \u00b7 ${_amount(item, done)}'
+                    : 'Paused')
+                : (item.error ?? 'Download failed'),
+            subtitleColor: paused ? null : AppColors.error,
+            below: item.hasPartial ? _bar(item, waiting: false) : null,
+            trailing: _IconAction(
+              icon: item.hasPartial
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.refresh_rounded,
+              label: 'Resume download',
+              onTap: () => store.resume(video.id),
             ),
           ),
         );
-      case DownloadStatus.failed:
-        return _VideoRow(
-          video: video,
-          title: video.title,
-          subtitle: item.error ?? 'Download failed',
-          subtitleColor: AppColors.error,
-          trailing: _IconAction(
-            icon: Icons.refresh_rounded,
-            label: 'Retry',
-            onTap: () => store.retry(video.id),
-          ),
-        );
+
       case DownloadStatus.queued:
       case DownloadStatus.downloading:
         return ValueListenableBuilder<int>(
@@ -598,25 +631,17 @@ class _DownloadRow extends StatelessWidget {
             final text = waiting
                 ? 'Waiting\u2026'
                 : (fraction != null
-                    ? '${(fraction * 100).round()}% \u00b7 ${formatBytes(done)} of ${formatBytes(item.bytesTotal)}'
+                    ? '${(fraction * 100).round()}% \u00b7 ${_amount(item, done)}'
                     : 'Downloading \u00b7 ${formatBytes(done)}');
             return _VideoRow(
               video: video,
               title: video.title,
               subtitle: text,
-              below: ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  minHeight: 3,
-                  value: waiting ? 0 : fraction,
-                  color: AppColors.accent,
-                  backgroundColor: AppColors.surfaceHigh,
-                ),
-              ),
+              below: _bar(item, waiting: waiting),
               trailing: _IconAction(
-                icon: Icons.close_rounded,
-                label: 'Cancel download',
-                onTap: () => store.remove(video.id),
+                icon: Icons.pause_circle_outline_rounded,
+                label: 'Pause download',
+                onTap: () => store.pause(video.id),
               ),
             );
           },

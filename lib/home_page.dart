@@ -9,6 +9,7 @@ import 'local_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
+import 'request_cache.dart';
 import 'touch.dart';
 import 'preview_manager.dart';
 import 'video_details_page.dart';
@@ -16,6 +17,7 @@ import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/bottom_bar.dart';
 import 'widgets/category_bar.dart';
+import 'widgets/continue_row.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/home_hero.dart';
 import 'widgets/library_view.dart';
@@ -133,10 +135,15 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final result = await videoRepository.getVideos(
-        page: requestedPage,
-        pageSize: _pageSize,
-        category: _category == 'All' ? null : _category,
+      // Cached for a few minutes: coming back to a category, or scrolling
+      // back up, never repeats a request.
+      final result = await listingCache.fetch(
+        'home|$_category|$requestedPage',
+        () => videoRepository.getVideos(
+          page: requestedPage,
+          pageSize: _pageSize,
+          category: _category == 'All' ? null : _category,
+        ),
       );
       if (!mounted || requestGeneration != _generation) return;
 
@@ -174,10 +181,14 @@ class _HomePageState extends State<HomePage> {
     Haptics.play(Haptic.light);
     final generation = ++_generation;
     try {
-      final result = await videoRepository.getVideos(
-        page: 0,
-        pageSize: _pageSize,
-        category: _category == 'All' ? null : _category,
+      final result = await listingCache.fetch(
+        'home|$_category|0',
+        () => videoRepository.getVideos(
+          page: 0,
+          pageSize: _pageSize,
+          category: _category == 'All' ? null : _category,
+        ),
+        force: true, // Pull-to-refresh always asks the server.
       );
       if (!mounted || generation != _generation) return;
       final seen = <String>{};
@@ -280,6 +291,18 @@ class _HomePageState extends State<HomePage> {
           setState(() => _section = _Section.settings);
         }
     }
+  }
+
+  /// "Continue watching": resume at the saved second.
+  Future<void> _resume(Video video) async {
+    final error = await launchPlayer(
+      context,
+      video,
+      startAt: PlaybackProgress.instance.resumePosition(video.id),
+    );
+    if (!mounted) return;
+    setState(() {}); // Progress bars and the row itself.
+    if (error != null) _toast(error);
   }
 
   Future<void> _playFeatured() async {
@@ -453,6 +476,7 @@ class _HomePageState extends State<HomePage> {
             },
           ),
         ),
+        SliverToBoxAdapter(child: ContinueRow(onPlay: _resume)),
         if (showCategories)
           SliverToBoxAdapter(
             child: Padding(

@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import '../download_store.dart';
 import '../models.dart';
 
 /// Thumbnail with consistent clipping, a fade-in, and a designed placeholder
@@ -39,6 +42,29 @@ class VideoArtwork extends StatelessWidget {
 
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
+        // A downloaded video keeps its own copy of the thumbnail: it shows
+        // instantly, works offline and costs no request.
+        final saved = DownloadStore.instance.thumbPath(video.id);
+        if (saved != null) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(color: AppColors.surfaceHigh),
+              Image.file(
+                File(saved),
+                fit: BoxFit.cover,
+                cacheWidth: constraints.maxWidth.isFinite
+                    ? (constraints.maxWidth * dpr).round().clamp(128, 1280).toInt()
+                    : null,
+                gaplessPlayback: true,
+                excludeFromSemantics: true,
+                errorBuilder: (context, error, stackTrace) =>
+                    _Placeholder(video: video, showLabel: showLabel),
+              ),
+            ],
+          );
+        }
+
         final url = video.thumbnailUrl?.trim() ?? '';
         final uri = Uri.tryParse(url);
         final valid = uri != null &&

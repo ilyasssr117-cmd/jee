@@ -28,7 +28,7 @@ abstract class VideoCatalogRepository {
 /// with --dart-define=VIDEO_SOURCE_BASE_URL=https://your-source.example.
 const String sourceBaseUrl = String.fromEnvironment(
   'VIDEO_SOURCE_BASE_URL',
-  defaultValue: 'https://mynae.com',
+  defaultValue: 'https://x-fetish.tube',
 );
 
 List<String> _parseCommaSeparated(String value) => value

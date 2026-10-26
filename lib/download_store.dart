@@ -315,16 +315,27 @@ class DownloadStore extends ChangeNotifier {
         debugPrint('[DOWNLOADS] Cookie lookup failed (${error.runtimeType}).');
       }
       if (_cancelled.contains(id)) throw const _Cancelled();
-      final request = http.Request('GET', uri)
-        ..headers.addAll(<String, String>{
-          ...headers,
-          if (cookie.isNotEmpty) 'Cookie': cookie,
-        });
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 30));
+      // Same headers as the player (+ Range, like the video player asks).
+      // Redirects are followed by hand so the cookie and headers survive a
+      // hop to another host (the HTTP client would drop them).
+      final requestHeaders = <String, String>{
+        ...headers,
+        'Range': 'bytes=0-',
+        if (cookie.isNotEmpty) 'Cookie': cookie,
+      };
+      debugPrint(
+        '[DOWNLOADS] GET host=${uri.host} cookie=${cookie.isNotEmpty ? 'yes' : 'NO'}',
+      );
+      final response = await _open(client, uri, requestHeaders);
+      debugPrint(
+        '[DOWNLOADS] status=${response.statusCode} '
+        'type=${response.headers['content-type']} '
+        'length=${response.contentLength}',
+      );
       if (response.statusCode != 200 && response.statusCode != 206) {
         throw _DownloadFailure(
-          'The server refused the download (${response.statusCode}).',
+          'The server refused the download (${response.statusCode}'
+          '${cookie.isEmpty ? ', no cookie' : ''}).',
         );
       }
       final type = (response.headers['content-type'] ?? '').toLowerCase();
@@ -397,6 +408,29 @@ class DownloadStore extends ChangeNotifier {
       _persist();
       notifyListeners();
     }
+  }
+
+  Future<http.StreamedResponse> _open(
+    http.Client client,
+    Uri uri,
+    Map<String, String> headers,
+  ) async {
+    var current = uri;
+    for (var hop = 0; hop < 6; hop++) {
+      final request = http.Request('GET', current)
+        ..followRedirects = false
+        ..headers.addAll(headers);
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 30));
+      final location = response.headers['location'];
+      if (response.isRedirect && location != null && location.isNotEmpty) {
+        await response.stream.drain<void>();
+        current = current.resolve(location);
+        continue;
+      }
+      return response;
+    }
+    throw const _DownloadFailure('Too many redirects.');
   }
 
   Future<void> _deleteFile(DownloadItem entry) async {

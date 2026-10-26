@@ -1,21 +1,19 @@
-name: Add iOS Platform
+```yaml
+name: Fix Flutter + Build iOS IPA
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: write
+  push:
+    branches:
+      - main
 
 jobs:
-  add-ios:
+  fix-and-build:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -25,93 +23,84 @@ jobs:
           architecture: arm64
           cache: true
 
-      - name: Check existing iOS
-        shell: bash
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Fix scrollCacheExtent migration
+        shell: python
         run: |
-          if [ -d "ios" ]; then
-            echo "ios/ already exists."
-            echo "Nothing to create."
-            exit 0
-          fi
+          from pathlib import Path
 
-          echo "ios/ does not exist."
-          echo "Creating iOS platform..."
+          files = [
+              "lib/home_page.dart",
+              "lib/video_details_page.dart",
+              "lib/widgets/library_view.dart",
+              "lib/widgets/search_overlay.dart",
+              "lib/widgets/favorites_view.dart",
+          ]
 
-      - name: Create iOS platform
-        shell: bash
+          for filename in files:
+              path = Path(filename)
+
+              if not path.exists():
+                  continue
+
+              text = path.read_text(encoding="utf-8")
+
+              # Fix incorrect migration:
+              # cacheExtent: ... -> scrollCacheExtent: ...
+              text = text.replace(
+                  "cacheExtent:",
+                  "scrollCacheExtent:"
+              )
+
+              # Never allow the nonexistent Flutter identifier.
+              text = text.replace(
+                  "ScrollCacheExtent",
+                  ""
+              )
+
+              path.write_text(text, encoding="utf-8")
+
+      - name: Fix Dart formatting
+        run: dart format lib
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Build iOS
         run: |
-          set -e
+          flutter build ios \
+            --release \
+            --no-codesign
 
-          flutter create \
-            --platforms=ios \
-            --project-name watch_tube \
-            --org com.tv \
-            --no-pub \
-            .
-
-          echo ""
-          echo "===== iOS directory ====="
-          ls -la ios
-
-          echo ""
-          echo "===== Runner directory ====="
-          ls -la ios/Runner
-
-      - name: Verify iOS platform
-        shell: bash
-        run: |
-          set -e
-
-          echo "Checking iOS platform..."
-
-          if [ ! -d "ios" ]; then
-            echo "ERROR: ios directory was not created."
-            exit 1
-          fi
-
-          if [ ! -d "ios/Runner" ]; then
-            echo "ERROR: ios/Runner was not created."
-            exit 1
-          fi
-
-          if [ ! -f "ios/Runner.xcodeproj/project.pbxproj" ]; then
-            echo "ERROR: Xcode project was not created."
-            exit 1
-          fi
-
-          if [ ! -f "ios/Runner/Info.plist" ]; then
-            echo "ERROR: Runner/Info.plist was not created."
-            exit 1
-          fi
-
-          echo ""
-          echo "iOS platform verified successfully."
-
-      - name: Commit iOS platform
+      - name: Create IPA
         shell: bash
         run: |
           set -e
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf Payload
+          rm -f TV-Tube.ipa
 
-          git add ios/
+          mkdir -p Payload
 
-          if git diff --cached --quiet; then
-            echo "No iOS changes to commit."
-            exit 0
-          fi
+          cp -R build/ios/iphoneos/Runner.app \
+            Payload/Runner.app
 
-          git commit -m "Add iOS platform"
+          cd Payload
+          zip -r -q ../TV-Tube.ipa Runner.app
+          cd ..
 
-      - name: Push iOS platform
-        shell: bash
-        run: |
-          set -e
+          ls -lh TV-Tube.ipa
 
-          git push origin HEAD:main
-
-          echo ""
-          echo "================================"
-          echo "iOS platform added successfully!"
-          echo "================================"
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-Tube-IPA
+          path: TV-Tube.ipa
+          if-no-files-found: error
+```

@@ -89,16 +89,15 @@ class _PressableState extends State<Pressable> {
             GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
           () => TapGestureRecognizer(),
           (TapGestureRecognizer tap) {
-            tap
-              ..onTapDown = (_) => _set(true)
-              ..onTapCancel = () => _set(false)
-              ..onTapUp = (_) => _set(false)
-              ..onTap = widget.onTap == null
-                  ? null
-                  : () {
-                      Haptics.play(widget.haptic);
-                      widget.onTap!();
-                    };
+            tap.onTapDown = (_) => _set(true);
+            tap.onTapCancel = () => _set(false);
+            tap.onTapUp = (_) => _set(false);
+            tap.onTap = widget.onTap == null
+                ? null
+                : () {
+                    Haptics.play(widget.haptic);
+                    widget.onTap!();
+                  };
           },
         ),
         if (widget.onLongPress != null)

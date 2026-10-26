@@ -144,7 +144,7 @@ class PreviewManager {
       await _play(video, url, generation);
     } catch (error) {
       // A preview is a nicety: on any failure the thumbnail simply stays.
-      debugPrint('[PREVIEW] ${video.id}: request failed (${error.runtimeType}).')
+      debugPrint('[PREVIEW] ${video.id}: request failed (${error.runtimeType}).');
     } finally {
       if (generation == _generation) {
         loading.value = false;

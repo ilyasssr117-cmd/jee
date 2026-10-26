@@ -1,4 +1,3 @@
-
 name: Fix Flutter + Build iOS IPA
 
 on:
@@ -26,10 +25,11 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Fix scrollCacheExtent migration
+      - name: Fix scrollCacheExtent
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           files = [
               "lib/home_page.dart",
@@ -47,22 +47,56 @@ jobs:
 
               text = path.read_text(encoding="utf-8")
 
-              # Fix incorrect migration:
-              # cacheExtent: ... -> scrollCacheExtent: ...
-              text = text.replace(
-                  "cacheExtent:",
-                  "scrollCacheExtent:"
+              # Convert:
+              # cacheExtent: 500
+              # or:
+              # cacheExtent: ScrollCacheExtent.pixels(500)
+              #
+              # into:
+              # scrollCacheExtent: 500
+
+              text = re.sub(
+                  r'\bcacheExtent\s*:\s*ScrollCacheExtent\.pixels\(\s*([^)]*?)\s*\)',
+                  r'scrollCacheExtent: \1',
+                  text,
               )
 
-              # Never allow the nonexistent Flutter identifier.
-              text = text.replace(
-                  "ScrollCacheExtent",
-                  ""
+              text = re.sub(
+                  r'\bscrollCacheExtent\s*:\s*ScrollCacheExtent\.pixels\(\s*([^)]*?)\s*\)',
+                  r'scrollCacheExtent: \1',
+                  text,
+              )
+
+              # Fix the exact broken result produced by the previous workflow:
+              # scrollCacheExtent: .pixels(500)
+              text = re.sub(
+                  r'\bscrollCacheExtent\s*:\s*\.pixels\(\s*([^)]*?)\s*\)',
+                  r'scrollCacheExtent: \1',
+                  text,
+              )
+
+              # If the old property still exists with a normal value,
+              # migrate only the property name.
+              text = re.sub(
+                  r'\bcacheExtent\s*:',
+                  'scrollCacheExtent:',
+                  text,
               )
 
               path.write_text(text, encoding="utf-8")
 
-      - name: Fix Dart formatting
+      - name: Show fixed lines
+        run: |
+          echo "Checking scrollCacheExtent..."
+          grep -RIn "scrollCacheExtent" lib || true
+          echo ""
+          echo "Checking for broken .pixels syntax..."
+          if grep -RIn "scrollCacheExtent: \.pixels" lib; then
+            echo "ERROR: Broken .pixels syntax still exists."
+            exit 1
+          fi
+
+      - name: Format Dart
         run: dart format lib
 
       - name: Analyze
@@ -95,6 +129,7 @@ jobs:
           zip -r -q ../TV-Tube.ipa Runner.app
           cd ..
 
+          echo "IPA created:"
           ls -lh TV-Tube.ipa
 
       - name: Upload IPA

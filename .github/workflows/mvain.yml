@@ -1,0 +1,95 @@
+```yaml
+name: Add iOS Platform
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  add-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          architecture: arm64
+          cache: true
+
+      - name: Check iOS
+        shell: bash
+        run: |
+          if [ -d "ios" ]; then
+            echo "ios/ already exists."
+            exit 0
+          fi
+
+          echo "ios/ does not exist. Creating iOS platform..."
+
+      - name: Create iOS platform
+        shell: bash
+        run: |
+          if [ ! -d "ios" ]; then
+            flutter create \
+              --platforms=ios \
+              --project-name watch_tube \
+              --org com.tv \
+              --no-pub \
+              .
+          fi
+
+      - name: Verify iOS files
+        shell: bash
+        run: |
+          test -d ios
+          test -f ios/Podfile
+          test -f ios/Runner.xcodeproj/project.pbxproj
+          test -f ios/Runner/Info.plist
+
+          echo "iOS platform successfully added."
+
+      - name: Configure iOS deployment target
+        shell: bash
+        run: |
+          if grep -q "^platform :ios" ios/Podfile; then
+            sed -i '' "s/^platform :ios.*/platform :ios, '15.0'/" ios/Podfile
+          else
+            sed -i '' "1i\\
+platform :ios, '15.0'\\
+" ios/Podfile
+          fi
+
+      - name: Get dependencies
+        run: |
+          flutter pub get
+
+      - name: Commit iOS platform
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ios
+
+          if git diff --cached --quiet; then
+            echo "No iOS changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Add iOS platform to Flutter project"
+
+      - name: Push iOS platform
+        shell: bash
+        run: |
+          git push origin HEAD:main
+```

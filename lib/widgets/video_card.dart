@@ -38,7 +38,7 @@ abstract final class VideoCardMetrics {
 /// Video card: 16:9 thumbnail, two-line title, one metadata line.
 ///
 /// * Tap ........ open the video.
-/// * Hold ....... play a muted preview right here (haptic buzz).
+/// * Hold ....... play a preview right here (haptic buzz).
 /// * Star ....... top-right corner button toggles the favourite.
 class VideoCard extends StatelessWidget {
   const VideoCard({super.key, required this.video, required this.onTap});
@@ -80,7 +80,7 @@ class VideoCard extends StatelessWidget {
                   VideoArtwork(video: video),
                   PreviewSlot(video: video),
                   if (completed)
-                    Positioned(
+                    const Positioned(
                       left: 6,
                       top: 6,
                       child: _Badge(
@@ -259,9 +259,9 @@ class _ProgressBar extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: FractionallySizedBox(
             widthFactor: fraction,
-            child: DecoratedBox(
+            child: const DecoratedBox(
               decoration: BoxDecoration(color: AppColors.accent),
-              child: const SizedBox.expand(),
+              child: SizedBox.expand(),
             ),
           ),
         ),

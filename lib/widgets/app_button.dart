@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -16,6 +17,7 @@ class AppButton extends StatelessWidget {
     this.loading = false,
     this.iconColor,
     this.expand = false,
+    this.onDark = false,
   });
 
   final String label;
@@ -30,9 +32,21 @@ class AppButton extends StatelessWidget {
   /// Fill the available width instead of hugging the label.
   final bool expand;
 
+  /// Sits on top of artwork / video: secondary buttons turn translucent white.
+  final bool onDark;
+
   @override
   Widget build(BuildContext context) {
     final primary = style == AppButtonStyle.primary;
+    final Color foreground = primary || onDark
+        ? Colors.white
+        : AppColors.textPrimary;
+    final Color background = primary
+        ? AppColors.accentStrong
+        : (onDark ? const Color(0x2EFFFFFF) : AppColors.surfaceHigh);
+    final Color border = primary
+        ? Colors.transparent
+        : (onDark ? const Color(0x26FFFFFF) : AppColors.outline);
     return Pressable(
       semanticLabel: label,
       // Ignore taps while busy so a slow request can't be started twice.
@@ -42,30 +56,21 @@ class AppButton extends StatelessWidget {
         height: 40,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: primary ? AppColors.accentStrong : AppColors.surfaceHigh,
+          color: background,
           borderRadius: BorderRadius.circular(Radii.button),
-          border: Border.all(
-            color: primary ? Colors.transparent : AppColors.outline,
-          ),
+          border: Border.all(color: border),
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (loading)
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
+              CupertinoActivityIndicator(radius: 8, color: foreground)
             else if (icon != null)
               Icon(
                 icon,
                 size: 18,
-                color: iconColor ?? (primary ? Colors.white : AppColors.textPrimary),
+                color: iconColor ?? foreground,
               ),
             if (loading || icon != null) const SizedBox(width: 6),
             Flexible(
@@ -73,9 +78,7 @@ class AppButton extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.label.copyWith(
-                  color: primary ? Colors.white : AppColors.textPrimary,
-                ),
+                style: AppText.label.copyWith(color: foreground),
               ),
             ),
           ],
@@ -92,11 +95,15 @@ class AppChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onPressed,
+    this.onDark = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onPressed;
+
+  /// Sits on a dark sheet / video: unselected chips are translucent white.
+  final bool onDark;
 
   @override
   Widget build(BuildContext context) {
@@ -112,10 +119,14 @@ class AppChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? AppColors.accentStrong : AppColors.surfaceHigh,
+          color: selected
+              ? AppColors.accentStrong
+              : (onDark ? const Color(0x1FFFFFFF) : AppColors.surfaceHigh),
           borderRadius: BorderRadius.circular(Radii.pill),
           border: Border.all(
-            color: selected ? Colors.transparent : AppColors.outline,
+            color: selected
+                ? Colors.transparent
+                : (onDark ? const Color(0x1FFFFFFF) : AppColors.outline),
           ),
         ),
         child: Text(
@@ -125,7 +136,7 @@ class AppChip extends StatelessWidget {
           style: AppText.label.copyWith(
             fontSize: 13,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-            color: selected ? Colors.white : AppColors.textPrimary,
+            color: selected || onDark ? Colors.white : AppColors.textPrimary,
           ),
         ),
       ),
@@ -143,7 +154,7 @@ class RoundIconButton extends StatelessWidget {
     this.size = 38,
     this.iconSize,
     this.background = const Color(0x8C000000),
-    this.color,
+    this.color = Colors.white,
     this.haptic = Haptic.light,
   });
 
@@ -153,7 +164,7 @@ class RoundIconButton extends StatelessWidget {
   final double size;
   final double? iconSize;
   final Color background;
-  final Color? color;
+  final Color color;
   final Haptic haptic;
 
   @override
@@ -171,11 +182,7 @@ class RoundIconButton extends StatelessWidget {
           color: background,
           border: Border.all(color: const Color(0x26FFFFFF)),
         ),
-        child: Icon(
-          icon,
-          size: iconSize ?? size * 0.55,
-          color: color ?? AppColors.textPrimary,
-        ),
+        child: Icon(icon, size: iconSize ?? size * 0.55, color: color),
       ),
     );
   }

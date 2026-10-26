@@ -1,44 +1,69 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import 'local_store.dart';
+import 'touch.dart';
 
-/// Small, local-only settings shared by the app shell and settings screen.
+enum AppThemeMode { system, dark, light }
+
+/// User preferences (Settings tab), saved locally.
 class AppSettings extends ChangeNotifier {
   AppSettings._();
 
   static final AppSettings instance = AppSettings._();
-  static const String _themeKey = 'appearance_v1';
-  static const String _hapticsKey = 'haptics_v1';
 
-  ThemeMode _themeMode = ThemeMode.dark;
-  bool _hapticsEnabled = true;
+  static const String _themeKey = 'settings_theme_v1';
+  static const String _hapticsKey = 'settings_haptics_v1';
+  static const String _autoplayKey = 'settings_autoplay_v1';
+  static const String _soundKey = 'settings_preview_sound_v1';
 
-  ThemeMode get themeMode => _themeMode;
-  bool get hapticsEnabled => _hapticsEnabled;
-  bool get isDark => _themeMode != ThemeMode.light;
+  AppThemeMode _themeMode = AppThemeMode.system;
+  bool _haptics = true;
+  bool _autoplayNext = true;
+  bool _previewSound = true;
+
+  AppThemeMode get themeMode => _themeMode;
+  bool get haptics => _haptics;
+  bool get autoplayNext => _autoplayNext;
+  bool get previewSound => _previewSound;
 
   void load() {
-    final theme = LocalStore.readList(_themeKey);
-    _themeMode = theme.isNotEmpty && theme.first == 'light'
-        ? ThemeMode.light
-        : ThemeMode.dark;
-    final haptics = LocalStore.readList(_hapticsKey);
-    _hapticsEnabled = haptics.isEmpty || haptics.first != 'off';
+    final saved = LocalStore.readString(_themeKey);
+    _themeMode = AppThemeMode.values.firstWhere(
+      (mode) => mode.name == saved,
+      orElse: () => AppThemeMode.system,
+    );
+    _haptics = LocalStore.readBool(_hapticsKey, fallback: true);
+    _autoplayNext = LocalStore.readBool(_autoplayKey, fallback: true);
+    _previewSound = LocalStore.readBool(_soundKey, fallback: true);
+    Haptics.enabled = _haptics;
   }
 
-  void setThemeMode(ThemeMode value) {
-    if (value == _themeMode) return;
-    _themeMode = value;
-    LocalStore.writeList(_themeKey, <String>[
-      value == ThemeMode.light ? 'light' : 'dark',
-    ]);
+  void setThemeMode(AppThemeMode mode) {
+    if (_themeMode == mode) return;
+    _themeMode = mode;
+    LocalStore.writeString(_themeKey, mode.name);
     notifyListeners();
   }
 
-  void setHapticsEnabled(bool value) {
-    if (value == _hapticsEnabled) return;
-    _hapticsEnabled = value;
-    LocalStore.writeList(_hapticsKey, <String>[value ? 'on' : 'off']);
+  void setHaptics(bool value) {
+    if (_haptics == value) return;
+    _haptics = value;
+    Haptics.enabled = value;
+    LocalStore.writeBool(_hapticsKey, value);
+    notifyListeners();
+  }
+
+  void setAutoplayNext(bool value) {
+    if (_autoplayNext == value) return;
+    _autoplayNext = value;
+    LocalStore.writeBool(_autoplayKey, value);
+    notifyListeners();
+  }
+
+  void setPreviewSound(bool value) {
+    if (_previewSound == value) return;
+    _previewSound = value;
+    LocalStore.writeBool(_soundKey, value);
     notifyListeners();
   }
 }

@@ -2,15 +2,14 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_settings.dart';
 import 'app_theme.dart';
 
 enum Haptic { none, selection, light, medium, heavy }
 
 /// One place for every vibration in the app.
 abstract final class Haptics {
-  /// Uses the persisted toggle in Settings.
-  static bool get enabled => AppSettings.instance.hapticsEnabled;
+  /// Flip to false to silence the whole app.
+  static bool enabled = true;
 
   static void play(Haptic kind) {
     if (!enabled) return;
@@ -89,15 +88,16 @@ class _PressableState extends State<Pressable> {
             GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
           () => TapGestureRecognizer(),
           (TapGestureRecognizer tap) {
-            tap.onTapDown = (_) => _set(true);
-            tap.onTapCancel = () => _set(false);
-            tap.onTapUp = (_) => _set(false);
-            tap.onTap = widget.onTap == null
-                ? null
-                : () {
-                    Haptics.play(widget.haptic);
-                    widget.onTap!();
-                  };
+            tap
+              ..onTapDown = (_) => _set(true)
+              ..onTapCancel = () => _set(false)
+              ..onTapUp = (_) => _set(false)
+              ..onTap = widget.onTap == null
+                  ? null
+                  : () {
+                      Haptics.play(widget.haptic);
+                      widget.onTap!();
+                    };
           },
         ),
         if (widget.onLongPress != null)

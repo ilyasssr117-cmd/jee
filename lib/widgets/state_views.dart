@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -16,7 +17,11 @@ class StatusView extends StatelessWidget {
     this.actionIcon = Icons.refresh_rounded,
     this.secondaryLabel,
     this.onSecondary,
+    this.dark = false,
   });
+
+  /// On top of video (player): always light text.
+  final bool dark;
 
   final IconData icon;
   final String title;
@@ -29,6 +34,7 @@ class StatusView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final text = dark ? darkText : TextSet(AppColors.palette);
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(Gaps.xl),
@@ -41,16 +47,20 @@ class StatusView extends StatelessWidget {
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: AppColors.surface,
+                  color: dark ? OnDark.surface : AppColors.surface,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: Icon(icon, size: 30, color: AppColors.textTertiary),
+                child: Icon(
+                  icon,
+                  size: 30,
+                  color: dark ? OnDark.textTertiary : AppColors.textTertiary,
+                ),
               ),
               const SizedBox(height: Gaps.lg),
-              Text(title, textAlign: TextAlign.center, style: AppText.title),
+              Text(title, textAlign: TextAlign.center, style: text.title),
               if (message != null) ...[
                 const SizedBox(height: Gaps.xs),
-                Text(message!, textAlign: TextAlign.center, style: AppText.body),
+                Text(message!, textAlign: TextAlign.center, style: text.body),
               ],
               if (actionLabel != null && onAction != null) ...[
                 const SizedBox(height: Gaps.lg),
@@ -62,12 +72,14 @@ class StatusView extends StatelessWidget {
                     AppButton(
                       label: actionLabel!,
                       icon: actionIcon,
+                      onDark: dark,
                       onPressed: onAction!,
                     ),
                     if (secondaryLabel != null && onSecondary != null)
                       AppButton(
                         label: secondaryLabel!,
                         style: AppButtonStyle.secondary,
+                        onDark: dark,
                         onPressed: onSecondary!,
                       ),
                   ],
@@ -81,19 +93,21 @@ class StatusView extends StatelessWidget {
   }
 }
 
-/// Neutral loading indicator for full-area loading.
+/// Native iOS activity indicator, centred.
 class Spinner extends StatelessWidget {
-  const Spinner({super.key, this.size = 28});
+  const Spinner({super.key, this.size = 28, this.color});
 
   final double size;
+
+  /// Defaults to the theme's secondary text colour.
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: const CircularProgressIndicator(strokeWidth: 3),
+      child: CupertinoActivityIndicator(
+        radius: size / 2.4,
+        color: color ?? AppColors.textSecondary,
       ),
     );
   }
@@ -131,8 +145,15 @@ class _SkeletonPulseState extends State<SkeletonPulse>
 }
 
 class SkeletonBlock extends StatelessWidget {
-  const SkeletonBlock({super.key, this.width, this.height, this.radius = 8});
+  const SkeletonBlock({
+    super.key,
+    this.width,
+    this.height,
+    this.radius = 8,
+    this.color,
+  });
 
+  final Color? color;
   final double? width;
   final double? height;
   final double radius;
@@ -143,7 +164,7 @@ class SkeletonBlock extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: AppColors.surfaceHigh,
+        color: color ?? AppColors.surfaceHigh,
         borderRadius: BorderRadius.circular(radius),
       ),
     );

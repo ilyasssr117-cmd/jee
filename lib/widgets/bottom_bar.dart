@@ -5,35 +5,36 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../touch.dart';
 
-enum AppTab { home, search, history, favorites, settings }
+enum AppTab { home, search, library, settings }
 
-/// Space reserved at the bottom for the compact floating iOS tab bar.
-const double kBottomBarHeight = 72;
+/// Space the floating bar occupies at the bottom (without the safe area).
+const double kBottomBarHeight = 76;
 
+/// Floating pill with the tabs: Home, Search, Library, Settings.
 class AppBottomBar extends StatelessWidget {
   const AppBottomBar({
     super.key,
     required this.selected,
     required this.onSelect,
+    this.bottomGap,
   });
 
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
 
+  /// Space under the pill (defaults to the home-indicator gap).
+  final double? bottomGap;
+
   @override
   Widget build(BuildContext context) {
-    final bottom = math.max(context.safe.bottom - 4, 10.0);
+    final bottom = bottomGap ?? math.max(context.safe.bottom - 4, 10.0);
     final pill = DecoratedBox(
       decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: AppColors.outline),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: _barShadowOpacity),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
+        color: AppColors.surface.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0x2EFFFFFF)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x80000000), blurRadius: 16),
         ],
       ),
       child: Padding(
@@ -54,16 +55,10 @@ class AppBottomBar extends StatelessWidget {
               onTap: () => onSelect(AppTab.search),
             ),
             _TabItem(
-              icon: Icons.history_rounded,
-              label: 'History',
-              active: selected == AppTab.history,
-              onTap: () => onSelect(AppTab.history),
-            ),
-            _TabItem(
-              icon: Icons.bookmark_rounded,
-              label: 'Saved',
-              active: selected == AppTab.favorites,
-              onTap: () => onSelect(AppTab.favorites),
+              icon: Icons.video_library_rounded,
+              label: 'Library',
+              active: selected == AppTab.library,
+              onTap: () => onSelect(AppTab.library),
             ),
             _TabItem(
               icon: Icons.tune_rounded,
@@ -76,6 +71,7 @@ class AppBottomBar extends StatelessWidget {
       ),
     );
 
+    // A Row (not Align) so the bar is only as tall as the pill.
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: Row(
@@ -85,8 +81,6 @@ class AppBottomBar extends StatelessWidget {
     );
   }
 }
-
-const double _barShadowOpacity = 0.22;
 
 class _TabItem extends StatelessWidget {
   const _TabItem({
@@ -106,20 +100,20 @@ class _TabItem extends StatelessWidget {
     return Pressable(
       semanticLabel: label,
       haptic: Haptic.selection,
-      pressedScale: 0.92,
+      pressedScale: 0.9,
       onTap: onTap,
       child: AnimatedContainer(
         duration: Motion.normal,
         curve: Motion.curve,
-        width: 56,
-        height: 44,
+        width: 58,
+        height: 42,
         decoration: BoxDecoration(
           color: active ? AppColors.blueSoft : Colors.transparent,
           borderRadius: BorderRadius.circular(21),
         ),
         child: Icon(
           icon,
-          size: 22,
+          size: 24,
           color: active ? AppColors.blue : AppColors.textSecondary,
         ),
       ),

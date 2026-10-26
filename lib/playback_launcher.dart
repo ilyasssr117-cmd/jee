@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
+import 'download_store.dart';
 import 'error_text.dart';
 import 'models.dart';
 import 'player_page.dart';
-import 'recent_videos_store.dart';
 import 'preview_manager.dart';
 import 'video_repository.dart';
 
@@ -24,18 +24,26 @@ Future<String?> launchPlayer(
     // Free the card-preview decoder before the real player needs one.
     await PreviewManager.instance.stopAndWait();
     if (!context.mounted) return null;
-    final playable = await videoRepository.resolveForPlayback(
-      video.copyWith(streamUrl: ''),
-    );
+    // A saved copy plays straight from the phone (works without internet).
+    final localPath = DownloadStore.instance.localPath(video.id);
+    final playable = localPath != null
+        ? video
+        : await videoRepository.resolveForPlayback(
+            video.copyWith(streamUrl: ''),
+          );
     if (!context.mounted) return null;
-    if (playable.streamUrl.trim().isEmpty) {
+    if (localPath == null && playable.streamUrl.trim().isEmpty) {
       return 'No playable link was found for this video.';
     }
-    RecentVideosStore.instance.record(playable);
     // The screen fades to black and into the player (no sliding).
     await navigator.push<void>(
       FadePageRoute<void>(
-        builder: (_) => PlayerPage(video: playable, startAt: startAt, queue: queue),
+        builder: (_) => PlayerPage(
+          video: playable,
+          startAt: startAt,
+          queue: queue,
+          localPath: localPath,
+        ),
       ),
     );
     return null;

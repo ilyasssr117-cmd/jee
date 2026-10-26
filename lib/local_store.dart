@@ -36,4 +36,40 @@ abstract final class LocalStore {
       }),
     );
   }
+
+  static String? readString(String key) {
+    try {
+      return _prefs?.getString(key);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void writeString(String key, String value) {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    unawaited(
+      prefs.setString(key, value).then((_) {}, onError: (Object error) {
+        debugPrint('[STORE] Could not save $key: $error');
+      }),
+    );
+  }
+
+  static bool readBool(String key, {required bool fallback}) {
+    try {
+      return _prefs?.getBool(key) ?? fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  static void writeBool(String key, bool value) {
+    final prefs = _prefs;
+    if (prefs == null) return;
+    unawaited(
+      prefs.setBool(key, value).then((_) {}, onError: (Object error) {
+        debugPrint('[STORE] Could not save $key: $error');
+      }),
+    );
+  }
 }

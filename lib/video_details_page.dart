@@ -1,8 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
+import 'download_store.dart';
 import 'favorites_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
@@ -11,6 +13,7 @@ import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/back_button.dart';
+import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_artwork.dart';
 import 'widgets/video_grid.dart';
@@ -30,6 +33,11 @@ class VideoDetailsPage extends StatefulWidget {
 
 class _VideoDetailsPageState extends State<VideoDetailsPage> {
   late Future<List<Video>> _relatedFuture;
+  final ScrollController _scroll = ScrollController();
+
+  /// Status-bar icons are light while the dark header is under them.
+  final ValueNotifier<bool> _overHeader = ValueNotifier<bool>(true);
+  double _headerLimit = 200;
   bool _preparing = false;
   String? _playError;
 
@@ -37,6 +45,17 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   void initState() {
     super.initState();
     _relatedFuture = videoRepository.getRelated(widget.video);
+    _scroll.addListener(() {
+      final over = !_scroll.hasClients || _scroll.offset < _headerLimit;
+      if (over != _overHeader.value) _overHeader.value = over;
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    _overHeader.dispose();
+    super.dispose();
   }
 
   void _reloadRelated() {
@@ -88,9 +107,20 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
-    return Scaffold(
+    _headerLimit = _headerHeight(MediaQuery.sizeOf(context)) - context.safe.top - 30;
+    final darkMode = AppColors.palette.brightness == Brightness.dark;
+    return ValueListenableBuilder<bool>(
+      valueListenable: _overHeader,
+      builder: (context, overHeader, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: darkMode || overHeader
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
+        child: child!,
+      ),
+      child: Scaffold(
       backgroundColor: AppColors.background,
       body: CustomScrollView(
+        controller: _scroll,
         cacheExtent: MediaQuery.sizeOf(context).height,
         slivers: [
           SliverToBoxAdapter(child: _buildHeader(margin)),
@@ -101,48 +131,36 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           ),
         ],
       ),
+      ),
     );
   }
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
     final size = MediaQuery.sizeOf(context);
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
     final meta = VideoMetaLine(
       video: video,
-      style: AppText.caption.copyWith(color: AppColors.textSecondary),
+      style: darkText.caption.copyWith(color: OnDark.textSecondary),
       showDuration: true,
       showDate: true,
       fallbackToCategory: false,
     );
 
     return SizedBox(
-      height: math.min(size.height * 0.5, 460.0),
-      child: Stack(
+      height: _headerHeight(size),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        child: Stack(
         fit: StackFit.expand,
         children: [
           VideoArtwork(video: video, showLabel: false),
-          DecoratedBox(
+          const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: dark
-                    ? const [Color(0x330B0D12), Color(0xE60B0D12)]
-                    : const [Color(0x18FFFFFF), Color(0xEEF5F6FA)],
-              ),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: dark
-                    ? const [Color(0x000B0D12), Color(0xFF0B0D12)]
-                    : const [Color(0x00F5F6FA), Color(0xFFF5F6FA)],
-                stops: const [0.55, 1],
+                colors: [Color(0x330B0D12), Color(0xE60B0D12)],
               ),
             ),
           ),
@@ -159,14 +177,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     video.category.toUpperCase(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.overline,
+                    style: darkText.overline,
                   ),
                 const SizedBox(height: 6),
                 Text(
                   video.title,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.display.copyWith(fontSize: 22),
+                  style: darkText.display.copyWith(fontSize: 22),
                 ),
                 if (meta.hasContent) ...[
                   const SizedBox(height: Gaps.sm),
@@ -178,7 +196,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     video.description,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
-                    style: AppText.body.copyWith(fontSize: 13),
+                    style: darkText.body.copyWith(fontSize: 13),
                   ),
                 ],
                 const SizedBox(height: Gaps.md),
@@ -192,6 +210,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                           : 'Play',
                       icon: Icons.play_arrow_rounded,
                       loading: _preparing,
+                      onDark: true,
                       onPressed: _play,
                     ),
                     if (resume != null)
@@ -199,25 +218,27 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                         label: 'Start over',
                         icon: Icons.replay_rounded,
                         style: AppButtonStyle.secondary,
+                        onDark: true,
                         onPressed: () => _play(fromStart: true),
                       ),
                     _buildFavoriteButton(),
+                    _buildDownloadButton(),
                   ],
                 ),
                 if (_playError != null) ...[
                   const SizedBox(height: Gaps.sm),
                   Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.error_outline_rounded,
                         size: 18,
-                        color: AppColors.error,
+                        color: OnDark.error,
                       ),
                       const SizedBox(width: Gaps.sm),
                       Flexible(
                         child: Text(
                           _playError!,
-                          style: AppText.body.copyWith(color: AppColors.error),
+                          style: darkText.body.copyWith(color: OnDark.error),
                         ),
                       ),
                     ],
@@ -233,6 +254,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -247,6 +269,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           icon: active ? Icons.star_rounded : Icons.star_border_rounded,
           iconColor: active ? AppColors.star : null,
           style: AppButtonStyle.secondary,
+          onDark: true,
           onPressed: () {
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
@@ -255,6 +278,72 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       },
     );
   }
+
+  /// Download / progress / saved button (plain MP4 links only).
+  Widget _buildDownloadButton() {
+    return ListenableBuilder(
+      listenable: DownloadStore.instance,
+      builder: (context, _) {
+        final store = DownloadStore.instance;
+        final id = widget.video.id;
+        final item = store.item(id);
+
+        if (item == null || item.status == DownloadStatus.failed) {
+          return AppButton(
+            label: item == null ? 'Download' : 'Retry download',
+            icon: Icons.download_rounded,
+            style: AppButtonStyle.secondary,
+            onDark: true,
+            onPressed: () {
+              store.enqueue(widget.video);
+              showToast(context, 'Download started', aboveBar: false);
+            },
+          );
+        }
+
+        if (item.status == DownloadStatus.done) {
+          return AppButton(
+            label: 'Downloaded',
+            icon: Icons.download_done_rounded,
+            iconColor: const Color(0xFFB8AEFF),
+            style: AppButtonStyle.secondary,
+            onDark: true,
+            onPressed: () async {
+              final ok = await confirmDialog(
+                context,
+                title: 'Delete this download?',
+                message: 'The video will be removed from your phone.',
+                confirmLabel: 'Delete',
+              );
+              if (ok) await store.remove(id);
+            },
+          );
+        }
+
+        // Queued or downloading: live percentage, tap to cancel.
+        return ValueListenableBuilder<int>(
+          valueListenable: item.bytes,
+          builder: (context, _, __) {
+            final fraction = item.progress;
+            final label = item.status == DownloadStatus.queued
+                ? 'Waiting\u2026'
+                : (fraction != null
+                    ? '${(fraction * 100).round()}%'
+                    : 'Downloading\u2026');
+            return AppButton(
+              label: label,
+              icon: Icons.close_rounded,
+              style: AppButtonStyle.secondary,
+              onDark: true,
+              onPressed: () => store.remove(id),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  double _headerHeight(Size size) => math.min(size.height * 0.5, 460.0);
 
   Widget _buildRelatedTitle(double margin) {
     return FutureBuilder<List<Video>>(

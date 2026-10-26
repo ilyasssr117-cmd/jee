@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:video_player/video_player.dart';
@@ -111,13 +112,9 @@ class _PreviewView extends StatelessWidget {
                 child: const ColoredBox(
                   color: Color(0x66000000),
                   child: Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Colors.white,
-                      ),
+                    child: CupertinoActivityIndicator(
+                      radius: 11,
+                      color: Colors.white,
                     ),
                   ),
                 ),

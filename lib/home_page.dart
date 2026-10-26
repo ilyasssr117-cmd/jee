@@ -1,29 +1,30 @@
-import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl;
-import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
-import 'app_settings.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import 'app_theme.dart';
 import 'error_text.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
+import 'touch.dart';
 import 'preview_manager.dart';
-import 'recent_history_view.dart';
-import 'recent_videos_store.dart';
-import 'settings_view.dart';
 import 'video_details_page.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/bottom_bar.dart';
 import 'widgets/category_bar.dart';
-import 'widgets/favorites_view.dart';
+import 'widgets/dialogs.dart';
 import 'widgets/home_hero.dart';
+import 'widgets/library_view.dart';
 import 'widgets/search_overlay.dart';
+import 'widgets/settings_view.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 
-enum _Section { home, favorites, history, settings }
+enum _Section { home, library, settings }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -54,7 +55,10 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
   bool _hasMore = true;
   bool _playingFeatured = false;
-  bool _searchOpen = false;
+  /// Search is its own notifier so opening it never rebuilds the video grid
+  /// (that rebuild was what made the keyboard open with a stutter).
+  final ValueNotifier<bool> _search = ValueNotifier<bool>(false);
+  bool get _searchOpen => _search.value;
   _Section _section = _Section.home;
   FriendlyError? _error;
 
@@ -63,20 +67,15 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    AppSettings.instance.addListener(_onSettingsChanged);
-    _scroll.addListener(_maybeLoadMore);
+    _scroll.addListener(_onScroll);
     _loadPage(reset: true);
-  }
-
-  void _onSettingsChanged() {
-    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    AppSettings.instance.removeListener(_onSettingsChanged);
+    _search.dispose();
     _scroll
-      ..removeListener(_maybeLoadMore)
+      ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
   }
@@ -84,6 +83,16 @@ class _HomePageState extends State<HomePage> {
   // -------------------------------------------------------------------------
   // Loading
   // -------------------------------------------------------------------------
+
+  /// Light status-bar icons only while the dark hero is under them.
+  bool _heroVisible = true;
+  double _heroLimit = 200;
+
+  void _onScroll() {
+    _maybeLoadMore();
+    final visible = !_scroll.hasClients || _scroll.offset < _heroLimit;
+    if (visible != _heroVisible) setState(() => _heroVisible = visible);
+  }
 
   void _maybeLoadMore() {
     if (!_scroll.hasClients || _loading || !_hasMore) return;
@@ -159,6 +168,42 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Pull-to-refresh: reloads the first page in the background and swaps the
+  /// list in when it arrives, so the page never jumps to a skeleton.
+  Future<void> _refresh() async {
+    Haptics.play(Haptic.light);
+    final generation = ++_generation;
+    try {
+      final result = await videoRepository.getVideos(
+        page: 0,
+        pageSize: _pageSize,
+        category: _category == 'All' ? null : _category,
+      );
+      if (!mounted || generation != _generation) return;
+      final seen = <String>{};
+      final fresh = <Video>[
+        for (final video in result)
+          if (seen.add(video.id)) video,
+      ];
+      setState(() {
+        _videos
+          ..clear()
+          ..addAll(fresh);
+        _recomputeDerived();
+        _page = 1;
+        _emptyPages = 0;
+        _hasMore = result.isNotEmpty;
+        _loading = false;
+        _error = null;
+      });
+      if (_hasMore) _scheduleFillViewport();
+    } catch (error) {
+      if (!mounted || generation != _generation) return;
+      setState(() => _loading = false);
+      _toast('Couldn\u2019t refresh. Check your connection.');
+    }
+  }
+
   /// One-time tip that explains the long-press preview.
   void _maybeShowPreviewHint() {
     if (_videos.isEmpty) return;
@@ -180,25 +225,9 @@ class _HomePageState extends State<HomePage> {
     _scroll.animateTo(0, duration: Motion.scroll, curve: Motion.curve);
   }
 
-  void _toast(String message) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          duration: const Duration(seconds: 3),
-          margin: EdgeInsets.fromLTRB(
-            Gaps.lg,
-            0,
-            Gaps.lg,
-            kBottomBarHeight + context.safe.bottom,
-          ),
-        ),
-      );
-  }
+  void _toast(String message) => showToast(context, message);
 
-  /// Return to the main feed before allowing the system to leave the app.
+  /// System back (Android): close search, then leave the tab, then exit.
   void _handleBack() {
     if (_searchOpen) {
       _closeSearch();
@@ -207,40 +236,16 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _clearHistory() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Clear watch history?'),
-        content: const Text('This removes recently played videos and progress.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Clear history'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    RecentVideosStore.instance.clear();
-    PlaybackProgress.instance.clearAll();
-    if (mounted) _toast('Watch history cleared');
-  }
-
   void _openSearch() {
     if (_searchOpen) return;
     PreviewManager.instance.stopNow(fade: false);
-    setState(() => _searchOpen = true);
+    _search.value = true;
   }
 
   void _closeSearch() {
     if (!_searchOpen) return;
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => _searchOpen = false);
+    _search.value = false;
   }
 
   Future<void> _openDetails(Video video, List<Video> queue) async {
@@ -264,15 +269,16 @@ class _HomePageState extends State<HomePage> {
         }
       case AppTab.search:
         _openSearch();
-      case AppTab.history:
+      case AppTab.library:
         if (_searchOpen) _closeSearch();
-        setState(() => _section = _Section.history);
-      case AppTab.favorites:
-        if (_searchOpen) _closeSearch();
-        setState(() => _section = _Section.favorites);
+        if (_section != _Section.library) {
+          setState(() => _section = _Section.library);
+        }
       case AppTab.settings:
         if (_searchOpen) _closeSearch();
-        setState(() => _section = _Section.settings);
+        if (_section != _Section.settings) {
+          setState(() => _section = _Section.settings);
+        }
     }
   }
 
@@ -305,138 +311,106 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final margin = context.hMargin;
     final bottomInset = kBottomBarHeight + context.safe.bottom;
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final featured = _featured;
     final showCategories = _categories.length > 1;
     final firstLoad = _videos.isEmpty && _loading;
     final resume = featured == null
         ? null
         : PlaybackProgress.instance.resumePosition(featured.id);
+    final screen = MediaQuery.sizeOf(context);
+    _heroLimit = math.min(screen.height * 0.42, 380.0) - context.safe.top - 30;
+    final darkMode = AppColors.palette.brightness == Brightness.dark;
 
-    return PopScope(
-      canPop: !_searchOpen && _section == _Section.home,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _handleBack();
-      },
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        // The search screen owns the keyboard; nothing may resize under it.
-        resizeToAvoidBottomInset: false,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            // The page keeps its scroll position while the search is open.
-            AnimatedSwitcher(
-              duration: Motion.normal,
-              transitionBuilder: (child, animation) {
-                final curved = CurvedAnimation(
-                  parent: animation,
-                  curve: Motion.curve,
-                  reverseCurve: Curves.easeIn,
-                );
-                return FadeTransition(
-                  opacity: curved,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.018),
-                      end: Offset.zero,
-                    ).animate(curved),
-                    child: child,
-                  ),
-                );
-              },
-              child: switch (_section) {
-                _Section.favorites => FavoritesView(
-                    key: const ValueKey<String>('favorites'),
-                    bottomInset: bottomInset,
-                    onOpen: _openDetails,
-                    onBrowse: () => setState(() => _section = _Section.home),
-                  ),
-                _Section.history => RecentHistoryView(
-                    key: const ValueKey<String>('history'),
-                    bottomInset: bottomInset,
-                    onOpen: _openDetails,
-                    onClear: _clearHistory,
-                  ),
-                _Section.settings => SettingsView(
-                    key: const ValueKey<String>('settings'),
-                    bottomInset: bottomInset,
-                  ),
-                _Section.home => KeyedSubtree(
-                    key: const ValueKey<String>('home'),
-                    child: _buildHome(
-                      margin,
-                      bottomInset,
-                      featured,
-                      showCategories,
-                      firstLoad,
-                      resume,
-                    ),
-                  ),
-              },
+    // The page itself. It does not depend on the search or the keyboard, so
+    // it is built once here and handed to the builder below as `child`.
+    final content = RepaintBoundary(
+      child: AnimatedSwitcher(
+        duration: Motion.normal,
+        child: switch (_section) {
+          _Section.library => LibraryView(
+              key: const ValueKey<String>('library'),
+              bottomInset: bottomInset,
+              onOpen: _openDetails,
+              onBrowse: () => setState(() => _section = _Section.home),
             ),
-            // Search fades in and out instead of popping.
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
-              reverseDuration: const Duration(milliseconds: 120),
-              transitionBuilder: (child, animation) {
-                final curved = CurvedAnimation(
-                  parent: animation,
-                  curve: Motion.curve,
-                  reverseCurve: Curves.easeIn,
-                );
-                return FadeTransition(
-                  opacity: curved,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.025),
-                      end: Offset.zero,
-                    ).animate(curved),
-                    child: child,
-                  ),
-                );
-              },
-              child: _searchOpen
-                  ? SearchOverlay(
-                      key: const ValueKey<String>('search'),
-                      bottomInset: bottomInset,
-                      onClose: _closeSearch,
-                      onOpen: _openDetails,
-                    )
-                  : const SizedBox.shrink(key: ValueKey<String>('no-search')),
+          _Section.settings => SettingsView(
+              key: const ValueKey<String>('settings'),
+              bottomInset: bottomInset,
             ),
-            // Hidden while the keyboard is up (it would ride on top of it).
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: AnimatedSlide(
-                duration: Motion.normal,
-                curve: Motion.curve,
-                offset: keyboardOpen ? const Offset(0, 1.5) : Offset.zero,
-                child: AnimatedOpacity(
-                  duration: Motion.normal,
-                  opacity: keyboardOpen ? 0 : 1,
-                  child: IgnorePointer(
-                    ignoring: keyboardOpen,
-                    child: AppBottomBar(
-                      selected: _searchOpen
-                          ? AppTab.search
-                          : switch (_section) {
-                              _Section.home => AppTab.home,
-                              _Section.favorites => AppTab.favorites,
-                              _Section.history => AppTab.history,
-                              _Section.settings => AppTab.settings,
-                            },
-                      onSelect: _onTabSelect,
-                    ),
-                  ),
-                ),
+          _Section.home => KeyedSubtree(
+              key: const ValueKey<String>('home'),
+              child: _buildHome(
+                margin,
+                bottomInset,
+                featured,
+                showCategories,
+                firstLoad,
+                resume,
               ),
             ),
-          ],
-        ),
+        },
       ),
+    );
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: _search,
+      child: content,
+      builder: (context, searchOpen, page) {
+        final lightIcons = darkMode ||
+            (_section == _Section.home && !searchOpen && _heroVisible);
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: lightIcons
+              ? SystemUiOverlayStyle.light
+              : SystemUiOverlayStyle.dark,
+          child: PopScope(
+            canPop: !searchOpen && _section == _Section.home,
+            onPopInvokedWithResult: (didPop, _) {
+              if (!didPop) _handleBack();
+            },
+            child: Scaffold(
+              backgroundColor: AppColors.background,
+              // The search screen owns the keyboard; nothing resizes under it.
+              resizeToAvoidBottomInset: false,
+              body: Stack(
+                fit: StackFit.expand,
+                children: [
+                  page!,
+                  // Search fades in and out instead of popping.
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 160),
+                    child: searchOpen
+                        ? SearchOverlay(
+                            key: const ValueKey<String>('search'),
+                            bottomInset: bottomInset,
+                            onClose: _closeSearch,
+                            onOpen: _openDetails,
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey<String>('no-search'),
+                          ),
+                  ),
+                  // The tab bar never hides: it rides on top of the keyboard.
+                  Positioned.fill(
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: _RidingTabBar(
+                        selected: searchOpen
+                            ? AppTab.search
+                            : switch (_section) {
+                                _Section.home => AppTab.home,
+                                _Section.library => AppTab.library,
+                                _Section.settings => AppTab.settings,
+                              },
+                        onSelect: _onTabSelect,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -448,16 +422,23 @@ class _HomePageState extends State<HomePage> {
     bool firstLoad,
     Duration? resume,
   ) {
-    return CustomScrollView(
-      // Restores the scroll position when coming back from Favorites.
+    // A small circle drops from the top while you pull; the page itself stays
+    // put (no bouncing / stretching of the whole screen).
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      color: AppColors.accent,
+      backgroundColor: AppColors.surface,
+      edgeOffset: context.safe.top + Gaps.sm,
+      displacement: 44,
+      child: CustomScrollView(
+      // Restores the scroll position when coming back from other tabs.
       key: const PageStorageKey<String>('home-scroll'),
       controller: _scroll,
+      physics: const ClampingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
       cacheExtent: MediaQuery.sizeOf(context).height,
       slivers: [
-        // Pull down to refresh (native iOS spinner).
-        CupertinoSliverRefreshControl(
-          onRefresh: () => _loadPage(reset: true),
-        ),
         SliverToBoxAdapter(
           child: HomeHero(
             video: featured,
@@ -497,6 +478,7 @@ class _HomePageState extends State<HomePage> {
         ..._contentSlivers(margin),
         SliverToBoxAdapter(child: SizedBox(height: Gaps.xl + bottomInset)),
       ],
+      ),
     );
   }
 
@@ -569,5 +551,30 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
     ];
+  }
+}
+
+/// The tab bar, lifted by the keyboard height so it stays visible and glides
+/// with the keyboard. Only this tiny widget listens to the keyboard.
+class _RidingTabBar extends StatelessWidget {
+  const _RidingTabBar({required this.selected, required this.onSelect});
+
+  final AppTab selected;
+  final ValueChanged<AppTab> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final restingGap = math.max(context.safe.bottom - 4, 10.0);
+    // As the keyboard rises, the home-indicator gap shrinks to a fixed 10 pt.
+    final gap = math.max(10.0, restingGap - keyboard);
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboard),
+      child: AppBottomBar(
+        selected: selected,
+        onSelect: onSelect,
+        bottomGap: gap,
+      ),
+    );
   }
 }

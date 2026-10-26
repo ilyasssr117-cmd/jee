@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
+import 'app_settings.dart';
 import 'models.dart';
 import 'stream_headers.dart';
 import 'video_repository.dart';
@@ -21,7 +22,7 @@ class PreviewSession {
   PreviewSession faded() => PreviewSession(id, controller, fadingOut: true);
 }
 
-/// Owns the single muted preview shared by every card.
+/// Owns the single preview shared by every card (with sound by default).
 ///
 /// * The preview is started by the viewer (long-press on a card), never by
 ///   itself, and starts at once.
@@ -80,6 +81,12 @@ class PreviewManager {
     unawaited(_start(video, generation));
   }
 
+  /// Forgets the resolved stream URLs (Settings → Clear cache).
+  void clearCaches() {
+    stopNow(fade: false);
+    _urls.clear();
+  }
+
   /// The card for [id] went away. Safe to call from dispose().
   void release(String id) {
     scheduleMicrotask(() {
@@ -107,9 +114,6 @@ class PreviewManager {
     await _disposing;
   }
 
-  /// Drops resolved stream URLs kept only for quick preview restarts.
-  void clearResolvedUrlCache() => _urls.clear();
-
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
@@ -123,7 +127,7 @@ class PreviewManager {
       if (clip.isNotEmpty && await _play(video, clip, generation)) return;
       if (generation != _generation) return;
 
-      // 2. Fallback: resolve the real stream and play it muted.
+      // 2. Fallback: resolve the real stream and play it.
       var url = video.streamUrl.trim();
       if (url.isEmpty) {
         url = _urls.remove(video.id) ?? '';
@@ -144,7 +148,7 @@ class PreviewManager {
       await _play(video, url, generation);
     } catch (error) {
       // A preview is a nicety: on any failure the thumbnail simply stays.
-      debugPrint('[PREVIEW] ${video.id}: request failed (${error.runtimeType}).');
+      debugPrint('[PREVIEW] ${video.id}: $error');
     } finally {
       if (generation == _generation) {
         loading.value = false;
@@ -154,7 +158,7 @@ class PreviewManager {
     }
   }
 
-  /// Plays [url] muted in a fresh controller. Returns true when the attempt is
+  /// Plays [url] in a fresh controller. Returns true when the attempt is
   /// finished (playing, or no longer wanted) and false when [url] failed and
   /// the caller may try something else.
   Future<bool> _play(Video video, String url, int generation) async {
@@ -170,7 +174,11 @@ class PreviewManager {
       controller = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: streamHeaders(uri, video.pageUrl),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        videoPlayerOptions: VideoPlayerOptions(
+          // With sound it plays like a normal video (works with the silent
+          // switch on); without sound it never interrupts the viewer's music.
+          mixWithOthers: !AppSettings.instance.previewSound,
+        ),
       );
       final init = controller.initialize().timeout(_initTimeout);
       _initializing = init.then((_) {}, onError: (Object _) {});
@@ -181,7 +189,7 @@ class PreviewManager {
         unawaited(_scheduleDispose(controller));
         return true;
       }
-      await controller.setVolume(0);
+      await controller.setVolume(AppSettings.instance.previewSound ? 1.0 : 0.0);
       await controller.setLooping(true);
       await controller.play();
       if (generation != _generation) {
@@ -199,7 +207,7 @@ class PreviewManager {
       });
       return true;
     } catch (error) {
-      debugPrint('[PREVIEW] ${video.id}: preview failed (${error.runtimeType}).');
+      debugPrint('[PREVIEW] ${video.id} $url: $error');
       _initializing = null;
       if (controller != null && !identical(_live, controller)) {
         unawaited(_scheduleDispose(controller));

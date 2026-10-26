@@ -36,7 +36,6 @@ class HomeHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final margin = context.hMargin;
     final topPad = context.safe.top + Gaps.sm;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     const topBar = _TopBar();
 
     // Error / empty: keep only the brand bar so the status view has room.
@@ -48,66 +47,45 @@ class HomeHero extends StatelessWidget {
     }
 
     final size = MediaQuery.sizeOf(context);
-    // In landscape, height is no longer tied to the short screen dimension:
-    // the featured title, metadata, and buttons get enough room to breathe.
-    final height = size.width > size.height
-        ? math.min(size.width * 0.40, 440.0)
-        : math.min(size.height * 0.42, 380.0);
+    final height = math.min(size.height * 0.42, 380.0);
     final featured = video;
 
     return SizedBox(
       height: height,
-      child: Stack(
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        child: Stack(
         fit: StackFit.expand,
         children: [
           if (featured != null)
             VideoArtwork(video: featured, showLabel: false)
           else
-            DecoratedBox(
+            const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    AppColors.surfaceHigh,
-                    AppColors.background,
-                  ],
+                  colors: [Color(0xFF1B2033), OnDark.background],
                 ),
               ),
             ),
           // Scrims: top for the brand bar, bottom to blend into the page.
-          DecoratedBox(
+          const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: dark
-                    ? const [Color(0x330B0D12), Color(0xE60B0D12)]
-                    : const [Color(0x18FFFFFF), Color(0xEEF5F6FA)],
+                colors: [Color(0x330B0D12), Color(0xE60B0D12)],
               ),
             ),
           ),
-          DecoratedBox(
+          const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: dark
-                    ? const [Color(0xB30B0D12), Color(0x000B0D12)]
-                    : const [Color(0xCCFFFFFF), Color(0x00FFFFFF)],
-                stops: const [0, 0.3],
-              ),
-            ),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: dark
-                    ? const [Color(0x000B0D12), Color(0xFF0B0D12)]
-                    : const [Color(0x00F5F6FA), Color(0xFFF5F6FA)],
-                stops: const [0.6, 1],
+                colors: [Color(0xB30B0D12), Color(0x000B0D12)],
+                stops: [0, 0.3],
               ),
             ),
           ),
@@ -115,26 +93,9 @@ class HomeHero extends StatelessWidget {
           Positioned(
             left: margin,
             right: margin,
-            bottom: Gaps.md,
+            bottom: Gaps.lg,
             child: AnimatedSwitcher(
               duration: Motion.fade,
-              transitionBuilder: (child, animation) {
-                final curved = CurvedAnimation(
-                  parent: animation,
-                  curve: Motion.curve,
-                  reverseCurve: Curves.easeIn,
-                );
-                return FadeTransition(
-                  opacity: curved,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.035),
-                      end: Offset.zero,
-                    ).animate(curved),
-                    child: child,
-                  ),
-                );
-              },
               child: featured == null
                   ? const _HeroSkeleton(key: ValueKey<String>('skeleton'))
                   : _HeroDetails(
@@ -148,6 +109,7 @@ class HomeHero extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -176,7 +138,7 @@ class _TopBar extends StatelessWidget {
         const SizedBox(width: Gaps.sm),
         Text(
           'FLOW',
-          style: AppText.label.copyWith(
+          style: darkText.label.copyWith(
             fontWeight: FontWeight.w800,
             letterSpacing: 1.6,
           ),
@@ -208,18 +170,18 @@ class _HeroDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('FEATURED', style: AppText.overline),
+        const Text('FEATURED', style: darkText.overline),
         const SizedBox(height: 6),
         Text(
           video.title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: AppText.display.copyWith(fontSize: 22),
+          style: darkText.display.copyWith(fontSize: 22),
         ),
         const SizedBox(height: Gaps.sm),
         VideoMetaLine(
           video: video,
-          style: AppText.caption.copyWith(color: AppColors.textSecondary),
+          style: darkText.caption.copyWith(color: OnDark.textSecondary),
           showDuration: true,
           showCategory: true,
         ),
@@ -231,6 +193,7 @@ class _HeroDetails extends StatelessWidget {
               label: playLabel,
               icon: Icons.play_arrow_rounded,
               loading: playBusy,
+              onDark: true,
               onPressed: onPlay,
             ),
             const SizedBox(width: Gaps.sm),
@@ -238,6 +201,7 @@ class _HeroDetails extends StatelessWidget {
               label: 'Details',
               icon: Icons.info_outline_rounded,
               style: AppButtonStyle.secondary,
+              onDark: true,
               onPressed: onDetails,
             ),
           ],
@@ -257,13 +221,18 @@ class _HeroSkeleton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SkeletonBlock(width: 70, height: 11),
+          SkeletonBlock(width: 70, height: 11, color: OnDark.surfaceHigh),
           SizedBox(height: 10),
-          SkeletonBlock(width: 260, height: 22),
+          SkeletonBlock(width: 260, height: 22, color: OnDark.surfaceHigh),
           SizedBox(height: 8),
-          SkeletonBlock(width: 180, height: 22),
+          SkeletonBlock(width: 180, height: 22, color: OnDark.surfaceHigh),
           SizedBox(height: Gaps.md),
-          SkeletonBlock(width: 150, height: 40, radius: Radii.button),
+          SkeletonBlock(
+            width: 150,
+            height: 40,
+            radius: Radii.button,
+            color: OnDark.surfaceHigh,
+          ),
         ],
       ),
     );

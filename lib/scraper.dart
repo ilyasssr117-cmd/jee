@@ -176,7 +176,8 @@ class Scraper {
         return await _getOnce(uri);
       } on ScraperException catch (error) {
         final status = error.statusCode;
-        if (status != null && status < 500) rethrow; // 4xx: retrying is useless.
+        if (status != null && status < 500) rethrow;
+        }// 4xx: retrying is useless.
         lastError = error;
       }
       if (attempt == 0) {

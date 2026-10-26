@@ -25,12 +25,12 @@ jobs:
           architecture: arm64
           cache: true
 
-      - name: Check iOS platform
+      - name: Check existing iOS
         shell: bash
         run: |
           if [ -d "ios" ]; then
             echo "ios/ already exists."
-            echo "Nothing to do."
+            echo "Nothing to create."
             exit 0
           fi
 
@@ -40,57 +40,52 @@ jobs:
       - name: Create iOS platform
         shell: bash
         run: |
-          if [ ! -d "ios" ]; then
-            flutter create \
-              --platforms=ios \
-              --project-name watch_tube \
-              --org com.tv \
-              --no-pub \
-              .
-          fi
+          set -e
+
+          flutter create \
+            --platforms=ios \
+            --project-name watch_tube \
+            --org com.tv \
+            --no-pub \
+            .
+
+          echo ""
+          echo "===== iOS directory ====="
+          ls -la ios
+
+          echo ""
+          echo "===== Runner directory ====="
+          ls -la ios/Runner
 
       - name: Verify iOS platform
         shell: bash
         run: |
           set -e
 
-          test -d ios
-          test -f ios/Podfile
-          test -f ios/Runner.xcodeproj/project.pbxproj
-          test -f ios/Runner/Info.plist
+          echo "Checking iOS platform..."
 
-          echo "iOS platform successfully created."
+          if [ ! -d "ios" ]; then
+            echo "ERROR: ios directory was not created."
+            exit 1
+          fi
 
-      - name: Configure iOS deployment target
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
+          if [ ! -d "ios/Runner" ]; then
+            echo "ERROR: ios/Runner was not created."
+            exit 1
+          fi
 
-          podfile = Path("ios/Podfile")
-          text = podfile.read_text()
+          if [ ! -f "ios/Runner.xcodeproj/project.pbxproj" ]; then
+            echo "ERROR: Xcode project was not created."
+            exit 1
+          fi
 
-          if "platform :ios" in text:
-              lines = text.splitlines()
-              lines = [
-                  "platform :ios, '15.0'"
-                  if line.strip().startswith("platform :ios")
-                  else line
-                  for line in lines
-              ]
-              text = "\n".join(lines) + "\n"
-          else:
-              text = "platform :ios, '15.0'\n\n" + text
+          if [ ! -f "ios/Runner/Info.plist" ]; then
+            echo "ERROR: Runner/Info.plist was not created."
+            exit 1
+          fi
 
-          podfile.write_text(text)
-          PY
-
-          echo "Configured iOS deployment target:"
-          head -5 ios/Podfile
-
-      - name: Get Flutter dependencies
-        run: |
-          flutter pub get
+          echo ""
+          echo "iOS platform verified successfully."
 
       - name: Commit iOS platform
         shell: bash
@@ -100,17 +95,23 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add ios
+          git add ios/
 
           if git diff --cached --quiet; then
             echo "No iOS changes to commit."
             exit 0
           fi
 
-          git commit -m "Add iOS platform to Flutter project"
+          git commit -m "Add iOS platform"
 
       - name: Push iOS platform
         shell: bash
         run: |
           set -e
+
           git push origin HEAD:main
+
+          echo ""
+          echo "================================"
+          echo "iOS platform added successfully!"
+          echo "================================"

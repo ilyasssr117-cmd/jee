@@ -1,17 +1,15 @@
-name: iOS Diagnostics
+name: Build iOS IPA
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
-
-permissions:
-  contents: read
+      - master
+  workflow_dispatch:
 
 jobs:
-  ios-diagnostics:
-    runs-on: macos-latest
+  build-ios:
+    runs-on: macos-14
 
     steps:
       - name: Checkout
@@ -20,125 +18,41 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.29.3"
           channel: stable
           cache: true
 
-      - name: Environment
+      - name: Flutter Doctor
+        run: flutter doctor -v
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Apply Dart automatic fixes
+        run: dart fix --apply
+
+      - name: Format Dart code
+        run: dart format lib
+
+      - name: Analyze project
+        run: flutter analyze
+
+      - name: Install CocoaPods
         run: |
-          flutter --version
-          dart --version
-          xcodebuild -version
-          pod --version
+          cd ios
+          pod install --repo-update
 
-      - name: Repair iOS
-        shell: bash
+      - name: Build iOS
+        run: flutter build ios --release --no-codesign
+
+      - name: Package Payload
         run: |
-          set -e
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -r WatchTube-unsigned.ipa Payload
 
-          chmod +x ios_setup/repair_ios.sh
-          bash ios_setup/repair_ios.sh
-
-      - name: Check iOS files
-        shell: bash
-        run: |
-          set -x
-
-          echo "=== iOS files ==="
-          find ios -maxdepth 3 -type f | sort
-
-          echo "=== Required files ==="
-
-          test -f ios/Runner.xcodeproj/project.pbxproj
-          test -f ios/Runner.xcworkspace/contents.xcworkspacedata
-          test -f ios/Runner/Info.plist
-          test -f ios/Flutter/Debug.xcconfig
-          test -f ios/Flutter/Release.xcconfig
-
-      - name: Flutter pub get
-        run: |
-          flutter pub get
-
-      # لا يوقف الـworkflow عند وجود analyzer errors
-      - name: Flutter Analyze
-        shell: bash
-        run: |
-          set +e
-
-          flutter analyze --no-pub 2>&1 | tee flutter-analyze.log
-
-          ANALYZE_EXIT=${PIPESTATUS[0]}
-
-          echo ""
-          echo "================================"
-          echo "Flutter Analyze exit code: $ANALYZE_EXIT"
-          echo "================================"
-
-          exit 0
-
-      # اختبار compilation بدون signing
-      - name: Flutter Build iOS Diagnostic
-        shell: bash
-        run: |
-          set +e
-
-          flutter clean
-          flutter pub get
-
-          flutter build ios \
-            --release \
-            --no-codesign \
-            --verbose \
-            2>&1 | tee ios-build.log
-
-          BUILD_EXIT=${PIPESTATUS[0]}
-
-          echo ""
-          echo "================================"
-          echo "iOS Build exit code: $BUILD_EXIT"
-          echo "================================"
-
-          exit 0
-
-      # استخراج الأخطاء المهمة من الـlogs
-      - name: Extract errors
-        shell: bash
-        run: |
-          {
-            echo "========================================"
-            echo "FLUTTER ANALYZE ERRORS"
-            echo "========================================"
-
-            grep -Ei \
-              "error •|ERROR|Error:|error:" \
-              flutter-analyze.log || true
-
-            echo ""
-            echo "========================================"
-            echo "IOS BUILD ERRORS"
-            echo "========================================"
-
-            grep -Ei \
-              "error:|error •|failed|Failed|failure|Swift Compiler Error|Provisioning|Signing|Development Team|not configured" \
-              ios-build.log || true
-
-            echo ""
-            echo "========================================"
-            echo "LAST 150 BUILD LOG LINES"
-            echo "========================================"
-
-            tail -n 150 ios-build.log
-
-          } | tee diagnostic-summary.txt
-
-      # رفع كل الملفات حتى لو حصل error
-      - name: Upload diagnostics
-        if: always()
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ios-diagnostics
-          path: |
-            flutter-analyze.log
-            ios-build.log
-            diagnostic-summary.txt
-          if-no-files-found: ignore
-          retention-days: 14
+          name: WatchTube-IPA
+          path: WatchTube-unsigned.ipa

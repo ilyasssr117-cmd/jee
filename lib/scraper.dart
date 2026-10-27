@@ -238,6 +238,11 @@ class Scraper {
     final body = await _get(uri);
     final document = html.parse(body);
     final selector = related ? config.relatedCardSelector : config.cardSelector;
+    return _videosFrom(document, uri, selector);
+  }
+
+  /// Every valid, non-duplicate video card of [document].
+  List<Video> _videosFrom(dom.Document document, Uri uri, String selector) {
     if (selector.trim().isEmpty) return const <Video>[];
 
     final videos = <Video>[];
@@ -261,6 +266,122 @@ class Scraper {
       '(${cards.length - videos.length} cards skipped: albums / duplicates)',
     );
     return videos;
+  }
+
+  // ---- Models (the channel / performer of a video) -------------------------
+
+  /// `https://site/models/slug/` for any link that points into a model page,
+  /// or null when [uri] is not a model link.
+  Uri? _modelBase(Uri uri) {
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    if (segments.length < 2 || segments.first.toLowerCase() != 'models') {
+      return null;
+    }
+    return uri.replace(
+      path: '/models/${segments[1]}/',
+      query: '',
+      fragment: '',
+    );
+  }
+
+  /// The models listed under a video ("Models:" row of the video page).
+  Future<List<ModelRef>> videoModels(Video video) async {
+    final pageUrl = video.pageUrl;
+    if (pageUrl == null || pageUrl.trim().isEmpty) return const <ModelRef>[];
+
+    final uri = config.baseUri.resolve(pageUrl);
+    final document = html.parse(await _get(uri));
+
+    // Preferred: the dedicated row; fallback: any model link in the info block.
+    var anchors = document.querySelectorAll('.media-models a[href]');
+    if (anchors.isEmpty) {
+      anchors = document.querySelectorAll('.media-info a[href*="/models/"]');
+    }
+
+    final models = <ModelRef>[];
+    final seen = <String>{};
+    for (final anchor in anchors) {
+      final target = _resolveHttp(anchor.attributes['href'], uri);
+      final base = target == null ? null : _modelBase(target);
+      if (base == null || !seen.add(base.toString())) continue;
+
+      var name = _collapse(anchor.text);
+      if (name.isEmpty) name = _collapse(anchor.attributes['title'] ?? '');
+      if (name.isEmpty) {
+        // Last resort: a readable name from the slug ("play-with-anny").
+        name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ').trim();
+      }
+      if (name.isEmpty) continue;
+      models.add(ModelRef(name: name, url: base.toString()));
+    }
+    debugPrint('[SCRAPER] ${models.length} models on ${uri.origin}');
+    return models;
+  }
+
+  /// One page of a model's videos: `.../models/slug/videos/`, then
+  /// `.../videos/2/`, `.../videos/3/`, ... An out-of-range page (HTTP 404)
+  /// returns an empty result instead of an error.
+  Future<ModelPageResult> modelPage(ModelRef model, {int page = 1}) async {
+    final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
+    final uri = page <= 1 ? base.resolve('videos/') : base.resolve('videos/$page/');
+
+    final String body;
+    try {
+      body = await _get(uri);
+    } on ScraperException catch (error) {
+      if (page > 1 && error.statusCode == 404) {
+        return const ModelPageResult(videos: <Video>[]);
+      }
+      rethrow;
+    }
+
+    final document = html.parse(body);
+    return ModelPageResult(
+      videos: _videosFrom(document, uri, config.cardSelector),
+      profile: page <= 1 ? _modelProfile(document, uri, model) : null,
+    );
+  }
+
+  /// Name and photo from the page's schema.org `Person` block. Models without
+  /// a photo simply have no `image`.
+  ModelProfile _modelProfile(dom.Document document, Uri pageUri, ModelRef model) {
+    String? name;
+    String? image;
+
+    void walk(Object? node) {
+      if (node is List) {
+        node.forEach(walk);
+      } else if (node is Map) {
+        final type = node['@type'];
+        final isPerson = type == 'Person' || (type is List && type.contains('Person'));
+        if (isPerson && name == null) {
+          final rawName = node['name']?.toString().trim() ?? '';
+          if (rawName.isNotEmpty) name = rawName;
+          final raw = node['image'];
+          String? candidate;
+          if (raw is String) {
+            candidate = raw;
+          } else if (raw is List && raw.isNotEmpty) {
+            final first = raw.first;
+            candidate = first is Map ? first['url']?.toString() : first?.toString();
+          } else if (raw is Map) {
+            candidate = raw['url']?.toString();
+          }
+          image = _absoluteUrl(candidate, pageUri);
+        }
+        node.values.forEach(walk);
+      }
+    }
+
+    for (final script
+        in document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        walk(jsonDecode(script.text));
+      } catch (_) {
+        // Not valid JSON: ignore this block.
+      }
+    }
+    return ModelProfile(name: name ?? model.name, imageUrl: image);
   }
 
   // ---- Card parsing -------------------------------------------------------

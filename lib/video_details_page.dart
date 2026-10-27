@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'favorites_store.dart';
+import 'model_page.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
@@ -34,6 +35,7 @@ class VideoDetailsPage extends StatefulWidget {
 
 class _VideoDetailsPageState extends State<VideoDetailsPage> {
   late Future<List<Video>> _relatedFuture;
+  late Future<List<ModelRef>> _modelsFuture;
   final ScrollController _scroll = ScrollController();
 
   /// Status-bar icons are light while the dark header is under them.
@@ -46,6 +48,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   void initState() {
     super.initState();
     _relatedFuture = _loadRelated();
+    _modelsFuture = _loadModels();
     _scroll.addListener(() {
       final over = !_scroll.hasClients || _scroll.offset < _headerLimit;
       if (over != _overHeader.value) _overHeader.value = over;
@@ -63,6 +66,18 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         widget.video.id,
         () => videoRepository.getRelated(widget.video),
       );
+
+  /// The models / channel that published this video (from its page).
+  Future<List<ModelRef>> _loadModels() => modelsCache.fetch(
+        widget.video.id,
+        () => videoRepository.getVideoModels(widget.video),
+      );
+
+  void _openModel(ModelRef model) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => ModelPage(model: model)),
+    );
+  }
 
   void _reloadRelated() {
     relatedCache.clear();
@@ -133,6 +148,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         ),
         slivers: [
           SliverToBoxAdapter(child: _buildHeader(margin)),
+          SliverToBoxAdapter(child: _buildModels(margin)),
           SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
           _buildRelated(margin),
           SliverToBoxAdapter(
@@ -394,6 +410,46 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   double _headerHeight(Size size) => math.min(size.height * 0.5, 460.0);
 
+  /// "Models:" under the video: who published it. Tap one to see all of that
+  /// model's videos. Hidden while loading, on failure and when there is none.
+  Widget _buildModels(double margin) {
+    return FutureBuilder<List<ModelRef>>(
+      future: _modelsFuture,
+      builder: (context, snapshot) {
+        final models = snapshot.data ?? const <ModelRef>[];
+        if (snapshot.connectionState != ConnectionState.done ||
+            snapshot.hasError ||
+            models.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: EdgeInsets.fromLTRB(margin, Gaps.lg, margin, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                models.length == 1 ? 'Model' : 'Models',
+                style: AppText.label.copyWith(color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: Gaps.sm),
+              Wrap(
+                spacing: Gaps.sm,
+                runSpacing: Gaps.sm,
+                children: [
+                  for (final model in models)
+                    _ModelChip(
+                      name: model.name,
+                      onPressed: () => _openModel(model),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildRelatedTitle(double margin) {
     return FutureBuilder<List<Video>>(
       future: _relatedFuture,
@@ -461,6 +517,59 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
         return content;
       },
+    );
+  }
+}
+
+/// Pill with the model's name; opens that model's page.
+class _ModelChip extends StatelessWidget {
+  const _ModelChip({required this.name, required this.onPressed});
+
+  final String name;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      semanticLabel: 'Model $name',
+      haptic: Haptic.selection,
+      pressedScale: 0.95,
+      onTap: onPressed,
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.only(left: 10, right: 14),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceHigh,
+          borderRadius: BorderRadius.circular(Radii.pill),
+          border: Border.all(color: AppColors.outline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.person_rounded, size: 18, color: AppColors.accent),
+            const SizedBox(width: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.label.copyWith(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: AppColors.textTertiary,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

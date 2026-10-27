@@ -65,3 +65,35 @@ class Video {
     );
   }
 }
+
+/// A model / channel that published a video (the "Models:" row of its page).
+class ModelRef {
+  const ModelRef({required this.name, required this.url});
+
+  final String name;
+
+  /// Model page, always ending with a slash: `https://site/models/slug/`.
+  final String url;
+
+  @override
+  bool operator ==(Object other) => other is ModelRef && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}
+
+/// Name and photo of a model. The photo is missing for some models.
+class ModelProfile {
+  const ModelProfile({required this.name, this.imageUrl});
+
+  final String name;
+  final String? imageUrl;
+}
+
+/// One page of a model's videos. [profile] is only read from the first page.
+class ModelPageResult {
+  const ModelPageResult({required this.videos, this.profile});
+
+  final List<Video> videos;
+  final ModelProfile? profile;
+}

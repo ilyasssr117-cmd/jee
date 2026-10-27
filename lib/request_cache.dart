@@ -71,7 +71,12 @@ final TtlCache<List<Video>> listingCache =
 final TtlCache<List<Video>> relatedCache =
     TtlCache<List<Video>>(ttl: const Duration(minutes: 15), maxEntries: 30);
 
+/// "Models:" row of a video, by video id.
+final TtlCache<List<ModelRef>> modelsCache =
+    TtlCache<List<ModelRef>>(ttl: const Duration(minutes: 30), maxEntries: 60);
+
 void clearRequestCaches() {
   listingCache.clear();
   relatedCache.clear();
+  modelsCache.clear();
 }

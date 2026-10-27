@@ -342,6 +342,141 @@ class Scraper {
     );
   }
 
+  /// First usable address of an <img>: lazy-load attributes come before `src`
+  /// (usually a 1px `data:` placeholder). Empty values and `data:` URIs are
+  /// skipped.
+  String? _imageSource(dom.Element? image) {
+    if (image == null) return null;
+    const names = ['data-src', 'data-original', 'data-webp', 'src'];
+    for (final name in names) {
+      final value = image.attributes[name]?.trim();
+      if (value != null && value.isNotEmpty && !value.startsWith('data:')) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  // ---- Photo albums of a model -------------------------------------------
+
+  /// One page of a model's albums: `.../models/slug/albums/`, then
+  /// `.../albums/2/`. A page past the end (HTTP 404) is empty.
+  Future<List<AlbumRef>> modelAlbums(ModelRef model, {int page = 1}) async {
+    final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
+    final uri = page <= 1 ? base.resolve('albums/') : base.resolve('albums/$page/');
+
+    final String body;
+    try {
+      body = await _get(uri);
+    } on ScraperException catch (error) {
+      if (page > 1 && error.statusCode == 404) return const <AlbumRef>[];
+      rethrow;
+    }
+    final document = html.parse(body);
+
+    // Album cards carry `thumb--albums`; fall back to any card whose link
+    // points into /albums/.
+    var cards = document.querySelectorAll('.thumb--albums');
+    if (cards.isEmpty) {
+      cards = document
+          .querySelectorAll(config.cardSelector)
+          .where((c) => c.querySelector('a[href*="/albums/"]') != null)
+          .toList();
+    }
+
+    final albums = <AlbumRef>[];
+    final seen = <String>{};
+    for (final card in cards) {
+      final anchor = card.localName == 'a' ? card : card.querySelector('a[href]');
+      final target = _resolveHttp(anchor?.attributes['href'], uri);
+      if (anchor == null || target == null) continue;
+      final segments = target.pathSegments.where((s) => s.isNotEmpty).toList();
+      if (segments.length < 2 || segments.first.toLowerCase() != 'albums') {
+        continue;
+      }
+      final id = '${target.host}${target.path}';
+      if (!seen.add(id)) continue;
+
+      final image = card.querySelector('img');
+      var title = _collapse(anchor.attributes['title'] ?? '');
+      if (title.isEmpty) {
+        title = _collapse(
+          card.querySelector('.thumb__title, .title')?.text ?? '',
+        );
+      }
+      if (title.isEmpty) title = _collapse(image?.attributes['alt'] ?? '');
+      if (title.isEmpty) {
+        title = segments.last.replaceAll(RegExp(r'[-_]+'), ' ').trim();
+      }
+      albums.add(AlbumRef(
+        id: id,
+        title: title,
+        url: target.toString(),
+        thumbnailUrl: _absoluteUrl(_imageSource(image), uri),
+      ));
+    }
+    debugPrint('[SCRAPER] ${albums.length} albums at ${uri.origin}');
+    return albums;
+  }
+
+  /// Photos of an album, in chunks: chunk 1 is the album page itself, chunk
+  /// N >= 2 is the site's "load more" request
+  /// (`?mode=async&function=get_block&block_id=album_view_album_view&load=more&from=N`).
+  /// An out-of-range chunk is empty.
+  Future<List<AlbumPhoto>> albumPhotos(AlbumRef album, {int chunk = 1}) async {
+    final base = Uri.parse(album.url);
+    final uri = chunk <= 1
+        ? base
+        : base.replace(queryParameters: <String, String>{
+            ...base.queryParameters,
+            'mode': 'async',
+            'function': 'get_block',
+            'block_id': 'album_view_album_view',
+            'load': 'more',
+            'from': '$chunk',
+          });
+
+    final String body;
+    try {
+      body = await _get(uri);
+    } on ScraperException catch (error) {
+      final status = error.statusCode;
+      if (chunk > 1 && status != null && status >= 400 && status < 500) {
+        return const <AlbumPhoto>[];
+      }
+      rethrow;
+    }
+    final document = html.parse(body);
+
+    var anchors = document.querySelectorAll('a.grid-item[href]');
+    if (anchors.isEmpty) {
+      anchors = document.querySelectorAll('#albumGallery .item a[href], .album-view .item a[href]');
+    }
+
+    final photos = <AlbumPhoto>[];
+    final seen = <String>{};
+    for (final anchor in anchors) {
+      final image = anchor.querySelector('img');
+      if (image == null) continue; // Not a picture tile.
+      final full = _absoluteUrl(anchor.attributes['href'], uri);
+      if (full == null) continue;
+      final thumb = _absoluteUrl(_imageSource(image), uri) ?? full;
+      final id = _photoId(full);
+      if (!seen.add(id)) continue;
+      photos.add(AlbumPhoto(id: id, thumbUrl: thumb, fullUrl: full));
+    }
+    debugPrint('[SCRAPER] ${photos.length} photos (chunk $chunk)');
+    return photos;
+  }
+
+  /// Stable id of a picture: the file part of its address (the access token in
+  /// the query changes on every request).
+  static String _photoId(String url) {
+    final path = Uri.tryParse(url)?.path ?? url;
+    final match = RegExp(r'/sources/(.+?)/?$').firstMatch(path);
+    return match?.group(1) ?? path;
+  }
+
   /// Name and photo from the page's schema.org `Person` block. Models without
   /// a photo simply have no `image`.
   ModelProfile _modelProfile(dom.Document document, Uri pageUri, ModelRef model) {

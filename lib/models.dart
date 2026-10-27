@@ -97,3 +97,40 @@ class ModelPageResult {
   final List<Video> videos;
   final ModelProfile? profile;
 }
+
+/// A photo album of a model (`/albums/<id>/<slug>/`).
+class AlbumRef {
+  const AlbumRef({
+    required this.id,
+    required this.title,
+    required this.url,
+    this.thumbnailUrl,
+  });
+
+  final String id;
+  final String title;
+  final String url;
+
+  /// The album's preview picture (portrait), when the card has one.
+  final String? thumbnailUrl;
+
+  @override
+  bool operator ==(Object other) => other is AlbumRef && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+/// One picture of an album: a small thumbnail for the grid and the address of
+/// the full-size picture for the viewer.
+class AlbumPhoto {
+  const AlbumPhoto({
+    required this.id,
+    required this.thumbUrl,
+    required this.fullUrl,
+  });
+
+  final String id;
+  final String thumbUrl;
+  final String fullUrl;
+}

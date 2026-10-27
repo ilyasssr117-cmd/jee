@@ -32,6 +32,12 @@ abstract class VideoCatalogRepository {
   /// One page (1-based) of [model]'s videos. Empty after the last page.
   Future<ModelPageResult> getModelPage(ModelRef model, {int page = 1});
 
+  /// One page (1-based) of [model]'s photo albums. Empty after the last page.
+  Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1});
+
+  /// One chunk (1-based) of an album's photos. Empty after the last chunk.
+  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 1});
+
   Future<String> getPlaybackCookieHeader({
     required Uri streamUri,
     String? pageUrl,
@@ -230,6 +236,18 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     final result = await scraper.modelPage(model, page: page);
     debugPrint('[FLOW] repository: model page returned ${result.videos.length} videos');
     return result;
+  }
+
+  @override
+  Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1}) async {
+    _ensureConfigured();
+    return scraper.modelAlbums(model, page: page);
+  }
+
+  @override
+  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 1}) async {
+    _ensureConfigured();
+    return scraper.albumPhotos(album, chunk: chunk);
   }
 
   @override

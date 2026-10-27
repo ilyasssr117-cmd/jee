@@ -154,4 +154,111 @@ void main() {
     );
     scraper.close();
   });
+
+  test('albums page lists albums with their preview pictures', () async {
+    final requested = <String>[];
+    final client = MockClient((request) async {
+      requested.add(request.url.path);
+      return http.Response('''
+        <html><body><div class="thumbs__list">
+          <div class="item thumb thumb--albums">
+            <a href="https://x.example.test/albums/6078/grazi-pictures-9/" title="Goddess Grazi pictures 9">
+              <div class="img-holder">
+                <img class="lazyload" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                     data-src="https://storage4.example.test/contents/albums/preview/576x760/6000/6078/preview.jpg" alt="pictures 9">
+              </div>
+            </a>
+          </div>
+          <div class="item thumb thumb--albums">
+            <a href="/albums/37/playwithanny-pictures/">
+              <div class="img-holder"><img data-src="/contents/albums/37.jpg" alt="Playwithanny pictures"></div>
+            </a>
+          </div>
+        </div></body></html>''', 200);
+    });
+    final scraper = _scraper(client);
+    const model = ModelRef(
+      name: 'Playwithanny',
+      url: 'https://x.example.test/models/playwithanny/',
+    );
+
+    final albums = await scraper.modelAlbums(model);
+
+    expect(requested.single, '/models/playwithanny/albums/');
+    expect(albums, hasLength(2));
+    expect(albums[0].title, 'Goddess Grazi pictures 9');
+    expect(albums[0].url,
+        'https://x.example.test/albums/6078/grazi-pictures-9/');
+    expect(albums[0].thumbnailUrl,
+        'https://storage4.example.test/contents/albums/preview/576x760/6000/6078/preview.jpg');
+    expect(albums[1].title, 'Playwithanny pictures');
+    expect(albums[1].thumbnailUrl,
+        'https://x.example.test/contents/albums/37.jpg');
+    scraper.close();
+  });
+
+  test('a model without albums gives an empty list and later pages end', () async {
+    final client = MockClient((request) async => request.url.path.endsWith('/albums/2/')
+        ? http.Response('nope', 404)
+        : http.Response('<html><body></body></html>', 200));
+    final scraper = _scraper(client);
+    const model = ModelRef(name: 'M', url: 'https://x.example.test/models/m/');
+    expect(await scraper.modelAlbums(model), isEmpty);
+    expect(await scraper.modelAlbums(model, page: 2), isEmpty);
+    scraper.close();
+  });
+
+  test('album photos load chunk by chunk with the site load-more request', () async {
+    final seen = <Uri>[];
+    final client = MockClient((request) async {
+      seen.add(request.url);
+      final from = request.url.queryParameters['from'];
+      if (from == null) {
+        return http.Response('''
+          <div class="album-view photo-holder"><div class="grid" id="albumGallery">
+            <div class="item"><a href="https://x.example.test/get_image/10/aaa/sources/0/37/29944.jpg/?i-acctoken=T1" class="grid-item">
+              <img src="https://storage4.example.test/contents/albums/main/200x150/0/37/29944.jpg"></a></div>
+            <div class="item"><a href="https://x.example.test/get_image/10/bbb/sources/0/37/29945.jpg/?i-acctoken=T1" class="grid-item">
+              <img src="data:image/gif;base64,AAAA" data-webp="https://storage4.example.test/contents/albums/main/200x150/0/37/29945.jpg"></a></div>
+          </div></div>''', 200);
+      }
+      if (from == '2') {
+        // One new picture and one repeated (token differs, file is the same).
+        return http.Response('''
+          <div class="item"><a href="https://x.example.test/get_image/10/aaa/sources/0/37/29944.jpg/?i-acctoken=T2" class="grid-item">
+            <img src="https://storage4.example.test/contents/albums/main/200x150/0/37/29944.jpg"></a></div>
+          <div class="item"><a href="https://x.example.test/get_image/10/ccc/sources/0/37/29946.jpg/?i-acctoken=T2" class="grid-item">
+            <img src="https://storage4.example.test/contents/albums/main/200x150/0/37/29946.jpg"></a></div>''', 200);
+      }
+      return http.Response('gone', 404);
+    });
+    final scraper = _scraper(client);
+    const album = AlbumRef(
+      id: 'x.example.test/albums/37/playwithanny-pictures/',
+      title: 'Playwithanny pictures',
+      url: 'https://x.example.test/albums/37/playwithanny-pictures/',
+    );
+
+    final first = await scraper.albumPhotos(album);
+    final second = await scraper.albumPhotos(album, chunk: 2);
+    final third = await scraper.albumPhotos(album, chunk: 3);
+
+    expect(first.map((p) => p.id), <String>['0/37/29944.jpg', '0/37/29945.jpg']);
+    expect(first[0].fullUrl, contains('/sources/0/37/29944.jpg/'));
+    expect(first[0].thumbUrl,
+        'https://storage4.example.test/contents/albums/main/200x150/0/37/29944.jpg');
+    // The placeholder data: image is skipped in favour of data-webp.
+    expect(first[1].thumbUrl,
+        'https://storage4.example.test/contents/albums/main/200x150/0/37/29945.jpg');
+    expect(second.map((p) => p.id), <String>['0/37/29944.jpg', '0/37/29946.jpg']);
+    expect(third, isEmpty);
+
+    final more = seen[1].queryParameters;
+    expect(more['mode'], 'async');
+    expect(more['function'], 'get_block');
+    expect(more['block_id'], 'album_view_album_view');
+    expect(more['load'], 'more');
+    expect(more['from'], '2');
+    scraper.close();
+  });
 }

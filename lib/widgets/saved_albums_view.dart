@@ -44,10 +44,17 @@ class SavedAlbumsView extends StatelessWidget {
             onAction: onBrowse,
           );
         }
+        // One section per model, so albums of different models never mix.
+        final groups = <String, List<SavedAlbum>>{};
+        for (final album in albums) {
+          final name = (album.modelName ?? '').trim();
+          groups.putIfAbsent(name.isEmpty ? 'Other albums' : name, () => <SavedAlbum>[]).add(album);
+        }
+
         return CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: EdgeInsets.fromLTRB(margin, Gaps.sm, margin, Gaps.sm),
+              padding: EdgeInsets.fromLTRB(margin, Gaps.sm, margin, Gaps.xs),
               sliver: SliverToBoxAdapter(
                 child: Text(
                   '${albums.length} album${albums.length == 1 ? '' : 's'}'
@@ -56,29 +63,50 @@ class SavedAlbumsView extends StatelessWidget {
                 ),
               ),
             ),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                margin,
-                0,
-                margin,
-                Gaps.xl + bottomInset,
-              ),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: Gaps.md,
-                  mainAxisSpacing: Gaps.lg,
-                  childAspectRatio: 0.62,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => _SavedAlbumCard(
-                    key: ValueKey<String>(albums[index].id),
-                    album: albums[index],
+            for (final entry in groups.entries) ...[
+              SliverPadding(
+                padding: EdgeInsets.fromLTRB(margin, Gaps.lg, margin, Gaps.sm),
+                sliver: SliverToBoxAdapter(
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_rounded, size: 18, color: AppColors.accent),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          entry.key,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.title,
+                        ),
+                      ),
+                      Text(
+                        '${entry.value.length} album${entry.value.length == 1 ? '' : 's'}',
+                        style: AppText.caption,
+                      ),
+                    ],
                   ),
-                  childCount: albums.length,
                 ),
               ),
-            ),
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: margin),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: Gaps.md,
+                    mainAxisSpacing: Gaps.lg,
+                    childAspectRatio: 0.62,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => _SavedAlbumCard(
+                      key: ValueKey<String>(entry.value[index].id),
+                      album: entry.value[index],
+                    ),
+                    childCount: entry.value.length,
+                  ),
+                ),
+              ),
+            ],
+            SliverToBoxAdapter(child: SizedBox(height: Gaps.xl + bottomInset)),
           ],
         );
       },

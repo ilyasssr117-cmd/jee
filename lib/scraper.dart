@@ -168,12 +168,12 @@ class Scraper {
         'Referer': '${config.baseUri}/',
       };
 
-  Future<String> _get(Uri uri) async {
+  Future<String> _get(Uri uri, {Map<String, String>? extraHeaders}) async {
     ScraperException? lastError;
     // One automatic retry for network hiccups and 5xx responses.
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        return await _getOnce(uri);
+        return await _getOnce(uri, extraHeaders);
       } on ScraperException catch (error) {
         final status = error.statusCode;
         if (status != null && status < 500) {
@@ -188,11 +188,11 @@ class Scraper {
     throw lastError ?? const ScraperException('The source could not be read.');
   }
 
-  Future<String> _getOnce(Uri uri) async {
+  Future<String> _getOnce(Uri uri, Map<String, String>? extraHeaders) async {
     try {
       debugPrint('[SCRAPER] GET ${uri.origin}');
       final response = await _client
-          .get(uri, headers: _headers)
+          .get(uri, headers: <String, String>{..._headers, ...?extraHeaders})
           .timeout(config.timeout);
       debugPrint('[SCRAPER] HTTP ${response.statusCode} from ${uri.origin}');
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -225,9 +225,18 @@ class Scraper {
     return list(page == 0 ? config.homeUri() : config.pageUri(page));
   }
 
-  Future<List<Video>> search(String query, {int page = 1}) {
+  /// [sortBy]: `post_date` (newest) or `duration` (longest); null = relevance.
+  Future<List<Video>> search(String query, {int page = 1, String? sortBy}) {
     if (query.trim().isEmpty) return Future.value(const <Video>[]);
-    return list(config.searchUri(query, page));
+    var uri = config.searchUri(query, page);
+    if (sortBy != null && sortBy.isNotEmpty) {
+      // e.g. /search/Playwithanny/?by=post_date, kept on every page.
+      uri = uri.replace(queryParameters: <String, String>{
+        ...uri.queryParameters,
+        'by': sortBy,
+      });
+    }
+    return list(uri);
   }
 
   Future<List<Video>> category(String slug, {int page = 1}) {
@@ -372,10 +381,13 @@ class Scraper {
       if (page > 1 && error.statusCode == 404) return const <AlbumRef>[];
       rethrow;
     }
-    final document = html.parse(body);
+    final albums = _albumsFrom(html.parse(body), uri, modelName: model.name);
+    debugPrint('[SCRAPER] ${albums.length} albums at ${uri.origin}');
+    return albums;
+  }
 
-    // Album cards carry `thumb--albums`; fall back to any card whose link
-    // points into /albums/.
+  /// Album cards of a page (`.thumb--albums`, or any card linking to /albums/).
+  List<AlbumRef> _albumsFrom(dom.Document document, Uri uri, {String? modelName}) {
     var cards = document.querySelectorAll('.thumb--albums');
     if (cards.isEmpty) {
       cards = document
@@ -413,35 +425,48 @@ class Scraper {
         title: title,
         url: target.toString(),
         thumbnailUrl: _absoluteUrl(_imageSource(image), uri),
+        modelName: modelName,
       ));
     }
-    debugPrint('[SCRAPER] ${albums.length} albums at ${uri.origin}');
     return albums;
   }
 
-  /// Photos of an album, in chunks: chunk 1 is the album page itself, chunk
-  /// N >= 2 is the site's "load more" request
-  /// (`?mode=async&function=get_block&block_id=album_view_album_view&load=more&from=N`).
-  /// An out-of-range chunk is empty.
-  Future<List<AlbumPhoto>> albumPhotos(AlbumRef album, {int chunk = 1}) async {
+  /// Photos of an album, in chunks. Chunk 0 is the album page itself; chunk
+  /// N >= 1 is the site's "load more" request
+  /// `?mode=async&function=get_block&block_id=album_view_album_view&load=more&from=N`
+  /// (from=1, 2, 3, ... until a request returns no picture at all).
+  ///
+  /// The async request is sent like the page's own script does (AJAX header,
+  /// the album as Referer); without that the site may answer with the whole
+  /// page again and the later pictures never arrive.
+  Future<List<AlbumPhoto>> albumPhotos(AlbumRef album, {int chunk = 0}) async {
     final base = Uri.parse(album.url);
-    final uri = chunk <= 1
-        ? base
-        : base.replace(queryParameters: <String, String>{
-            ...base.queryParameters,
-            'mode': 'async',
-            'function': 'get_block',
-            'block_id': 'album_view_album_view',
-            'load': 'more',
-            'from': '$chunk',
-          });
+    final Uri uri;
+    Map<String, String>? extra;
+    if (chunk <= 0) {
+      uri = base;
+    } else {
+      uri = base.replace(queryParameters: <String, String>{
+        ...base.queryParameters,
+        'mode': 'async',
+        'function': 'get_block',
+        'block_id': 'album_view_album_view',
+        'load': 'more',
+        'from': '$chunk',
+      });
+      extra = <String, String>{
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': album.url,
+        'Accept': '*/*',
+      };
+    }
 
     final String body;
     try {
-      body = await _get(uri);
+      body = await _get(uri, extraHeaders: extra);
     } on ScraperException catch (error) {
       final status = error.statusCode;
-      if (chunk > 1 && status != null && status >= 400 && status < 500) {
+      if (chunk > 0 && status != null && status >= 400 && status < 500) {
         return const <AlbumPhoto>[];
       }
       rethrow;
@@ -450,7 +475,9 @@ class Scraper {
 
     var anchors = document.querySelectorAll('a.grid-item[href]');
     if (anchors.isEmpty) {
-      anchors = document.querySelectorAll('#albumGallery .item a[href], .album-view .item a[href]');
+      anchors = document.querySelectorAll(
+        '#albumGallery .item a[href], .album-view .item a[href], .photo-holder .item a[href]',
+      );
     }
 
     final photos = <AlbumPhoto>[];
@@ -477,8 +504,9 @@ class Scraper {
     return match?.group(1) ?? path;
   }
 
-  /// Name and photo from the page's schema.org `Person` block. Models without
-  /// a photo simply have no `image`.
+  /// Name and photo of a model: the schema.org `Person` block first, then the
+  /// `og:image` / `twitter:image` meta tags, then any `"image"` value in the
+  /// page's JSON. Models without a photo simply end up with no image.
   ModelProfile _modelProfile(dom.Document document, Uri pageUri, ModelRef model) {
     String? name;
     String? image;
@@ -508,15 +536,164 @@ class Scraper {
       }
     }
 
-    for (final script
-        in document.querySelectorAll('script[type="application/ld+json"]')) {
+    final blocks = document.querySelectorAll('script[type="application/ld+json"]');
+    for (final script in blocks) {
       try {
         walk(jsonDecode(script.text));
       } catch (_) {
-        // Not valid JSON: ignore this block.
+        // Not valid JSON: the fallbacks below still look at the text.
       }
     }
+
+    if (image == null) {
+      for (final selector in const [
+        'meta[property="og:image"]',
+        'meta[name="twitter:image"]',
+        'link[rel="image_src"]',
+      ]) {
+        final element = document.querySelector(selector);
+        final value = element?.attributes['content'] ?? element?.attributes['href'];
+        final url = _absoluteUrl(value, pageUri);
+        if (url != null) {
+          image = url;
+          break;
+        }
+      }
+    }
+    if (image == null) {
+      // Broken JSON-LD: read the image straight from the text.
+      for (final script in blocks) {
+        final match = RegExp(r'"image"\s*:\s*"([^"]+)"').firstMatch(script.text);
+        final url = _absoluteUrl(match?.group(1)?.replaceAll(r'\/', '/'), pageUri);
+        if (url != null) {
+          image = url;
+          break;
+        }
+      }
+    }
+    if (name == null) {
+      final raw = RegExp(r'"name"\s*:\s*"([^"]+)"');
+      for (final script in blocks) {
+        final match = raw.firstMatch(script.text);
+        if (match != null) {
+          name = match.group(1)!.trim();
+          break;
+        }
+      }
+    }
+    debugPrint('[SCRAPER] Model "${name ?? model.name}": '
+        '${image == null ? 'no photo' : 'photo found'}');
     return ModelProfile(name: name ?? model.name, imageUrl: image);
+  }
+
+  /// Profile only (name + photo) of a model.
+  Future<ModelProfile> modelProfile(ModelRef model) async {
+    final result = await modelPage(model);
+    return result.profile ?? ModelProfile(name: model.name);
+  }
+
+  // ---- "Models & Albums" search --------------------------------------------
+
+  /// Smart search for models and albums:
+  ///
+  /// 1. the query is also tried as a model address (`play with anny` ->
+  ///    `/models/play-with-anny/`, `/models/playwithanny/`), so typing a model
+  ///    name finds it directly;
+  /// 2. model links and album cards found on the site's search page;
+  /// 3. the albums of the best matching models, so their photos are one tap
+  ///    away.
+  Future<PeopleSearchResult> searchPeople(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return const PeopleSearchResult(models: [], albums: []);
+
+    final models = <String, ModelRef>{}; // by address
+    final albums = <String, AlbumRef>{}; // by id
+
+    // 1. Direct guesses.
+    final slugs = <String>{
+      ScraperConfig._slugify(q),
+      q.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
+    }..removeWhere((s) => s.isEmpty);
+    await Future.wait<void>([
+      for (final slug in slugs)
+        () async {
+          final ref = ModelRef(
+            name: q,
+            url: config.baseUri.resolve('models/$slug/').toString(),
+          );
+          try {
+            final page = await modelPage(ref);
+            final profile = page.profile;
+            models.putIfAbsent(
+              ref.url,
+              () => ModelRef(
+                name: profile?.name ?? q,
+                url: ref.url,
+                imageUrl: profile?.imageUrl,
+              ),
+            );
+          } on ScraperException {
+            // No such model: ignore.
+          }
+        }(),
+    ]);
+
+    // 2. The site's own search page.
+    try {
+      final uri = config.searchUri(q, 1);
+      final document = html.parse(await _get(uri));
+      for (final anchor in document.querySelectorAll('a[href*="/models/"]')) {
+        final target = _resolveHttp(anchor.attributes['href'], uri);
+        final base = target == null ? null : _modelBase(target);
+        if (base == null || models.containsKey(base.toString())) continue;
+        var name = _collapse(anchor.text);
+        if (name.isEmpty) name = _collapse(anchor.attributes['title'] ?? '');
+        if (name.isEmpty) name = _collapse(anchor.querySelector('img')?.attributes['alt'] ?? '');
+        if (name.isEmpty) name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ');
+        models[base.toString()] = ModelRef(
+          name: name,
+          url: base.toString(),
+          imageUrl: _absoluteUrl(_imageSource(anchor.querySelector('img')), uri),
+        );
+      }
+      for (final album in _albumsFrom(document, uri)) {
+        albums.putIfAbsent(album.id, () => album);
+      }
+    } on ScraperException catch (error) {
+      debugPrint('[SCRAPER] People search page failed: ${error.message}');
+    }
+
+    // Best matches first: exact name, then names starting with the query.
+    final lower = q.toLowerCase();
+    int rank(ModelRef m) {
+      final n = m.name.toLowerCase();
+      if (n == lower) return 0;
+      if (n.startsWith(lower)) return 1;
+      if (n.contains(lower)) return 2;
+      return 3;
+    }
+
+    final sorted = models.values.toList()
+      ..sort((a, b) => rank(a).compareTo(rank(b)));
+
+    // 3. Albums of the best matches.
+    await Future.wait<void>([
+      for (final model in sorted.take(3))
+        () async {
+          try {
+            for (final album in await modelAlbums(model)) {
+              albums.putIfAbsent(album.id, () => album);
+            }
+          } on ScraperException {
+            // That model has no albums page.
+          }
+        }(),
+    ]);
+
+    return PeopleSearchResult(
+      models: sorted.take(20).toList(),
+      albums: albums.values.toList(),
+    );
   }
 
   // ---- Card parsing -------------------------------------------------------

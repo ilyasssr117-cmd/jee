@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../album_page.dart';
 import '../app_theme.dart';
 import '../error_text.dart';
 import '../models.dart';
@@ -10,8 +11,25 @@ import '../search_history.dart';
 import '../touch.dart';
 import '../video_repository.dart';
 import 'app_button.dart';
+import 'model_row.dart';
 import 'state_views.dart';
 import 'video_grid.dart';
+
+/// What the search looks for.
+enum SearchScope { videos, people }
+
+/// Order of the video results (the site's `?by=` filter).
+enum SearchSort {
+  relevant(null, 'Relevant'),
+  newest('post_date', 'Newest'),
+  longest('duration', 'Longest');
+
+  const SearchSort(this.param, this.label);
+
+  /// Value of `?by=` on the site; null = the site's default order.
+  final String? param;
+  final String label;
+}
 
 /// Full-screen search that lives *on top of* the home page (no route).
 ///
@@ -64,6 +82,15 @@ class SearchOverlayState extends State<SearchOverlay> {
   bool _hasMore = false;
   FriendlyError? _error;
 
+  // Filters.
+  SearchScope _scope = SearchScope.videos;
+  SearchSort _sort = SearchSort.relevant;
+
+  // "Models & Albums" results.
+  PeopleSearchResult? _people;
+  bool _peopleLoading = false;
+  FriendlyError? _peopleError;
+
   @override
   void initState() {
     super.initState();
@@ -103,6 +130,8 @@ class SearchOverlayState extends State<SearchOverlay> {
         _awaiting = true;
         _query = '';
         _videos.clear();
+        _people = null;
+        _peopleLoading = false;
         _loading = false;
         _hasMore = false;
         _error = null;
@@ -127,6 +156,9 @@ class SearchOverlayState extends State<SearchOverlay> {
       _hasText = false;
       _awaiting = false;
       _videos.clear();
+      _people = null;
+      _peopleLoading = false;
+      _peopleError = null;
       _page = 0;
       _emptyPages = 0;
       _loading = false;
@@ -147,7 +179,63 @@ class SearchOverlayState extends State<SearchOverlay> {
     if (!mounted) return;
     _query = value;
     _awaiting = false;
-    _loadPage(reset: true);
+    if (_scope == SearchScope.people) {
+      _loadPeople();
+    } else {
+      _loadPage(reset: true);
+    }
+  }
+
+  void _setScope(SearchScope scope) {
+    if (scope == _scope) return;
+    setState(() => _scope = scope);
+    _searchAgain();
+  }
+
+  void _setSort(SearchSort sort) {
+    if (sort == _sort) return;
+    setState(() => _sort = sort);
+    _searchAgain();
+  }
+
+  /// A filter changed: repeat the current search with it.
+  void _searchAgain() {
+    final value = SearchHistory.normalize(_text.text);
+    if (value.length >= _minLength) {
+      _debounceTimer?.cancel();
+      _runSearch(value);
+    }
+  }
+
+  Future<void> _loadPeople() async {
+    final generation = ++_generation;
+    final text = _query;
+    setState(() {
+      _videos.clear();
+      _loading = false;
+      _hasMore = false;
+      _error = null;
+      _people = null;
+      _peopleError = null;
+      _peopleLoading = true;
+    });
+    try {
+      final result = await peopleCache.fetch(
+        'people|${text.toLowerCase()}',
+        () => videoRepository.searchPeople(text),
+      );
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _people = result;
+        _peopleLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _peopleLoading = false;
+        _peopleError = describeError(error, subject: 'search results');
+      });
+    }
   }
 
   /// The keyboard's Search key: search right now, remember it, hide keyboard.
@@ -157,7 +245,7 @@ class SearchOverlayState extends State<SearchOverlay> {
     if (value.isEmpty) return;
     SearchHistory.instance.add(value);
     _fieldNode.unfocus();
-    if (_loading && value == _query) return;
+    if ((_loading || _peopleLoading) && value == _query) return;
     setState(() => _hasText = true);
     _runSearch(value);
   }
@@ -206,11 +294,12 @@ class SearchOverlayState extends State<SearchOverlay> {
       final searchText = _query;
       final pageIndex = _page;
       final result = await listingCache.fetch(
-        'search|${searchText.toLowerCase()}|$pageIndex',
+        'search|${searchText.toLowerCase()}|${_sort.name}|$pageIndex',
         () => videoRepository.searchVideos(
           query: searchText,
           page: pageIndex,
           pageSize: _pageSize,
+          sortBy: _sort.param,
         ),
       );
       if (!mounted || generation != _generation) return;
@@ -274,6 +363,7 @@ class SearchOverlayState extends State<SearchOverlay> {
             ),
             child: _buildSearchBar(),
           ),
+          _buildFilters(margin),
           Expanded(child: _buildBody(margin)),
         ],
       ),
@@ -329,7 +419,9 @@ class SearchOverlayState extends State<SearchOverlay> {
                         decoration: InputDecoration(
                           isDense: true,
                           border: InputBorder.none,
-                          hintText: 'Search videos',
+                          hintText: _scope == SearchScope.people
+                              ? 'Search models & albums'
+                              : 'Search videos',
                           hintStyle: AppText.title.copyWith(
                             fontWeight: FontWeight.w400,
                             color: AppColors.textTertiary,
@@ -391,8 +483,164 @@ class SearchOverlayState extends State<SearchOverlay> {
     );
   }
 
+  /// Scope (Videos / Models & Albums) and, for videos, the order.
+  Widget _buildFilters(double margin) {
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.symmetric(horizontal: margin, vertical: 6),
+        children: [
+          AppChip(
+            label: 'Videos',
+            selected: _scope == SearchScope.videos,
+            onPressed: () => _setScope(SearchScope.videos),
+          ),
+          const SizedBox(width: Gaps.sm),
+          AppChip(
+            label: 'Models & Albums',
+            selected: _scope == SearchScope.people,
+            onPressed: () => _setScope(SearchScope.people),
+          ),
+          if (_scope == SearchScope.videos) ...[
+            const SizedBox(width: Gaps.md),
+            Container(
+              width: 1,
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              color: AppColors.outline,
+            ),
+            const SizedBox(width: Gaps.md),
+            for (final sort in SearchSort.values) ...[
+              AppChip(
+                label: sort.label,
+                selected: _sort == sort,
+                onPressed: () => _setSort(sort),
+              ),
+              const SizedBox(width: Gaps.sm),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Results of the "Models & Albums" search: models as rows, albums as cards.
+  Widget _buildPeopleBody(double margin) {
+    final typed = SearchHistory.normalize(_text.text);
+    if (_awaiting || typed.length < _minLength) {
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: margin, vertical: Gaps.xl),
+        child: Text(
+          typed.isEmpty
+              ? 'Type a model name.'
+              : 'Keep typing\u2026 (at least $_minLength letters)',
+          style: AppText.body,
+        ),
+      );
+    }
+    final error = _peopleError;
+    if (error != null) {
+      return StatusView(
+        icon: error.icon,
+        title: error.title,
+        message: error.message,
+        actionLabel: 'Retry',
+        onAction: _loadPeople,
+      );
+    }
+    final people = _people;
+    if (_peopleLoading || people == null) {
+      return const Center(child: Spinner());
+    }
+    if (people.isEmpty) {
+      return const StatusView(
+        icon: Icons.search_off_rounded,
+        title: 'No models or albums found',
+        message: 'Try the exact model name, for example \u201cPlaywithanny\u201d.',
+      );
+    }
+
+    return CustomScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      slivers: [
+        if (people.models.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(margin, Gaps.sm, margin, Gaps.xs),
+              child: Text(
+                'Models \u00b7 ${people.models.length}',
+                style: AppText.label.copyWith(color: AppColors.textSecondary),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: margin),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => ModelRow(
+                  key: ValueKey<String>(people.models[index].url),
+                  model: people.models[index],
+                ),
+                childCount: people.models.length,
+              ),
+            ),
+          ),
+        ],
+        if (people.albums.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(margin, Gaps.lg, margin, Gaps.sm),
+              child: Text(
+                'Albums \u00b7 ${people.albums.length}',
+                style: AppText.label.copyWith(color: AppColors.textSecondary),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: margin),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: Gaps.md,
+                mainAxisSpacing: Gaps.lg,
+                childAspectRatio: 0.62,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final album = people.albums[index];
+                  return AlbumCard(
+                    key: ValueKey<String>(album.id),
+                    album: album,
+                    subtitle: album.modelName,
+                    onTap: () {
+                      SearchHistory.instance.add(_query);
+                      _fieldNode.unfocus();
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => AlbumPage(
+                            album: album,
+                            modelName: album.modelName,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+                childCount: people.albums.length,
+              ),
+            ),
+          ),
+        ],
+        SliverToBoxAdapter(
+          child: SizedBox(height: Gaps.xl + widget.bottomInset),
+        ),
+      ],
+    );
+  }
+
   Widget _buildBody(double margin) {
     if (!_hasText) return _buildRecents(margin);
+    if (_scope == SearchScope.people) return _buildPeopleBody(margin);
 
     final gridPadding = EdgeInsets.fromLTRB(
       margin,
@@ -524,9 +772,11 @@ class SearchOverlayState extends State<SearchOverlay> {
       builder: (context, _) {
         final items = SearchHistory.instance.items;
         if (items.isEmpty) {
-          return const StatusView(
+          return StatusView(
             icon: Icons.search_rounded,
-            title: 'Search for videos',
+            title: _scope == SearchScope.people
+                ? 'Search for models & albums'
+                : 'Search for videos',
             message: 'Results appear as you type.',
           );
         }

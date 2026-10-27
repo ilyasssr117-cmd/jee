@@ -16,11 +16,19 @@ abstract class VideoCatalogRepository {
     String? category,
   });
 
+  /// [sortBy]: `post_date` (newest) or `duration` (longest); null = relevance.
   Future<List<Video>> searchVideos({
     required String query,
     required int page,
     required int pageSize,
+    String? sortBy,
   });
+
+  /// Models and albums matching [query] (the "Models & Albums" search).
+  Future<PeopleSearchResult> searchPeople(String query);
+
+  /// Name and photo of a model.
+  Future<ModelProfile> getModelProfile(ModelRef model);
 
   Future<List<Video>> getRelated(Video video, {int limit = 6});
 
@@ -35,8 +43,9 @@ abstract class VideoCatalogRepository {
   /// One page (1-based) of [model]'s photo albums. Empty after the last page.
   Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1});
 
-  /// One chunk (1-based) of an album's photos. Empty after the last chunk.
-  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 1});
+  /// One chunk of an album's photos: 0 = the album page, N >= 1 = the site's
+  /// "load more" request `from=N`. Empty after the last chunk.
+  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0});
 
   Future<String> getPlaybackCookieHeader({
     required Uri streamUri,
@@ -206,10 +215,11 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     required String query,
     required int page,
     required int pageSize,
+    String? sortBy,
   }) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: search query="$query" page=$page');
-    final videos = await scraper.search(query, page: page + 1);
+    debugPrint('[FLOW] repository: search query="$query" page=$page sort=$sortBy');
+    final videos = await scraper.search(query, page: page + 1, sortBy: sortBy);
     debugPrint('[FLOW] repository: search returned ${videos.length} videos');
     return videos;
   }
@@ -221,6 +231,18 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     final videos = await scraper.related(video, limit: limit);
     debugPrint('[FLOW] repository: related returned ${videos.length} videos');
     return videos;
+  }
+
+  @override
+  Future<PeopleSearchResult> searchPeople(String query) async {
+    _ensureConfigured();
+    return scraper.searchPeople(query);
+  }
+
+  @override
+  Future<ModelProfile> getModelProfile(ModelRef model) async {
+    _ensureConfigured();
+    return scraper.modelProfile(model);
   }
 
   @override
@@ -245,7 +267,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   }
 
   @override
-  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 1}) async {
+  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0}) async {
     _ensureConfigured();
     return scraper.albumPhotos(album, chunk: chunk);
   }

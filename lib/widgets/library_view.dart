@@ -11,13 +11,14 @@ import '../preview_manager.dart';
 import '../touch.dart';
 import 'app_button.dart';
 import 'dialogs.dart';
+import 'favorite_models_view.dart';
 import 'saved_albums_view.dart';
 import 'state_views.dart';
 import 'video_artwork.dart';
 import 'video_grid.dart';
 import 'video_preview.dart';
 
-enum LibrarySegment { favorites, history, downloads, albums }
+enum LibrarySegment { favorites, models, history, downloads, albums }
 
 /// The Library tab: Favorites, History, Downloads and saved photo Albums.
 class LibraryView extends StatefulWidget {
@@ -44,6 +45,7 @@ class _LibraryViewState extends State<LibraryView> {
 
   static const Map<LibrarySegment, String> _labels = <LibrarySegment, String>{
     LibrarySegment.favorites: 'Favorites',
+    LibrarySegment.models: 'Models',
     LibrarySegment.history: 'History',
     LibrarySegment.downloads: 'Downloads',
     LibrarySegment.albums: 'Albums',
@@ -101,6 +103,10 @@ class _LibraryViewState extends State<LibraryView> {
                 LibrarySegment.favorites => _buildFavorites(margin),
                 LibrarySegment.history => _buildHistory(margin),
                 LibrarySegment.downloads => _buildDownloads(margin),
+                LibrarySegment.models => FavoriteModelsView(
+                    onBrowse: widget.onBrowse,
+                    bottomInset: widget.bottomInset,
+                  ),
                 LibrarySegment.albums => SavedAlbumsView(
                     onBrowse: widget.onBrowse,
                     bottomInset: widget.bottomInset,

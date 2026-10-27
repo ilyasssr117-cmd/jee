@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
 import 'error_text.dart';
+import 'image_headers.dart';
 import 'models.dart';
 import 'native_bridge.dart';
+import 'photo_saver.dart';
 import 'photo_store.dart';
 import 'touch.dart';
 import 'video_repository.dart';
@@ -17,8 +19,9 @@ import 'widgets/state_views.dart';
 
 /// Loads every photo of one album, chunk after chunk, until the last one.
 ///
-/// Chunk 1 is the album page, the next chunks are the site's "load more"
-/// requests. The photos list grows while the chunks arrive.
+/// Chunk 0 is the album page, then the site's "load more" request is repeated
+/// with from=1, 2, 3, ... until a request returns no picture at all. The photos
+/// list grows while the chunks arrive.
 class AlbumLoader extends ChangeNotifier {
   AlbumLoader(this.album);
 
@@ -32,16 +35,15 @@ class AlbumLoader extends ChangeNotifier {
   bool finished = false;
   Object? error;
 
-  int _next = 1;
+  int _next = 0; // 0 = the album page, N >= 1 = "load more" from=N.
+  int _stale = 0; // Chunks in a row without any new picture.
   int _run = 0;
   bool _disposed = false;
   Completer<void> _done = Completer<void>();
 
-  /// Some image servers refuse pictures requested without a Referer.
-  Map<String, String>? get imageHeaders {
-    final origin = Uri.tryParse(album.url)?.origin;
-    return origin == null ? null : <String, String>{'Referer': '$origin/'};
-  }
+  /// Some image servers refuse pictures requested without a Referer (and a
+  /// browser-like client name).
+  Map<String, String>? get imageHeaders => imageHeadersFor(album.url);
 
   /// Completes when every chunk is loaded, or when loading stopped on an
   /// error (check [error]).
@@ -82,8 +84,12 @@ class AlbumLoader extends ChangeNotifier {
         }
       }
       _next++;
-      if (added == 0) {
-        // Nothing new: that was the last chunk.
+      _stale = added == 0 ? _stale + 1 : 0;
+      // The end: a request with no picture at all, or (safety against a site
+      // that repeats the last page forever) three requests in a row with
+      // nothing new. A repeated first page (from=1 can equal the page itself)
+      // is normal and does not stop the loading.
+      if (chunk.isEmpty || _stale >= 3) {
         loading = false;
         finished = true;
         _complete();
@@ -206,22 +212,48 @@ Future<void> savePhotosToAlbums(
   );
 }
 
-/// Sends saved files to the iOS share sheet ("Save N Images" = Photos app).
+/// Saves picture files into the phone's Photos app. If that is not possible
+/// (plugin missing), the iOS share sheet is opened instead.
 Future<void> sendToPhotos(BuildContext context, List<String> paths) async {
   if (paths.isEmpty) return;
+  if (paths.length > 1) {
+    showToast(
+      context,
+      'Saving ${paths.length} photos to Photos\u2026',
+      aboveBar: false,
+    );
+  }
+
+  final result = await PhotoSaver.saveToGallery(paths);
+  if (!context.mounted) return;
+
+  if (result.denied) {
+    showToast(
+      context,
+      'Allow access to Photos in Settings to save pictures.',
+      aboveBar: false,
+    );
+    return;
+  }
+  if (result.saved > 0) {
+    final partial = result.failed > 0 ? ' (${result.failed} failed)' : '';
+    showToast(
+      context,
+      result.saved == 1
+          ? 'Saved to Photos.'
+          : 'Saved ${result.saved} photos to Photos.$partial',
+      aboveBar: false,
+    );
+    return;
+  }
+
+  // Nothing could be saved directly: fall back to the share sheet.
   const limit = 150; // The share sheet gets slow with more files than this.
   final batch = paths.length > limit ? paths.sublist(0, limit) : paths;
   final ok = await NativeBridge.instance.shareFiles(batch);
   if (!context.mounted) return;
   if (!ok) {
-    showToast(
-      context,
-      paths.length > 1
-          ? 'Couldn\u2019t open the share sheet for several photos. '
-              'Open one photo and use Share.'
-          : 'Couldn\u2019t open the share sheet.',
-      aboveBar: false,
-    );
+    showToast(context, 'Couldn\u2019t save to Photos.', aboveBar: false);
   } else if (paths.length > limit) {
     showToast(
       context,
@@ -671,6 +703,76 @@ class PhotoGridSliver extends StatelessWidget {
     mainAxisSpacing: 4,
     childAspectRatio: 3 / 4,
   );
+}
+
+/// An album: its (portrait) preview picture and title.
+class AlbumCard extends StatelessWidget {
+  const AlbumCard({
+    super.key,
+    required this.album,
+    required this.onTap,
+    this.subtitle,
+  });
+
+  final AlbumRef album;
+  final VoidCallback onTap;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final thumb = album.thumbnailUrl;
+    final placeholder = Container(
+      color: AppColors.surfaceHigh,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.photo_library_outlined,
+        color: AppColors.textTertiary,
+        size: 32,
+      ),
+    );
+    return Pressable(
+      semanticLabel: 'Album ${album.title}',
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.card),
+              child: SizedBox.expand(
+                child: thumb == null
+                    ? placeholder
+                    : Image.network(
+                        thumb,
+                        fit: BoxFit.cover,
+                        headers: imageHeadersFor(album.url),
+                        cacheWidth: (200 * dpr).round(),
+                        errorBuilder: (context, error, stack) => placeholder,
+                        loadingBuilder: (context, child, progress) =>
+                            progress == null ? child : placeholder,
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            album.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.cardTitle,
+          ),
+          if (subtitle != null)
+            Text(
+              subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption,
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// One grid tile: the picture, a tick while selecting and a small badge when

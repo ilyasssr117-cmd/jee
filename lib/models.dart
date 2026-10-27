@@ -68,12 +68,18 @@ class Video {
 
 /// A model / channel that published a video (the "Models:" row of its page).
 class ModelRef {
-  const ModelRef({required this.name, required this.url});
+  const ModelRef({required this.name, required this.url, this.imageUrl});
 
   final String name;
 
   /// Model page, always ending with a slash: `https://site/models/slug/`.
   final String url;
+
+  /// Photo of the model when it is known (some models have none).
+  final String? imageUrl;
+
+  ModelRef withImage(String? image) =>
+      ModelRef(name: name, url: url, imageUrl: image ?? imageUrl);
 
   @override
   bool operator ==(Object other) => other is ModelRef && other.url == url;
@@ -105,11 +111,15 @@ class AlbumRef {
     required this.title,
     required this.url,
     this.thumbnailUrl,
+    this.modelName,
   });
 
   final String id;
   final String title;
   final String url;
+
+  /// The model the album belongs to, when it is known.
+  final String? modelName;
 
   /// The album's preview picture (portrait), when the card has one.
   final String? thumbnailUrl;
@@ -133,4 +143,14 @@ class AlbumPhoto {
   final String id;
   final String thumbUrl;
   final String fullUrl;
+}
+
+/// Result of the "Models & Albums" search.
+class PeopleSearchResult {
+  const PeopleSearchResult({required this.models, required this.albums});
+
+  final List<ModelRef> models;
+  final List<AlbumRef> albums;
+
+  bool get isEmpty => models.isEmpty && albums.isEmpty;
 }

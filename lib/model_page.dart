@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'album_page.dart';
 import 'app_theme.dart';
+import 'favorite_models_store.dart';
 import 'error_text.dart';
 import 'models.dart';
 import 'video_details_page.dart';
@@ -10,6 +11,7 @@ import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/back_button.dart';
+import 'widgets/model_avatar.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 
@@ -25,6 +27,13 @@ class ModelPage extends StatefulWidget {
 
   @override
   State<ModelPage> createState() => _ModelPageState();
+}
+
+/// Opens the page of [model] (its videos and photos).
+void openModelPage(BuildContext context, ModelRef model) {
+  Navigator.of(context).push<void>(
+    MaterialPageRoute<void>(builder: (_) => ModelPage(model: model)),
+  );
 }
 
 enum _Mode { videos, photos }
@@ -182,6 +191,10 @@ class _ModelPageState extends State<ModelPage> {
       }
       // An empty page (or one with nothing new) is the end of the list.
       final last = added == 0;
+      if (result.profile?.imageUrl != null) {
+        FavoriteModelsStore.instance
+            .updateImage(widget.model.url, result.profile!.imageUrl);
+      }
       setState(() {
         _profile ??= result.profile;
         _nextPage = page + 1;
@@ -417,9 +430,6 @@ class _ModelPageState extends State<ModelPage> {
       ];
     }
 
-    final origin = Uri.tryParse(widget.model.url)?.origin;
-    final headers =
-        origin == null ? null : <String, String>{'Referer': '$origin/'};
     return [
       SliverPadding(
         padding: padding,
@@ -431,10 +441,9 @@ class _ModelPageState extends State<ModelPage> {
             childAspectRatio: 0.62,
           ),
           delegate: SliverChildBuilderDelegate(
-            (context, index) => _AlbumCard(
+            (context, index) => AlbumCard(
               key: ValueKey<String>(_albums[index].id),
               album: _albums[index],
-              headers: headers,
               onTap: () => _openAlbum(_albums[index]),
             ),
             childCount: _albums.length,
@@ -481,7 +490,12 @@ class _ModelPageState extends State<ModelPage> {
           const SizedBox(height: Gaps.lg),
           Row(
             children: [
-              _Avatar(name: name, imageUrl: _profile?.imageUrl, pageUrl: widget.model.url),
+              ModelAvatar(
+                name: name,
+                imageUrl: _profile?.imageUrl ?? widget.model.imageUrl,
+                pageUrl: widget.model.url,
+                size: 84,
+              ),
               const SizedBox(width: Gaps.lg),
               Expanded(
                 child: Column(
@@ -503,6 +517,39 @@ class _ModelPageState extends State<ModelPage> {
                     ),
                   ],
                 ),
+              ),
+              ListenableBuilder(
+                listenable: FavoriteModelsStore.instance,
+                builder: (context, _) {
+                  final favorites = FavoriteModelsStore.instance;
+                  final isFavorite = favorites.isFavorite(widget.model.url);
+                  return Pressable(
+                    semanticLabel: isFavorite
+                        ? 'Remove from favourite models'
+                        : 'Add to favourite models',
+                    haptic: Haptic.medium,
+                    pressedScale: 0.85,
+                    onTap: () {
+                      favorites.toggle(ModelRef(
+                        name: name,
+                        url: widget.model.url,
+                        imageUrl: _profile?.imageUrl ?? widget.model.imageUrl,
+                      ));
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(
+                        isFavorite
+                            ? Icons.star_rounded
+                            : Icons.star_border_rounded,
+                        size: 30,
+                        color: isFavorite
+                            ? AppColors.star
+                            : AppColors.textSecondary,
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -578,122 +625,6 @@ class _ModeSwitch extends StatelessWidget {
           segment(_Mode.photos, Icons.photo_library_outlined, 'Photos'),
         ],
       ),
-    );
-  }
-}
-
-/// An album: its (portrait) preview picture and title.
-class _AlbumCard extends StatelessWidget {
-  const _AlbumCard({
-    super.key,
-    required this.album,
-    required this.headers,
-    required this.onTap,
-  });
-
-  final AlbumRef album;
-  final Map<String, String>? headers;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    final thumb = album.thumbnailUrl;
-    final placeholder = Container(
-      color: AppColors.surfaceHigh,
-      alignment: Alignment.center,
-      child: Icon(
-        Icons.photo_library_outlined,
-        color: AppColors.textTertiary,
-        size: 32,
-      ),
-    );
-    return Pressable(
-      semanticLabel: 'Album ${album.title}',
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(Radii.card),
-              child: SizedBox.expand(
-                child: thumb == null
-                    ? placeholder
-                    : Image.network(
-                        thumb,
-                        fit: BoxFit.cover,
-                        headers: headers,
-                        cacheWidth: (200 * dpr).round(),
-                        errorBuilder: (context, error, stack) => placeholder,
-                        loadingBuilder: (context, child, progress) =>
-                            progress == null ? child : placeholder,
-                      ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            album.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: AppText.cardTitle,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Round photo of the model. Some models have no photo: their initial is
-/// shown instead.
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name, required this.imageUrl, required this.pageUrl});
-
-  static const double size = 84;
-
-  final String name;
-  final String? imageUrl;
-  final String pageUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final initial = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
-    final placeholder = Container(
-      color: AppColors.accentStrong,
-      alignment: Alignment.center,
-      child: Text(
-        initial,
-        style: AppText.display.copyWith(fontSize: 34, color: Colors.white),
-      ),
-    );
-
-    final url = imageUrl;
-    final Widget content;
-    if (url == null || url.isEmpty) {
-      content = placeholder;
-    } else {
-      final origin = Uri.tryParse(pageUrl)?.origin;
-      content = Image.network(
-        url,
-        fit: BoxFit.cover,
-        cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
-        // Some CDNs refuse hot-linked images without a Referer.
-        headers: origin == null ? null : <String, String>{'Referer': '$origin/'},
-        errorBuilder: (context, error, stackTrace) => placeholder,
-        loadingBuilder: (context, child, progress) =>
-            progress == null ? child : placeholder,
-      );
-    }
-
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.outline, width: 2),
-      ),
-      child: ClipOval(child: content),
     );
   }
 }

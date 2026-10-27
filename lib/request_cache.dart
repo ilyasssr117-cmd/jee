@@ -6,10 +6,18 @@ import 'models.dart';
 /// between callers that ask for the same key at the same time, so the app
 /// never sends the same request twice.
 class TtlCache<V> {
-  TtlCache({this.ttl = const Duration(minutes: 5), this.maxEntries = 40});
+  TtlCache({
+    this.ttl = const Duration(minutes: 5),
+    this.maxEntries = 40,
+    this.cacheable,
+  });
 
   final Duration ttl;
   final int maxEntries;
+
+  /// Results for which this returns false are handed to the caller but not
+  /// kept (an empty answer caused by a hiccup must not stick for minutes).
+  final bool Function(V value)? cacheable;
 
   final LinkedHashMap<String, _Entry<V>> _entries =
       LinkedHashMap<String, _Entry<V>>();
@@ -34,10 +42,12 @@ class TtlCache<V> {
     }
 
     final future = loader().then((value) {
-      _entries.remove(key);
-      _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
-      while (_entries.length > maxEntries) {
-        _entries.remove(_entries.keys.first);
+      if (cacheable == null || cacheable!(value)) {
+        _entries.remove(key);
+        _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
+        while (_entries.length > maxEntries) {
+          _entries.remove(_entries.keys.first);
+        }
       }
       return value;
     });
@@ -75,7 +85,20 @@ final TtlCache<List<Video>> relatedCache =
 final TtlCache<List<ModelRef>> modelsCache =
     TtlCache<List<ModelRef>>(ttl: const Duration(minutes: 30), maxEntries: 60);
 
+/// "Models & Albums" searches, by text.
+final TtlCache<PeopleSearchResult> peopleCache = TtlCache<PeopleSearchResult>(
+  ttl: const Duration(minutes: 10),
+  maxEntries: 30,
+  cacheable: (result) => !result.isEmpty,
+);
+
+/// Name and photo of models seen in the search results, by model address.
+final TtlCache<ModelProfile> profileCache =
+    TtlCache<ModelProfile>(ttl: const Duration(hours: 6), maxEntries: 120);
+
 void clearRequestCaches() {
+  profileCache.clear();
+  peopleCache.clear();
   listingCache.clear();
   relatedCache.clear();
   modelsCache.clear();

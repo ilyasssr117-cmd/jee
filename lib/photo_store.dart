@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'image_headers.dart';
 import 'local_store.dart';
 import 'models.dart';
 
@@ -124,10 +125,6 @@ class PhotoStore extends ChangeNotifier {
 
   static const String _key = 'photo_albums_v1';
   static const int _parallel = 3;
-  static const String _userAgent =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
-      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
-      'Mobile/15E148 Safari/604.1';
 
   Directory? _root;
   http.Client? _client;
@@ -313,14 +310,12 @@ class PhotoStore extends ChangeNotifier {
     return name;
   }
 
-  Map<String, String> _defaultHeaders(String albumUrl) {
-    final origin = Uri.tryParse(albumUrl)?.origin;
-    return <String, String>{
-      'User-Agent': _userAgent,
-      'Accept': 'image/*,*/*;q=0.8',
-      if (origin != null && origin.isNotEmpty) 'Referer': '$origin/',
-    };
-  }
+  Map<String, String> _defaultHeaders(String albumUrl) =>
+      imageHeadersFor(albumUrl) ??
+      const <String, String>{
+        'User-Agent': kBrowserUserAgent,
+        'Accept': 'image/*,*/*;q=0.8',
+      };
 
   // -------------------------------------------------------------------------
   // Removing

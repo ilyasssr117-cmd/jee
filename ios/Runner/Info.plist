@@ -38,6 +38,10 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
+	<!-- Photo Library permission for saving images -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save photos from albums to your Photos library.</string>
+
 	<!-- Background audio / Picture in Picture -->
 	<key>UIBackgroundModes</key>
 	<array>

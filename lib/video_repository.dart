@@ -112,7 +112,7 @@ final ScraperConfig _scraperConfig = ScraperConfig(
   ),
   videoPathPattern: const String.fromEnvironment(
     'VIDEO_PATH_PATTERN',
-    defaultValue: r'/video/',
+    defaultValue: r'/videos?/',
   ),
   excludePathPattern: const String.fromEnvironment(
     'VIDEO_EXCLUDE_PATH_PATTERN',

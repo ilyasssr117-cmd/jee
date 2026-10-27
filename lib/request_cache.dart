@@ -6,7 +6,15 @@ import 'models.dart';
 /// between callers that ask for the same key at the same time, so the app
 /// never sends the same request twice.
 class TtlCache<V> {
-  TtlCache({this.ttl = const Duration(minutes: 5), this.maxEntries = 40});
+  TtlCache({
+    this.ttl = const Duration(minutes: 5),
+    this.maxEntries = 40,
+    this.cacheable,
+  });
+
+  /// Results for which this returns false are handed to the caller but not
+  /// kept (an empty page caused by a hiccup must not stick for minutes).
+  final bool Function(V value)? cacheable;
 
   final Duration ttl;
   final int maxEntries;
@@ -34,10 +42,12 @@ class TtlCache<V> {
     }
 
     final future = loader().then((value) {
-      _entries.remove(key);
-      _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
-      while (_entries.length > maxEntries) {
-        _entries.remove(_entries.keys.first);
+      if (cacheable == null || cacheable!(value)) {
+        _entries.remove(key);
+        _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
+        while (_entries.length > maxEntries) {
+          _entries.remove(_entries.keys.first);
+        }
       }
       return value;
     });
@@ -58,11 +68,19 @@ class _Entry<V> {
 
 /// Lists of videos by "category|page" and "query|page".
 final TtlCache<List<Video>> listingCache =
-    TtlCache<List<Video>>(ttl: const Duration(minutes: 4), maxEntries: 60);
+    TtlCache<List<Video>>(
+  ttl: const Duration(minutes: 4),
+  maxEntries: 60,
+  cacheable: (videos) => videos.isNotEmpty,
+);
 
 /// "More like this" lists by video id.
 final TtlCache<List<Video>> relatedCache =
-    TtlCache<List<Video>>(ttl: const Duration(minutes: 15), maxEntries: 30);
+    TtlCache<List<Video>>(
+  ttl: const Duration(minutes: 15),
+  maxEntries: 30,
+  cacheable: (videos) => videos.isNotEmpty,
+);
 
 void clearRequestCaches() {
   listingCache.clear();

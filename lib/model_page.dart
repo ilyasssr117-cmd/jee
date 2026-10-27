@@ -46,6 +46,7 @@ class _ModelPageState extends State<ModelPage> {
 
   /// A model with exactly one album shows its photos straight away.
   AlbumLoader? _soloLoader;
+  final PhotoSelection _selection = PhotoSelection();
 
   final List<Video> _videos = <Video>[];
   final Set<String> _seen = <String>{};
@@ -69,6 +70,7 @@ class _ModelPageState extends State<ModelPage> {
     _run++;
     _albumRun++;
     _soloLoader?.dispose();
+    _selection.dispose();
     super.dispose();
   }
 
@@ -135,12 +137,18 @@ class _ModelPageState extends State<ModelPage> {
   void _setMode(_Mode mode) {
     if (mode == _mode) return;
     setState(() => _mode = mode);
-    if (mode == _Mode.photos) _soloLoader?.load();
+    if (mode == _Mode.photos) {
+      _soloLoader?.load();
+    } else {
+      _selection.clear();
+    }
   }
 
   void _openAlbum(AlbumRef album) {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => AlbumPage(album: album)),
+      MaterialPageRoute<void>(
+        builder: (_) => AlbumPage(album: album, modelName: widget.model.name),
+      ),
     );
   }
 
@@ -223,9 +231,20 @@ class _ModelPageState extends State<ModelPage> {
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: darkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      child: Scaffold(
+      child: ListenableBuilder(
+        listenable: _selection,
+        builder: (context, child) => PopScope(
+          canPop: !_selection.active,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _selection.clear();
+          },
+          child: child!,
+        ),
+        child: Scaffold(
         backgroundColor: AppColors.background,
-        body: CustomScrollView(
+        body: Stack(
+          children: [
+        CustomScrollView(
           slivers: [
             SliverToBoxAdapter(child: _buildHeader(margin, name)),
             if (_mode == _Mode.photos)
@@ -292,6 +311,20 @@ class _ModelPageState extends State<ModelPage> {
               child: SizedBox(height: Gaps.xl + context.safe.bottom),
             ),
           ],
+        ),
+            if (_soloLoader != null && _mode == _Mode.photos)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: PhotoSelectionBar(
+                  loader: _soloLoader!,
+                  selection: _selection,
+                  modelName: widget.model.name,
+                ),
+              ),
+          ],
+        ),
         ),
       ),
     );
@@ -363,7 +396,24 @@ class _ModelPageState extends State<ModelPage> {
             ),
           ),
         ),
-        PhotoGridSliver(loader: solo, padding: padding),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: padding.add(const EdgeInsets.only(bottom: Gaps.md)),
+            child: AlbumToolbar(
+              loader: solo,
+              selection: _selection,
+              modelName: widget.model.name,
+            ),
+          ),
+        ),
+        PhotoGridSliver(
+          loader: solo,
+          selection: _selection,
+          modelName: widget.model.name,
+          padding: padding,
+        ),
+        // Room for the selection bar.
+        const SliverToBoxAdapter(child: SizedBox(height: 72)),
       ];
     }
 

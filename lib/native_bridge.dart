@@ -90,6 +90,22 @@ class NativeBridge {
     }
   }
 
+  /// Opens the iOS share sheet for several files at once ("Save N Images" puts
+  /// them all in the Photos app). Needs the `shareFiles` method on the iOS
+  /// side; returns false when it is missing, so the caller can tell the viewer.
+  Future<bool> shareFiles(List<String> paths) async {
+    if (paths.isEmpty) return false;
+    if (paths.length == 1) return shareFile(paths.first);
+    try {
+      return await _channel.invokeMethod<bool>('shareFiles', <String, Object?>{
+            'paths': paths,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<dynamic> _onCall(MethodCall call) async {
     if (call.method != 'pipEnded') return null;
     final args = call.arguments;

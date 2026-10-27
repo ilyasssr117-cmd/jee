@@ -14,6 +14,7 @@ import 'home_page.dart';
 import 'local_store.dart';
 import 'native_bridge.dart';
 import 'platform_ui.dart';
+import 'photo_store.dart';
 import 'playback_progress.dart';
 import 'preview_manager.dart';
 import 'search_history.dart';
@@ -80,6 +81,7 @@ Future<void> _bootstrap() async {
     SearchHistory.instance.load();
     PlaybackProgress.instance.load();
     await DownloadStore.instance.init();
+    await PhotoStore.instance.init();
     await NativeBridge.instance.init();
   } catch (error) {
     debugPrint('[STARTUP] Local data failed to load: $error');

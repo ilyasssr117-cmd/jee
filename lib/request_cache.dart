@@ -6,15 +6,7 @@ import 'models.dart';
 /// between callers that ask for the same key at the same time, so the app
 /// never sends the same request twice.
 class TtlCache<V> {
-  TtlCache({
-    this.ttl = const Duration(minutes: 5),
-    this.maxEntries = 40,
-    this.cacheable,
-  });
-
-  /// Results for which this returns false are handed to the caller but not
-  /// kept (an empty page caused by a hiccup must not stick for minutes).
-  final bool Function(V value)? cacheable;
+  TtlCache({this.ttl = const Duration(minutes: 5), this.maxEntries = 40});
 
   final Duration ttl;
   final int maxEntries;
@@ -42,16 +34,21 @@ class TtlCache<V> {
     }
 
     final future = loader().then((value) {
-      if (cacheable == null || cacheable!(value)) {
-        _entries.remove(key);
-        _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
-        while (_entries.length > maxEntries) {
-          _entries.remove(_entries.keys.first);
-        }
+      _entries.remove(key);
+      _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
+      while (_entries.length > maxEntries) {
+        _entries.remove(_entries.keys.first);
       }
       return value;
     });
-    final tracked = future.whenComplete(() => _running.remove(key));
+    // IMPORTANT: block body, not `=> _running.remove(key)`. `Map.remove`
+    // returns the removed value, which here is `tracked` itself. whenComplete
+    // waits for a Future returned by its callback, so the arrow form made the
+    // request wait for itself forever: the data arrived but the page stayed on
+    // its loading skeleton.
+    final tracked = future.whenComplete(() {
+      _running.remove(key);
+    });
     _running[key] = tracked;
     return tracked;
   }
@@ -68,19 +65,11 @@ class _Entry<V> {
 
 /// Lists of videos by "category|page" and "query|page".
 final TtlCache<List<Video>> listingCache =
-    TtlCache<List<Video>>(
-  ttl: const Duration(minutes: 4),
-  maxEntries: 60,
-  cacheable: (videos) => videos.isNotEmpty,
-);
+    TtlCache<List<Video>>(ttl: const Duration(minutes: 4), maxEntries: 60);
 
 /// "More like this" lists by video id.
 final TtlCache<List<Video>> relatedCache =
-    TtlCache<List<Video>>(
-  ttl: const Duration(minutes: 15),
-  maxEntries: 30,
-  cacheable: (videos) => videos.isNotEmpty,
-);
+    TtlCache<List<Video>>(ttl: const Duration(minutes: 15), maxEntries: 30);
 
 void clearRequestCaches() {
   listingCache.clear();

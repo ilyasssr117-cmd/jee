@@ -46,7 +46,7 @@ class ScraperConfig {
         'meta[property="og:description"], meta[name="description"]',
     this.likesSelector =
         '.rating, .likes, .thumb-spot__rating, [data-rating], [data-likes]',
-    this.videoPathPattern = r'/videos?/',
+    this.videoPathPattern = r'/video/',
     this.excludePathPattern =
         r'/albums?/|/galleries/|/gallery/|/photos?/|/pictures?/',
     this.relatedCardSelector =
@@ -222,11 +222,7 @@ class Scraper {
   }
 
   Future<List<Video>> home({int page = 0}) {
-    return list(
-      page == 0 ? config.homeUri() : config.pageUri(page),
-      fallback: true,
-      explainEmpty: page == 0,
-    );
+    return list(page == 0 ? config.homeUri() : config.pageUri(page));
   }
 
   Future<List<Video>> search(String query, {int page = 1}) {
@@ -235,221 +231,36 @@ class Scraper {
   }
 
   Future<List<Video>> category(String slug, {int page = 1}) {
-    return list(
-      config.categoryUri(slug, page),
-      fallback: true,
-      explainEmpty: page <= 1,
-    );
+    return list(config.categoryUri(slug, page));
   }
 
-  /// [fallback]: when the configured selectors find nothing (the site changed
-  /// its markup), try layout-independent strategies before giving up.
-  /// [explainEmpty]: an empty *first* page is an error the viewer can see
-  /// (blocked, layout changed) instead of a silent blank screen.
-  Future<List<Video>> list(
-    Uri uri, {
-    bool related = false,
-    bool fallback = false,
-    bool explainEmpty = false,
-  }) async {
+  Future<List<Video>> list(Uri uri, {bool related = false}) async {
     final body = await _get(uri);
     final document = html.parse(body);
     final selector = related ? config.relatedCardSelector : config.cardSelector;
+    if (selector.trim().isEmpty) return const <Video>[];
 
-    var videos = <Video>[];
-    var cardCount = 0;
-    if (selector.trim().isNotEmpty) {
-      final cards = document.querySelectorAll(selector);
-      cardCount = cards.length;
-      debugPrint('[SCRAPER] Selector "$selector" matched $cardCount cards at ${uri.origin}');
-      final seen = <String>{};
-      for (final element in cards) {
-        try {
-          final video = _parseCard(element, uri);
-          if (video == null || video.title.isEmpty || !seen.add(video.id)) {
-            continue;
-          }
-          videos.add(video);
-        } catch (error) {
-          // Ignore malformed cards without throwing away valid cards on the page.
-          debugPrint('[SCRAPER] Skipped an invalid video card: $error');
-        }
-      }
-    }
-
-    if (videos.isEmpty && fallback && !related) {
-      videos = _fallbackParse(document, uri);
-      if (videos.isNotEmpty) {
-        debugPrint(
-          '[SCRAPER] Configured selectors found nothing; the generic '
-          'strategy recovered ${videos.length} videos.',
-        );
-      }
-    }
-
-    debugPrint(
-      '[SCRAPER] Parsed ${videos.length} videos from ${uri.origin} '
-      '($cardCount cards matched)',
-    );
-
-    if (videos.isEmpty && explainEmpty) {
-      final reason = _explainEmptyPage(body, document);
-      debugPrint('[SCRAPER] Empty first page: $reason');
-      throw ScraperException(reason);
-    }
-    return videos;
-  }
-
-  // ---- Fallbacks when the site layout changes --------------------------------
-
-  /// Why a page with no videos came back empty, in plain words.
-  String _explainEmptyPage(String body, dom.Document document) {
-    final lower = body.toLowerCase();
-    final title = _collapse(document.querySelector('title')?.text ?? '');
-    debugPrint('[SCRAPER] Page title: "$title", ${body.length} chars, '
-        '${document.querySelectorAll('a[href]').length} links');
-    const challenge = [
-      'just a moment',
-      'cf-chl',
-      'challenge-platform',
-      'cf-browser-verification',
-      'attention required',
-      'captcha',
-      'verify you are human',
-      'ddos-guard',
-    ];
-    if (challenge.any(lower.contains)) {
-      return 'The source is showing a security check page, so no videos '
-          'could be read.';
-    }
-    if (document.querySelectorAll('a[href]').length < 5) {
-      return 'The source page has no readable video list (it may load the '
-          'videos with JavaScript).';
-    }
-    return 'No videos were found; the source page layout may have changed.';
-  }
-
-  /// Number of different video links inside [root].
-  int _distinctVideoLinks(dom.Element root, Uri pageUri, bool relaxed) {
-    final links = <String>{};
-    for (final a in root.querySelectorAll('a[href]')) {
-      final uri = _resolveHttp(a.attributes['href'], pageUri);
-      if (uri != null && _isVideoUri(uri, relaxed: relaxed)) {
-        links.add('${uri.host}${uri.path}');
-        if (links.length > 1) break;
-      }
-    }
-    return links.length;
-  }
-
-  /// Layout-independent extraction: every link that looks like a video page and
-  /// carries a thumbnail is a card; its container is found by climbing up while
-  /// the parent still holds exactly one video link.
-  List<Video> _fallbackParse(dom.Document document, Uri pageUri) {
-    for (final relaxed in const [false, true]) {
-      final found = <Video>[];
-      final seen = <String>{};
-      for (final anchor in document.querySelectorAll('a[href]')) {
-        final uri = _resolveHttp(anchor.attributes['href'], pageUri);
-        if (uri == null || !_isVideoUri(uri, relaxed: relaxed)) continue;
-        if (anchor.querySelector('img') == null &&
-            anchor.querySelector('video') == null) {
+    final videos = <Video>[];
+    final seen = <String>{};
+    final cards = document.querySelectorAll(selector);
+    debugPrint('[SCRAPER] Selector "$selector" matched ${cards.length} cards at ${uri.origin}');
+    for (final element in cards) {
+      try {
+        final video = _parseCard(element, uri);
+        if (video == null || video.title.isEmpty || !seen.add(video.id)) {
           continue;
         }
-
-        dom.Element card = anchor;
-        for (var i = 0; i < 4; i++) {
-          final parent = card.parent;
-          if (parent == null ||
-              parent.localName == 'body' ||
-              parent.localName == 'html' ||
-              _distinctVideoLinks(parent, pageUri, relaxed) > 1) {
-            break;
-          }
-          card = parent;
-        }
-
-        // The relaxed pass accepts any link, so it insists on a duration
-        // ("12:34") inside the card: that is what a video thumbnail has.
-        if (relaxed && !_durationRe.hasMatch(_collapse(card.text))) continue;
-
-        try {
-          final video = _parseCard(card, pageUri, relaxed: relaxed);
-          if (video != null && video.title.isNotEmpty && seen.add(video.id)) {
-            found.add(video);
-          }
-        } catch (error) {
-          debugPrint('[SCRAPER] Fallback skipped a card: $error');
-        }
-      }
-      if (found.isNotEmpty) return found;
-    }
-    return _jsonLdVideos(document, pageUri);
-  }
-
-  /// schema.org `VideoObject` entries in `<script type="application/ld+json">`.
-  List<Video> _jsonLdVideos(dom.Document document, Uri pageUri) {
-    final found = <Video>[];
-    final seen = <String>{};
-
-    void walk(Object? node) {
-      if (node is List) {
-        node.forEach(walk);
-      } else if (node is Map) {
-        final type = node['@type'];
-        final isVideo = type == 'VideoObject' ||
-            (type is List && type.contains('VideoObject'));
-        if (isVideo) {
-          final name = node['name']?.toString().trim() ?? '';
-          final page = _resolveHttp(node['url']?.toString(), pageUri);
-          if (name.isNotEmpty && page != null && _isVideoUri(page, relaxed: true)) {
-            final thumb = node['thumbnailUrl'];
-            final thumbRaw = thumb is List
-                ? (thumb.isEmpty ? null : thumb.first?.toString())
-                : thumb?.toString();
-            final id = '${page.host}${page.path}';
-            if (seen.add(id)) {
-              found.add(Video(
-                id: id,
-                title: _collapse(name),
-                streamUrl: '',
-                pageUrl: page.toString(),
-                previewUrl: '',
-                thumbnailUrl: _absoluteUrl(thumbRaw, pageUri),
-                duration: _isoDuration(node['duration']?.toString()),
-                views: '',
-                likes: '',
-                date: '',
-                category: 'Video',
-              ));
-            }
-          }
-        }
-        node.values.forEach(walk);
+        videos.add(video);
+      } catch (error) {
+        // Ignore malformed cards without throwing away valid cards on the page.
+        debugPrint('[SCRAPER] Skipped an invalid video card: $error');
       }
     }
-
-    for (final script
-        in document.querySelectorAll('script[type="application/ld+json"]')) {
-      try {
-        walk(jsonDecode(script.text));
-      } catch (_) {
-        // Not valid JSON: ignore this block.
-      }
-    }
-    return found;
-  }
-
-  /// `PT1H2M3S` -> `1:02:03`, `PT45S` -> `0:45`.
-  static String _isoDuration(String? iso) {
-    if (iso == null) return '';
-    final m = RegExp(r'^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$').firstMatch(iso);
-    if (m == null) return '';
-    final h = int.tryParse(m.group(1) ?? '') ?? 0;
-    final min = int.tryParse(m.group(2) ?? '') ?? 0;
-    final sec = int.tryParse(m.group(3) ?? '') ?? 0;
-    String two(int v) => v.toString().padLeft(2, '0');
-    return h > 0 ? '$h:${two(min)}:${two(sec)}' : '$min:${two(sec)}';
+    debugPrint(
+      '[SCRAPER] Parsed ${videos.length} videos from ${uri.origin} '
+      '(${cards.length - videos.length} cards skipped: albums / duplicates)',
+    );
+    return videos;
   }
 
   // ---- Card parsing -------------------------------------------------------
@@ -497,26 +308,14 @@ class Scraper {
   /// Photo albums, galleries etc. use the same card markup as videos, so the
   /// link decides: it must look like a video page and must not look like an
   /// album.
-  bool _isVideoUri(Uri uri, {bool relaxed = false}) {
+  bool _isVideoUri(Uri uri) {
     final path = uri.path;
-    final excluded = _excludePathRe;
-    if (excluded != null && excluded.hasMatch(path)) return false;
-    if (relaxed) {
-      // Last resort when the site no longer uses the configured video path:
-      // any content link that is not obvious site navigation.
-      return path.length > 1 && !_navPathRe.hasMatch(path);
-    }
     final video = _videoPathRe;
     if (video != null && !video.hasMatch(path)) return false;
+    final excluded = _excludePathRe;
+    if (excluded != null && excluded.hasMatch(path)) return false;
     return true;
   }
-
-  static final RegExp _navPathRe = RegExp(
-    r'^/(?:categories|category|tags?|models?|pornstars?|channels?|search|'
-    r'login|register|signup|dmca|contact|terms|privacy|2257|faq|rss|'
-    r'sitemap|upload|playlists?|members?|users?)(?:/|$)',
-    caseSensitive: false,
-  );
 
   /// Text that still contains the "99%", views and age fragments of a card.
   static bool _isPolluted(String text) =>
@@ -578,7 +377,7 @@ class Scraper {
     return count == 1 ? '1 view' : '$count views';
   }
 
-  Video? _parseCard(dom.Element element, Uri pageUri, {bool relaxed = false}) {
+  Video? _parseCard(dom.Element element, Uri pageUri) {
     // 1. Find the link that really is a video page (skips albums).
     final anchors = <dom.Element>[
       if (element.localName == 'a') element,
@@ -588,7 +387,7 @@ class Scraper {
     Uri? videoPage;
     for (final candidate in anchors) {
       final uri = _resolveHttp(candidate.attributes['href'], pageUri);
-      if (uri != null && _isVideoUri(uri, relaxed: relaxed)) {
+      if (uri != null && _isVideoUri(uri)) {
         anchor = candidate;
         videoPage = uri;
         break;
@@ -599,7 +398,7 @@ class Scraper {
         element.attributes['data-href'] ?? element.attributes['data-url'],
         pageUri,
       );
-      if (uri != null && _isVideoUri(uri, relaxed: relaxed)) videoPage = uri;
+      if (uri != null && _isVideoUri(uri)) videoPage = uri;
     }
     if (videoPage == null) return null;
 
@@ -679,7 +478,10 @@ class Scraper {
 
     // 3. Image and title.
     final image = element.querySelector(config.imageSelector);
-    final thumbnailRaw = _imageSource(image) ??
+    final thumbnailRaw = image?.attributes['data-src'] ??
+        image?.attributes['data-original'] ??
+        image?.attributes['data-lazy-src'] ??
+        image?.attributes['src'] ??
         element.querySelector('video[poster]')?.attributes['poster'];
     final thumbnail = _absoluteUrl(thumbnailRaw, pageUri);
 
@@ -718,34 +520,6 @@ class Scraper {
       date: date,
       category: element.attributes['data-category'] ?? 'Video',
     );
-  }
-
-  /// First usable image address of an <img>: lazy-load attributes come before
-  /// `src` (often a 1px placeholder), empty values and `data:` URIs are
-  /// skipped, and `srcset` is the last resort.
-  String? _imageSource(dom.Element? image) {
-    if (image == null) return null;
-    const names = [
-      'data-src',
-      'data-original',
-      'data-lazy-src',
-      'data-lazy',
-      'data-thumb',
-      'data-webp',
-      'data-image',
-      'src',
-    ];
-    for (final name in names) {
-      final value = image.attributes[name]?.trim();
-      if (value != null && value.isNotEmpty && !value.startsWith('data:')) {
-        return value;
-      }
-    }
-    final srcset = image.attributes['data-srcset'] ?? image.attributes['srcset'];
-    final first = srcset?.split(',').first.trim().split(RegExp(r'\s+')).first;
-    return (first == null || first.isEmpty || first.startsWith('data:'))
-        ? null
-        : first;
   }
 
   String? _text(dom.Element element, String selector) {

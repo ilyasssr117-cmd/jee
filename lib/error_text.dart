@@ -46,22 +46,6 @@ FriendlyError describeError(Object error, {String subject = 'videos'}) {
     }
     final text = error.message.toLowerCase();
     if (text.contains('could not reach')) return offline;
-    if (text.contains('security check')) {
-      return const FriendlyError(
-        title: 'The source is blocking the app',
-        message: 'The video source is asking for a security check. '
-            'Try again later or from another network.',
-        icon: Icons.shield_outlined,
-      );
-    }
-    if (text.contains('layout') || text.contains('no readable video list')) {
-      return const FriendlyError(
-        title: 'Couldn\u2019t read the video list',
-        message: 'The source page looks different from what the app '
-            'expects. Check the selectors in lib/video_repository.dart.',
-        icon: Icons.web_asset_off_rounded,
-      );
-    }
     if (text.contains('configure')) {
       return FriendlyError(
         title: 'Video source not configured',

@@ -19,7 +19,7 @@ void main() {
         <html><body>
           <div class="thumbs__list">
             <div class="item thumb">
-              <a href="/watch/one" title="Example Video">
+              <a href="/video/one/" title="Example Video">
                 <img data-src="/images/one.jpg" alt="Example Video">
               </a>
               <div class="thumb-spot__data">
@@ -48,10 +48,11 @@ void main() {
     expect(firstPage, hasLength(1));
     expect(firstPage.first.title, 'Example Video');
     expect(firstPage.first.duration, '12:34');
-    expect(firstPage.first.views, '1,234 views');
+    // The scraper shortens counts: "1,234 views" becomes "1.2K views".
+    expect(firstPage.first.views, '1.2K views');
     expect(
       firstPage.first.pageUrl,
-      'https://videos.example.test/watch/one',
+      'https://videos.example.test/video/one/',
     );
     expect(
       firstPage.first.thumbnailUrl,

@@ -11,6 +11,7 @@ import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
 import 'request_cache.dart';
+import 'save_video_to_photos.dart';
 import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
@@ -347,22 +348,13 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   if (ok) await store.remove(id);
                 },
               ),
-              // "Add to device": Save Video (Photos) or Save to Files.
+              // Straight into the Photos app.
               AppButton(
-                label: 'Save to phone',
-                icon: Icons.ios_share_rounded,
+                label: 'Save to Photos',
+                icon: Icons.photo_library_outlined,
                 style: AppButtonStyle.secondary,
                 onDark: true,
-                onPressed: () async {
-                  final ok = await store.shareFile(id);
-                  if (!ok && context.mounted) {
-                    showToast(
-                      context,
-                      'Couldn\u2019t open the share sheet.',
-                      aboveBar: false,
-                    );
-                  }
-                },
+                onPressed: () => saveVideoToPhotos(context, id, aboveBar: false),
               ),
             ],
           );

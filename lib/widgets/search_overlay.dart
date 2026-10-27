@@ -95,6 +95,12 @@ class SearchOverlayState extends State<SearchOverlay> {
   void initState() {
     super.initState();
     _scroll.addListener(_maybeLoadMore);
+    // Show the search first, then bring the keyboard up.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 220), () {
+        if (mounted) _fieldNode.requestFocus();
+      });
+    });
   }
 
   @override
@@ -405,7 +411,10 @@ class SearchOverlayState extends State<SearchOverlay> {
                       child: TextField(
                         controller: _text,
                         focusNode: _fieldNode,
-                        autofocus: true,
+                        // No autofocus: the keyboard is requested after the
+                        // screen is on display (see initState), so the first
+                        // keyboard start-up never delays opening the search.
+                        autofocus: false,
                         maxLines: 1,
                         textAlignVertical: TextAlignVertical.center,
                         textInputAction: TextInputAction.search,

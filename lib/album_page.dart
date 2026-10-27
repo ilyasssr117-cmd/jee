@@ -482,35 +482,15 @@ class PhotoSelectionBar extends StatelessWidget {
       builder: (context, _) {
         if (!selection.active) return const SizedBox.shrink();
         final count = selection.ids.length;
-        return Container(
-          padding: EdgeInsets.fromLTRB(
-            context.hMargin,
-            Gaps.md,
-            context.hMargin,
-            Gaps.md + context.safe.bottom,
-          ),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceHigh,
-            border: Border(top: BorderSide(color: AppColors.outline)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  count == 0 ? 'Select photos' : '$count selected',
-                  style: AppText.label,
-                ),
-              ),
-              AppButton(
-                label: 'All',
-                style: AppButtonStyle.secondary,
-                onPressed: () =>
-                    selection.selectAll(loader.photos.map((p) => p.id)),
-              ),
-              const SizedBox(width: Gaps.sm),
-              AppButton(
+        return SelectionBarFrame(
+          count: count,
+          onSelectAll: () => selection.selectAll(loader.photos.map((p) => p.id)),
+          actions: [
+            Expanded(
+              child: AppButton(
                 label: 'Download',
                 icon: Icons.download_rounded,
+                expand: true,
                 onPressed: () async {
                   if (count == 0) {
                     showToast(context, 'Tap photos to select them.',
@@ -530,10 +510,89 @@ class PhotoSelectionBar extends StatelessWidget {
                   );
                 },
               ),
-            ],
-          ),
+            ),
+          ],
         );
       },
+    );
+  }
+}
+
+/// Bottom bar of select mode: a small count + "All" on the first line and the
+/// actions below it, each taking an equal share of the width (so no label is
+/// ever squeezed into a narrow column and wrapped).
+class SelectionBarFrame extends StatelessWidget {
+  const SelectionBarFrame({
+    super.key,
+    required this.count,
+    required this.onSelectAll,
+    required this.actions,
+  });
+
+  final int count;
+  final VoidCallback onSelectAll;
+
+  /// Usually `Expanded` buttons.
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        context.hMargin,
+        Gaps.sm,
+        context.hMargin,
+        Gaps.md + context.safe.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceHigh,
+        border: Border(top: BorderSide(color: AppColors.outline)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  count == 0 ? 'Tap photos to select' : '$count selected',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              Pressable(
+                semanticLabel: 'Select all',
+                haptic: Haptic.selection,
+                onTap: onSelectAll,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  child: Text(
+                    'Select all',
+                    style: AppText.caption.copyWith(
+                      color: AppColors.blue,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Gaps.xs),
+          Row(
+            children: [
+              for (var i = 0; i < actions.length; i++) ...[
+                if (i > 0) const SizedBox(width: Gaps.sm),
+                actions[i],
+              ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1094,7 +1153,7 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                           ),
                         const SizedBox(width: Gaps.sm),
                         RoundIconButton(
-                          icon: Icons.ios_share_rounded,
+                          icon: Icons.photo_library_outlined,
                           iconSize: 20,
                           label: 'Save to Photos',
                           onTap: () => _share(current),

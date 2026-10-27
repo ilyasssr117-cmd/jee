@@ -314,6 +314,12 @@ void main() {
       'https://x.example.test/contents/models/290/s1.jpg',
     );
     expect((await profileOf('<html><head></head></html>'))?.imageUrl, isNull);
+    // The site logo in og:image is not the model's photo.
+    expect(
+      (await profileOf('<html><head><meta property="og:image" content="https://x.example.test/static/images/logo.png"></head></html>'))
+          ?.imageUrl,
+      isNull,
+    );
   });
 
   test('models & albums search finds the model by name and its albums', () async {

@@ -420,7 +420,7 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
               ),
               AppButton(
                 label: 'Save all to Photos',
-                icon: Icons.ios_share_rounded,
+                icon: Icons.photo_library_outlined,
                 onPressed: () => sendToPhotos(context, _paths(album)),
               ),
               AppButton(
@@ -439,42 +439,25 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
   Widget _selectionBar(SavedAlbum album) {
     if (!_selection.active) return const SizedBox.shrink();
     final count = _selection.ids.length;
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        context.hMargin,
-        Gaps.md,
-        context.hMargin,
-        Gaps.md + context.safe.bottom,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceHigh,
-        border: Border(top: BorderSide(color: AppColors.outline)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              count == 0 ? 'Select photos' : '$count selected',
-              style: AppText.label,
-            ),
-          ),
-          AppButton(
-            label: 'All',
-            style: AppButtonStyle.secondary,
-            onPressed: () =>
-                _selection.selectAll(album.photos.map((p) => p.id)),
-          ),
-          const SizedBox(width: Gaps.sm),
-          AppButton(
+    return SelectionBarFrame(
+      count: count,
+      onSelectAll: () => _selection.selectAll(album.photos.map((p) => p.id)),
+      actions: [
+        Expanded(
+          child: AppButton(
             label: 'Delete',
             icon: Icons.delete_outline_rounded,
             style: AppButtonStyle.secondary,
+            expand: true,
             onPressed: () => _deleteSelected(album),
           ),
-          const SizedBox(width: Gaps.sm),
-          AppButton(
+        ),
+        Expanded(
+          flex: 2,
+          child: AppButton(
             label: 'Save to Photos',
-            icon: Icons.ios_share_rounded,
+            icon: Icons.photo_library_outlined,
+            expand: true,
             onPressed: () {
               if (count == 0) {
                 showToast(context, 'Tap photos to select them.',
@@ -484,8 +467,8 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
               sendToPhotos(context, _paths(album, only: _selection.ids));
             },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

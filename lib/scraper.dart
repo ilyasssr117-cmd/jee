@@ -554,7 +554,8 @@ class Scraper {
         final element = document.querySelector(selector);
         final value = element?.attributes['content'] ?? element?.attributes['href'];
         final url = _absoluteUrl(value, pageUri);
-        if (url != null) {
+        // `og:image` of these pages is often just the site logo: not a photo.
+        if (url != null && !RegExp(r'logo|/static/', caseSensitive: false).hasMatch(url)) {
           image = url;
           break;
         }

@@ -10,6 +10,7 @@ import '../playback_progress.dart';
 import '../preview_manager.dart';
 import '../touch.dart';
 import 'app_button.dart';
+import '../save_video_to_photos.dart';
 import 'dialogs.dart';
 import 'favorite_models_view.dart';
 import 'saved_albums_view.dart';
@@ -601,16 +602,11 @@ class _DownloadRow extends StatelessWidget {
           title: video.title,
           subtitle: '${formatBytes(item.bytesTotal)} \u00b7 Saved offline',
           onTap: onTap,
-          // "Add to device": the iOS share sheet (Save Video / Save to Files).
+          // Straight into the Photos app.
           trailing: _IconAction(
-            icon: Icons.ios_share_rounded,
-            label: 'Save to phone',
-            onTap: () async {
-              final ok = await store.shareFile(video.id);
-              if (!ok && context.mounted) {
-                showToast(context, 'Couldn\u2019t open the share sheet.');
-              }
-            },
+            icon: Icons.photo_library_outlined,
+            label: 'Save to Photos',
+            onTap: () => saveVideoToPhotos(context, video.id),
           ),
         );
 

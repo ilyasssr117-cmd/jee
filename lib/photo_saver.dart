@@ -26,7 +26,17 @@ abstract final class PhotoSaver {
   /// Name of the album created in the Photos app.
   static const String albumName = 'Flow';
 
-  static Future<GallerySaveResult> saveToGallery(List<String> paths) async {
+  static Future<GallerySaveResult> saveToGallery(List<String> paths) =>
+      _save(paths, video: false);
+
+  /// Saves a video file (mp4 / mov) into the Photos app.
+  static Future<GallerySaveResult> saveVideoToGallery(String path) =>
+      _save(<String>[path], video: true);
+
+  static Future<GallerySaveResult> _save(
+    List<String> paths, {
+    required bool video,
+  }) async {
     if (paths.isEmpty) return const GallerySaveResult(saved: 0);
 
     try {
@@ -41,7 +51,11 @@ abstract final class PhotoSaver {
     var saved = 0;
     for (final path in paths) {
       try {
-        await Gal.putImage(path, album: albumName);
+        if (video) {
+          await Gal.putVideo(path, album: albumName);
+        } else {
+          await Gal.putImage(path, album: albumName);
+        }
         saved++;
       } catch (error) {
         debugPrint('[PHOTOS] Could not save a picture: ${error.runtimeType}');

@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'native_bridge.dart';
+import 'photo_saver.dart';
 import 'stream_headers.dart';
 import 'touch.dart';
 import 'video_json.dart';
@@ -230,7 +231,14 @@ class DownloadStore extends ChangeNotifier {
   /// Path of the saved thumbnail for [id] (a plain map lookup, safe in build).
   String? thumbPath(String id) => _thumbs[id];
 
-  /// Opens the iOS share sheet: "Save Video" (Photos) or "Save to Files".
+  /// Saves the downloaded video straight into the Photos app.
+  Future<GallerySaveResult> saveToPhotos(String id) async {
+    final path = localPath(id);
+    if (path == null) return const GallerySaveResult(saved: 0, failed: 1);
+    return PhotoSaver.saveVideoToGallery(path);
+  }
+
+  /// Opens the iOS share sheet (last resort: "Save to Files").
   Future<bool> shareFile(String id) async {
     final path = localPath(id);
     if (path == null) return false;

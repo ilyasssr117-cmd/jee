@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
@@ -7,7 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'app_settings.dart';
 import 'models.dart';
 import 'stream_headers.dart';
-import 'stream_resolver.dart';
+import 'playback_source.dart';
 import 'video_repository.dart';
 
 /// The one live card preview.
@@ -43,7 +42,6 @@ class PreviewManager {
   /// A preview stops by itself so it never streams forever.
   static const Duration _maxPlay = Duration(seconds: 30);
   static const Duration _initTimeout = Duration(seconds: 12);
-  static const int _urlCacheSize = 24;
 
   /// The live (or fading-out) preview surface.
   final ValueNotifier<PreviewSession?> session =
@@ -54,9 +52,6 @@ class PreviewManager {
 
   /// True between the long-press and the first preview frame.
   final ValueNotifier<bool> loading = ValueNotifier<bool>(false);
-
-  // Tiny LRU of resolved stream URLs (a few dozen short strings).
-  final LinkedHashMap<String, String> _urls = LinkedHashMap<String, String>();
 
   Timer? _limitTimer;
   int _generation = 0;
@@ -85,7 +80,7 @@ class PreviewManager {
   /// Forgets the resolved stream URLs (Settings → Clear cache).
   void clearCaches() {
     stopNow(fade: false);
-    _urls.clear();
+    videoRepository.clearPlaybackCaches();
   }
 
   /// The card for [id] went away. Safe to call from dispose().
@@ -133,25 +128,19 @@ class PreviewManager {
       }
       if (generation != _generation) return;
 
-      // 2. The real stream (with sound), resolved once and remembered.
+      // 2. The real stream (with sound). The repository remembers the page
+      //    answer, so a later tap on the card (the player) reuses it.
       var url = video.streamUrl.trim();
-      if (url.isEmpty) {
-        url = _urls.remove(video.id) ?? '';
-        if (url.isNotEmpty) _urls[video.id] = url; // Mark as recently used.
-      }
+      var pageUrl = video.pageUrl;
       if (url.isEmpty) {
         final resolved = await videoRepository
             .resolveForPlayback(video.copyWith(streamUrl: ''));
         url = resolved.streamUrl.trim();
-        if (url.isNotEmpty) {
-          _urls[video.id] = url;
-          while (_urls.length > _urlCacheSize) {
-            _urls.remove(_urls.keys.first);
-          }
-        }
+        pageUrl = resolved.pageUrl ?? pageUrl;
       }
       if (generation != _generation) return;
-      if (url.isNotEmpty && await _play(video, url, generation, real: true)) {
+      if (url.isNotEmpty &&
+          await _play(video, url, generation, real: true, pageUrl: pageUrl)) {
         return;
       }
       if (generation != _generation) return;
@@ -178,6 +167,7 @@ class PreviewManager {
     String url,
     int generation, {
     bool real = false,
+    String? pageUrl,
   }) async {
     final uri = Uri.tryParse(url);
     if (uri == null ||
@@ -186,28 +176,20 @@ class PreviewManager {
       return false;
     }
 
-    var headers = streamHeaders(uri, video.pageUrl);
+    var headers = streamHeaders(uri, pageUrl ?? video.pageUrl);
     var playUri = uri;
     if (real) {
       // The real video needs the same cookie as the player (from the
-      // repository) and talks to its final server directly.
-      try {
-        final page = Uri.tryParse(video.pageUrl?.trim() ?? '');
-        final validPage = page != null &&
-            (page.scheme == 'http' || page.scheme == 'https') &&
-            page.host.isNotEmpty;
-        final cookie = await videoRepository.getPlaybackCookieHeader(
-          streamUri: uri,
-          pageUrl: validPage ? page.toString() : null,
-          userAgent: headers['User-Agent'] ?? '',
-        );
-        if (cookie.isNotEmpty) {
-          headers = <String, String>{...headers, 'Cookie': cookie};
-        }
-      } catch (_) {}
+      // repository) and talks to its final server directly. Both answers are
+      // remembered, so opening the player afterwards asks for nothing again.
+      final source = await resolvePlaybackSource(
+        uri,
+        pageUrl ?? video.pageUrl,
+        tolerant: true,
+      );
       if (generation != _generation) return true;
-      playUri = await resolveFinalStreamUri(uri, headers);
-      if (generation != _generation) return true;
+      headers = source.headers;
+      playUri = Uri.parse(source.url);
     }
 
     VideoPlayerController? controller;

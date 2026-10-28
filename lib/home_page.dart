@@ -62,6 +62,8 @@ class _HomePageState extends State<HomePage> {
   final ValueNotifier<bool> _search = ValueNotifier<bool>(false);
   bool get _searchOpen => _search.value;
   _Section _section = _Section.home;
+  Widget? _libraryPage;
+  Widget? _settingsPage;
   FriendlyError? _error;
 
   List<String> get _categories => <String>['All', ...videoRepository.categories];
@@ -117,10 +119,45 @@ class _HomePageState extends State<HomePage> {
         : const <Video>[];
   }
 
+  /// Adds one page of results to the list (call inside setState).
+  void _applyPage(List<Video> result, int requestedPage) {
+    final seenIds = _videos.map((video) => video.id).toSet();
+    final fresh = <Video>[];
+    for (final video in result) {
+      if (seenIds.add(video.id)) fresh.add(video);
+    }
+    _videos.addAll(fresh);
+    _recomputeDerived();
+    _page = requestedPage + 1;
+    // A page of only duplicates must not end pagination by itself; only
+    // an empty source or repeated duplicates do.
+    _emptyPages = fresh.isEmpty ? _emptyPages + 1 : 0;
+    _hasMore = result.isNotEmpty && _emptyPages < _maxEmptyPages;
+    _loading = false;
+  }
+
   Future<void> _loadPage({bool reset = false}) async {
     if (_loading && !reset) return;
     final requestGeneration = reset ? ++_generation : _generation;
     final requestedPage = reset ? 0 : _page;
+    final key = 'home|$_category|$requestedPage';
+
+    // Remembered for a few minutes: coming back to a category, or scrolling
+    // back up, shows it in the same frame (no skeleton, no request).
+    final cached = listingCache.peek(key);
+    if (cached != null) {
+      setState(() {
+        _error = null;
+        if (reset) {
+          _videos.clear();
+          _page = 0;
+          _emptyPages = 0;
+        }
+        _applyPage(cached, requestedPage);
+      });
+      if (_hasMore) _scheduleFillViewport();
+      return;
+    }
 
     setState(() {
       _loading = true;
@@ -135,10 +172,8 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      // Cached for a few minutes: coming back to a category, or scrolling
-      // back up, never repeats a request.
       final result = await listingCache.fetch(
-        'home|$_category|$requestedPage',
+        key,
         () => videoRepository.getVideos(
           page: requestedPage,
           pageSize: _pageSize,
@@ -147,22 +182,7 @@ class _HomePageState extends State<HomePage> {
       );
       if (!mounted || requestGeneration != _generation) return;
 
-      final seenIds = _videos.map((video) => video.id).toSet();
-      final fresh = <Video>[];
-      for (final video in result) {
-        if (seenIds.add(video.id)) fresh.add(video);
-      }
-
-      setState(() {
-        _videos.addAll(fresh);
-        _recomputeDerived();
-        _page = requestedPage + 1;
-        // A page of only duplicates must not end pagination by itself; only
-        // an empty source or repeated duplicates do.
-        _emptyPages = fresh.isEmpty ? _emptyPages + 1 : 0;
-        _hasMore = result.isNotEmpty && _emptyPages < _maxEmptyPages;
-        _loading = false;
-      });
+      setState(() => _applyPage(result, requestedPage));
       if (_hasMore) _scheduleFillViewport();
       _maybeShowPreviewHint();
     } catch (error) {
@@ -243,6 +263,7 @@ class _HomePageState extends State<HomePage> {
     if (_searchOpen) {
       _closeSearch();
     } else if (_section != _Section.home) {
+      PreviewManager.instance.stopNow(fade: false);
       setState(() => _section = _Section.home);
     }
   }
@@ -270,6 +291,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onTabSelect(AppTab tab) {
+    // Home stays alive behind the other tabs: a card preview must not keep
+    // playing there.
+    PreviewManager.instance.stopNow(fade: false);
     switch (tab) {
       case AppTab.home:
         if (_searchOpen) _closeSearch();
@@ -344,34 +368,56 @@ class _HomePageState extends State<HomePage> {
     _heroLimit = math.min(screen.height * 0.42, 380.0) - context.safe.top - 30;
     final darkMode = AppColors.palette.brightness == Brightness.dark;
 
-    // The page itself. It does not depend on the search or the keyboard, so
-    // it is built once here and handed to the builder below as `child`.
+    // The pages do not depend on the search or the keyboard, so they are built
+    // once here and handed to the builder below as `child`. Sections are built the first time they are opened and then kept, so
+    // switching tabs never rebuilds a whole page or loses its scroll
+    // position. A hidden section keeps its last built widget (no work) and
+    // gets a fresh one the moment it is shown again.
+    final libraryActive = _section == _Section.library;
+    final settingsActive = _section == _Section.settings;
+    if (libraryActive) {
+      _libraryPage = LibraryView(
+        key: const ValueKey<String>('library'),
+        bottomInset: bottomInset,
+        onOpen: _openDetails,
+        onBrowse: () => setState(() => _section = _Section.home),
+      );
+    }
+    if (settingsActive) {
+      _settingsPage = SettingsView(
+        key: const ValueKey<String>('settings'),
+        bottomInset: bottomInset,
+      );
+    }
     final content = RepaintBoundary(
-      child: AnimatedSwitcher(
-        duration: Motion.normal,
-        child: switch (_section) {
-          _Section.library => LibraryView(
-              key: const ValueKey<String>('library'),
-              bottomInset: bottomInset,
-              onOpen: _openDetails,
-              onBrowse: () => setState(() => _section = _Section.home),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _SectionHost(
+            key: const ValueKey<String>('home'),
+            active: _section == _Section.home,
+            child: _buildHome(
+              margin,
+              bottomInset,
+              featured,
+              showCategories,
+              firstLoad,
+              resume,
             ),
-          _Section.settings => SettingsView(
-              key: const ValueKey<String>('settings'),
-              bottomInset: bottomInset,
+          ),
+          if (_libraryPage != null)
+            _SectionHost(
+              key: const ValueKey<String>('library-host'),
+              active: libraryActive,
+              child: _libraryPage!,
             ),
-          _Section.home => KeyedSubtree(
-              key: const ValueKey<String>('home'),
-              child: _buildHome(
-                margin,
-                bottomInset,
-                featured,
-                showCategories,
-                firstLoad,
-                resume,
-              ),
+          if (_settingsPage != null)
+            _SectionHost(
+              key: const ValueKey<String>('settings-host'),
+              active: settingsActive,
+              child: _settingsPage!,
             ),
-        },
+        ],
       ),
     );
 
@@ -577,6 +623,56 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
     ];
+  }
+}
+
+/// One tab's page. Hidden pages stay mounted (state and scroll position are
+/// kept) but are not painted, cannot be touched and do not run animations.
+/// A page fades in when it is shown again.
+class _SectionHost extends StatefulWidget {
+  const _SectionHost({super.key, required this.active, required this.child});
+
+  final bool active;
+  final Widget child;
+
+  @override
+  State<_SectionHost> createState() => _SectionHostState();
+}
+
+class _SectionHostState extends State<_SectionHost>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: Motion.normal,
+    value: widget.active ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_SectionHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active == oldWidget.active) return;
+    if (widget.active) {
+      _fade.forward(from: 0);
+    } else {
+      _fade.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _fade.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Offstage(
+      offstage: !widget.active,
+      child: TickerMode(
+        enabled: widget.active,
+        child: FadeTransition(opacity: _fade, child: widget.child),
+      ),
+    );
   }
 }
 

@@ -48,7 +48,14 @@ class FavoritesView extends StatelessWidget {
                       color: AppColors.star,
                     ),
                     const SizedBox(width: Gaps.sm),
-                    Text('Saved videos', style: AppText.headline),
+                    Flexible(
+                      child: Text(
+                        'Saved videos',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.headline,
+                      ),
+                    ),
                     if (items.isNotEmpty) ...[
                       const SizedBox(width: Gaps.sm),
                       Text('${items.length}', style: AppText.body),

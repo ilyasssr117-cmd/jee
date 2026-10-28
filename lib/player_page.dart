@@ -13,7 +13,7 @@ import 'models.dart';
 import 'native_bridge.dart';
 import 'platform_ui.dart';
 import 'playback_progress.dart';
-import 'stream_resolver.dart';
+import 'playback_source.dart';
 import 'touch.dart';
 import 'video_repository.dart';
 import 'res_log.dart';
@@ -36,9 +36,14 @@ class PlayerPage extends StatefulWidget {
     this.startAt,
     this.queue,
     this.localPath,
+    this.initialSource,
   });
 
   final Video video;
+
+  /// Already resolved address + headers (coming back from Picture in
+  /// Picture): used for the first start so nothing is looked up again.
+  final PlaybackSource? initialSource;
 
   /// The list the video was opened from. When one video ends, Autoplay Next
   /// continues with the following entry (null / last entry: nothing to play).
@@ -73,12 +78,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static const Duration _controlsTimeout = Duration(seconds: 4);
   static const Duration _scrubCommitDelay = Duration(milliseconds: 350);
   static const Duration _initTimeout = Duration(seconds: 30);
-
-  /// Pending seek target while the viewer is scrubbing (null otherwise).
-  static const String _userAgent =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
-      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
-      'Mobile/15E148 Safari/604.1';
 
   final ValueNotifier<Duration?> _scrubTarget = ValueNotifier<Duration?>(null);
   final ValueNotifier<bool> _playing = ValueNotifier<bool>(false);
@@ -128,6 +127,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   final ValueNotifier<bool> _stalled = ValueNotifier<bool>(false);
   late Video _video = widget.video; // May be replaced by a fresh stream URL.
   late String? _localPath = widget.localPath;
+  PlaybackSource? _initialSource;
+  bool _usedKnownSource = false;
   String? _recordedId;
   Duration? _resumeAt;
   Duration _lastPosition = Duration.zero;
@@ -156,6 +157,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     // Landscape + immersive while watching (phones are portrait elsewhere).
     unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
+    _initialSource = widget.initialSource;
     _initializePlayer();
   }
 
@@ -202,6 +204,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       try {
         final fresh = await videoRepository.resolveForPlayback(
           _video.copyWith(streamUrl: ''),
+          refresh: true,
         );
         if (fresh.streamUrl.trim().isNotEmpty) _video = fresh;
       } catch (error) {
@@ -215,7 +218,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
     VideoPlayerController? controller;
     try {
-      controller = await _createController(generation);
+      controller = await _createController(generation, refresh: refreshSource);
       if (controller == null) return;
       _controller = controller;
       await controller.initialize().timeout(_initTimeout);
@@ -242,6 +245,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         return;
       }
 
+      _usedKnownSource = false;
       _retryBase = controller.value.position;
       _applyVideoOrientation(controller);
       if (_recordedId != _video.id) {
@@ -264,6 +268,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         await _disposeController(controller);
       }
       if (!mounted || generation != _initializationGeneration || _isLeaving) {
+        return;
+      }
+      if (_usedKnownSource) {
+        // The handed-over address no longer works: look it up the normal way.
+        _usedKnownSource = false;
+        unawaited(_initializePlayer(refreshSource: true));
         return;
       }
       if (_reconnecting && _autoRetries < _maxAutoRetries) {
@@ -312,9 +322,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   /// The cookie comes from the repository, exactly as before. The stream link
   /// is resolved once to its final address with the same headers, so the
   /// player talks to the final server directly (no redirect on every range
-  /// request, and the cookie reaches that server). Returns null when this
-  /// attempt is no longer wanted.
-  Future<VideoPlayerController?> _createController(int generation) async {
+  /// request, and the cookie reaches that server). Both answers are reused
+  /// from earlier lookups (preview, previous open) unless [refresh] is set.
+  /// Returns null when this attempt is no longer wanted.
+  Future<VideoPlayerController?> _createController(
+    int generation, {
+    bool refresh = false,
+  }) async {
     final localPath = _localPath;
     if (localPath != null && File(localPath).existsSync()) {
       // Saved on the phone: no network needed.
@@ -326,8 +340,22 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _localPath = null;
     _activeIsFile = false;
 
+    // Coming back from Picture in Picture: the address and headers are
+    // already known, so there is nothing to look up. Used once.
+    final known = _initialSource;
+    if (known != null && !refresh) {
+      _initialSource = null;
+      _usedKnownSource = true;
+      _activeUrl = known.url;
+      _activeHeaders = known.headers;
+      return VideoPlayerController.networkUrl(
+        Uri.parse(known.url),
+        httpHeaders: known.headers,
+      );
+    }
+    _initialSource = null;
+
     final rawUrl = _video.streamUrl.trim();
-    debugPrint('[PLAYER] URL attempting to play: $rawUrl');
     if (rawUrl.isEmpty) {
       throw const _MissingStreamException();
     }
@@ -338,40 +366,23 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       throw const FormatException('Invalid video stream URL.');
     }
 
-    final pageUri = Uri.tryParse(_video.pageUrl?.trim() ?? '');
-    final validPageUri = pageUri != null &&
-        (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
-        pageUri.host.isNotEmpty;
-    final pageOrigin = validPageUri ? pageUri.origin : streamUri.origin;
-    final referer = validPageUri ? pageUri.toString() : '$pageOrigin/';
-
-    final cookieHeader = await videoRepository.getPlaybackCookieHeader(
-      streamUri: streamUri,
-      pageUrl: validPageUri ? pageUri.toString() : null,
-      userAgent: _userAgent,
+    final source = await resolvePlaybackSource(
+      streamUri,
+      _video.pageUrl,
+      refresh: refresh,
     );
     if (!mounted || generation != _initializationGeneration || _isLeaving) {
       return null;
     }
 
-    final headers = <String, String>{
-      'User-Agent': _userAgent,
-      'Referer': referer,
-      'Origin': pageOrigin,
-      'Accept': '*/*',
-      if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
-    };
-
-    final finalUri = await resolveFinalStreamUri(streamUri, headers);
-    if (!mounted || generation != _initializationGeneration || _isLeaving) {
-      return null;
-    }
-
-    debugPrint('[PLAYER] Initializing stream host=${finalUri.host}');
-    ResLog.video(pageUrl: _video.pageUrl, videoUrl: finalUri.toString());
-    _activeUrl = finalUri.toString();
-    _activeHeaders = headers;
-    return VideoPlayerController.networkUrl(finalUri, httpHeaders: headers);
+    final finalUri = Uri.parse(source.url);
+    ResLog.video(pageUrl: _video.pageUrl, videoUrl: source.url);
+    _activeUrl = source.url;
+    _activeHeaders = source.headers;
+    return VideoPlayerController.networkUrl(
+      finalUri,
+      httpHeaders: source.headers,
+    );
   }
 
   /// Reload without a black screen. The current picture stays, and the
@@ -403,6 +414,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         try {
           final next = await videoRepository.resolveForPlayback(
             _video.copyWith(streamUrl: ''),
+            refresh: true,
           );
           if (next.streamUrl.trim().isNotEmpty) _video = next;
         } catch (error) {
@@ -411,7 +423,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
       if (cancelled()) return;
 
-      fresh = await _createController(generation);
+      fresh = await _createController(generation, refresh: true);
       if (fresh == null || cancelled()) {
         if (fresh != null) await _disposeController(fresh);
         return;
@@ -1369,6 +1381,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 child: RoundIconButton(
                   icon: Icons.arrow_back_ios_new_rounded,
                   iconSize: 18,
+                  tapSize: kMinTapSize,
                   label: 'Back',
                   onTap: () => unawaited(_leave()),
                 ),
@@ -1643,6 +1656,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         icon: Icons.skip_previous_rounded,
                         label: 'Previous video',
                         size: 42,
+                        tapSize: kMinTapSize,
                         iconSize: 26,
                         onTap: () => unawaited(_playPrevious()),
                       ),
@@ -1693,6 +1707,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         icon: Icons.skip_next_rounded,
                         label: 'Next video',
                         size: 42,
+                        tapSize: kMinTapSize,
                         iconSize: 26,
                         onTap: () => unawaited(_playNext()),
                       ),
@@ -1730,9 +1745,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           icon: Icons.arrow_back_ios_new_rounded,
           iconSize: 18,
           label: 'Back',
+          tapSize: kMinTapSize,
           onTap: () => unawaited(_leave()),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1759,45 +1775,55 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ],
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Pressable(
           semanticLabel: 'Playback speed',
           haptic: Haptic.selection,
           pressedScale: 0.9,
           onTap: _pickSpeed,
-          child: Container(
-            height: 38,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0x8C000000),
-              borderRadius: BorderRadius.circular(19),
-              border: Border.all(color: const Color(0x26FFFFFF)),
-            ),
-            child: Text(
-              _speedLabel(_speed),
-              style: darkText.label.copyWith(fontSize: 13),
+          child: SizedBox(
+            height: kMinTapSize,
+            child: Center(
+              child: Container(
+                height: 38,
+                // Keeps the visible gap to the next button at 8 pt.
+                margin: const EdgeInsets.only(right: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0x8C000000),
+                  borderRadius: BorderRadius.circular(19),
+                  border: Border.all(color: const Color(0x26FFFFFF)),
+                ),
+                child: Text(
+                  _speedLabel(_speed),
+                  style: darkText.label.copyWith(fontSize: 13),
+                ),
+              ),
             ),
           ),
         ),
         if (NativeBridge.instance.pipSupported) ...[
-          const SizedBox(width: 8),
+          const SizedBox(width: 2),
           RoundIconButton(
             icon: Icons.picture_in_picture_alt_rounded,
             label: 'Picture in Picture',
+          tapSize: kMinTapSize,
             onTap: () => unawaited(_enterPip()),
           ),
         ],
-        const SizedBox(width: 8),
+        const SizedBox(width: 2),
         RoundIconButton(
           icon: Icons.screen_rotation_rounded,
           label: 'Rotate',
+          tapSize: kMinTapSize,
           onTap: _toggleOrientation,
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 2),
         RoundIconButton(
           icon: Icons.refresh_rounded,
           label: 'Reload',
+          tapSize: kMinTapSize,
           onTap: _reload,
         ),
       ],

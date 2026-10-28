@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as dom;
@@ -6,18 +7,7 @@ import 'package:html/parser.dart' as html;
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
-
-/// Logs only a host origin; query strings and signed media URLs stay private.
-String _safeOriginForLog(String raw) {
-  final uri = Uri.tryParse(raw);
-  if (uri == null ||
-      !uri.hasAuthority ||
-      uri.host.isEmpty ||
-      (uri.scheme != 'http' && uri.scheme != 'https')) {
-    return '[non-http-url]';
-  }
-  return uri.origin;
-}
+import 'request_cache.dart';
 
 /// HTML catalogue configuration for a source you own or are authorized to use.
 /// Selectors and paths are configurable because each website has its own markup.
@@ -168,6 +158,16 @@ class Scraper {
         'Referer': '${config.baseUri}/',
       };
 
+  /// A video's detail page is needed by "related", "models" and "play" at
+  /// about the same moment: read it once and share it for a short while.
+  final TtlCache<String> _detailPages = TtlCache<String>(
+    ttl: const Duration(seconds: 90),
+    maxEntries: 4,
+  );
+
+  Future<String> _getDetailPage(Uri uri, {bool fresh = false}) =>
+      _detailPages.fetch(uri.toString(), () => _get(uri), force: fresh);
+
   Future<String> _get(Uri uri, {Map<String, String>? extraHeaders}) async {
     ScraperException? lastError;
     // One automatic retry for network hiccups and 5xx responses.
@@ -190,11 +190,9 @@ class Scraper {
 
   Future<String> _getOnce(Uri uri, Map<String, String>? extraHeaders) async {
     try {
-      debugPrint('[SCRAPER] GET ${uri.origin}');
       final response = await _client
           .get(uri, headers: <String, String>{..._headers, ...?extraHeaders})
           .timeout(config.timeout);
-      debugPrint('[SCRAPER] HTTP ${response.statusCode} from ${uri.origin}');
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ScraperException(
           'Source request failed with HTTP ${response.statusCode}.',
@@ -244,10 +242,16 @@ class Scraper {
   }
 
   Future<List<Video>> list(Uri uri, {bool related = false}) async {
-    final body = await _get(uri);
-    final document = html.parse(body);
-    final selector = related ? config.relatedCardSelector : config.cardSelector;
-    return _videosFrom(document, uri, selector);
+    final body = related ? await _getDetailPage(uri) : await _get(uri);
+    final job = (
+      config: config,
+      body: body,
+      uri: uri,
+      selector: related ? config.relatedCardSelector : config.cardSelector,
+    );
+    // Parsing a whole HTML page is heavy: keep it off the UI thread so
+    // scrolling and taps never stall while a page loads.
+    return _offMainThread(() => _parseListJob(job));
   }
 
   /// Every valid, non-duplicate video card of [document].
@@ -257,7 +261,6 @@ class Scraper {
     final videos = <Video>[];
     final seen = <String>{};
     final cards = document.querySelectorAll(selector);
-    debugPrint('[SCRAPER] Selector "$selector" matched ${cards.length} cards at ${uri.origin}');
     for (final element in cards) {
       try {
         final video = _parseCard(element, uri);
@@ -270,10 +273,6 @@ class Scraper {
         debugPrint('[SCRAPER] Skipped an invalid video card: $error');
       }
     }
-    debugPrint(
-      '[SCRAPER] Parsed ${videos.length} videos from ${uri.origin} '
-      '(${cards.length - videos.length} cards skipped: albums / duplicates)',
-    );
     return videos;
   }
 
@@ -299,7 +298,7 @@ class Scraper {
     if (pageUrl == null || pageUrl.trim().isEmpty) return const <ModelRef>[];
 
     final uri = config.baseUri.resolve(pageUrl);
-    final document = html.parse(await _get(uri));
+    final document = html.parse(await _getDetailPage(uri));
 
     // Preferred: the dedicated row; fallback: any model link in the info block.
     var anchors = document.querySelectorAll('.media-models a[href]');
@@ -323,7 +322,6 @@ class Scraper {
       if (name.isEmpty) continue;
       models.add(ModelRef(name: name, url: base.toString()));
     }
-    debugPrint('[SCRAPER] ${models.length} models on ${uri.origin}');
     return models;
   }
 
@@ -382,7 +380,6 @@ class Scraper {
       rethrow;
     }
     final albums = _albumsFrom(html.parse(body), uri, modelName: model.name);
-    debugPrint('[SCRAPER] ${albums.length} albums at ${uri.origin}');
     return albums;
   }
 
@@ -492,7 +489,6 @@ class Scraper {
       if (!seen.add(id)) continue;
       photos.add(AlbumPhoto(id: id, thumbUrl: thumb, fullUrl: full));
     }
-    debugPrint('[SCRAPER] ${photos.length} photos (chunk $chunk)');
     return photos;
   }
 
@@ -582,8 +578,6 @@ class Scraper {
         }
       }
     }
-    debugPrint('[SCRAPER] Model "${name ?? model.name}": '
-        '${image == null ? 'no photo' : 'photo found'}');
     return ModelProfile(name: name ?? model.name, imageUrl: image);
   }
 
@@ -1156,12 +1150,6 @@ class Scraper {
         return byRank != 0 ? byRank : x.order.compareTo(y.order);
       });
 
-    for (final c in unique) {
-      debugPrint(
-        '[SCRAPER] stream candidate rank=${c.rank} q=${c.quality} '
-        'preview=${c.preview} ${_safeOriginForLog(c.url)}',
-      );
-    }
     return (
       best: unique.isEmpty ? null : unique.first.url,
       needsDecoding: needsDecoding,
@@ -1170,7 +1158,7 @@ class Scraper {
 
   /// Resolves a catalogue page to a direct stream only when one is exposed in
   /// the page HTML. It does not bypass protected/encrypted player formats.
-  Future<Video> resolveForPlayback(Video video) async {
+  Future<Video> resolveForPlayback(Video video, {bool fresh = false}) async {
     if (video.streamUrl.trim().isNotEmpty) return video;
     final pageUrl = video.pageUrl;
     if (pageUrl == null || pageUrl.trim().isEmpty) {
@@ -1178,7 +1166,13 @@ class Scraper {
     }
 
     final uri = config.baseUri.resolve(pageUrl);
-    final body = await _get(uri);
+    final body = await _getDetailPage(uri, fresh: fresh);
+    final job = (config: config, video: video, body: body, uri: uri);
+    return _offMainThread(() => _resolveJob(job));
+  }
+
+  /// The parsing half of [resolveForPlayback] (pure: needs no network).
+  Video _videoFromPage(Video video, String body, Uri uri) {
     final document = html.parse(body);
 
     final picked = _extractStreams(body, document, uri);
@@ -1239,6 +1233,40 @@ class Scraper {
   }
 
   void close() => _client.close();
+}
+
+/// Runs [job] on a background isolate. Falls back to running it here when an
+/// isolate can't be used, so parsing never fails just because of that.
+Future<T> _offMainThread<T>(T Function() job) async {
+  try {
+    return await Isolate.run<T>(job);
+  } on ScraperException {
+    rethrow;
+  } catch (_) {
+    return job();
+  }
+}
+
+List<Video> _parseListJob(
+  ({ScraperConfig config, String body, Uri uri, String selector}) job,
+) {
+  final scraper = Scraper(job.config);
+  try {
+    return scraper._videosFrom(html.parse(job.body), job.uri, job.selector);
+  } finally {
+    scraper.close();
+  }
+}
+
+Video _resolveJob(
+  ({ScraperConfig config, Video video, String body, Uri uri}) job,
+) {
+  final scraper = Scraper(job.config);
+  try {
+    return scraper._videoFromPage(job.video, job.body, job.uri);
+  } finally {
+    scraper.close();
+  }
 }
 
 class _StreamCandidate {

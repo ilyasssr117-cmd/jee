@@ -5,6 +5,7 @@ import 'download_store.dart';
 import 'error_text.dart';
 import 'models.dart';
 import 'player_page.dart';
+import 'playback_source.dart';
 import 'preview_manager.dart';
 import 'video_repository.dart';
 
@@ -13,11 +14,15 @@ import 'video_repository.dart';
 /// List pages may expose only a preview URL or an expiring stream URL, so the
 /// detail page is re-read right before playback. Returns null on success or a
 /// short, user-facing message on failure. Callers own the "busy" UI state.
+///
+/// With a [source] (the address and headers a player already used, e.g. when
+/// Picture in Picture closes) nothing is looked up: the player opens at once.
 Future<String?> launchPlayer(
   BuildContext context,
   Video video, {
   Duration? startAt,
   List<Video>? queue,
+  PlaybackSource? source,
 }) async {
   final navigator = Navigator.of(context);
   try {
@@ -26,7 +31,7 @@ Future<String?> launchPlayer(
     if (!context.mounted) return null;
     // A saved copy plays straight from the phone (works without internet).
     final localPath = DownloadStore.instance.localPath(video.id);
-    final playable = localPath != null
+    final playable = localPath != null || source != null
         ? video
         : await videoRepository.resolveForPlayback(
             video.copyWith(streamUrl: ''),
@@ -43,6 +48,7 @@ Future<String?> launchPlayer(
           startAt: startAt,
           queue: queue,
           localPath: localPath,
+          initialSource: localPath == null ? source : null,
         ),
       ),
     );

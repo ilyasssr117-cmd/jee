@@ -20,14 +20,12 @@ class GallerySaveResult {
 }
 
 /// Saves picture files straight into the Photos app (iOS) / gallery (Android),
-/// with the `gal` plugin.
-///
-/// Pictures go to the camera roll with *add-only* access, which needs just
-/// `NSPhotoLibraryAddUsageDescription` in Info.plist. Do NOT pass `album:` to
-/// `Gal.putImage` / `Gal.putVideo`: a named album needs full read/write access
-/// (`NSPhotoLibraryUsageDescription`), and when iOS finds that key missing it
-/// closes the whole app the moment the permission is requested.
+/// with the `gal` plugin. iOS needs `NSPhotoLibraryAddUsageDescription` in
+/// Info.plist (see ios_setup/IOS_BUILD.md).
 abstract final class PhotoSaver {
+  /// Name of the album created in the Photos app.
+  static const String albumName = 'Flow';
+
   static Future<GallerySaveResult> saveToGallery(List<String> paths) =>
       _save(paths, video: false);
 
@@ -42,7 +40,6 @@ abstract final class PhotoSaver {
     if (paths.isEmpty) return const GallerySaveResult(saved: 0);
 
     try {
-      // Add-only access (the default): the weakest permission that works.
       var allowed = await Gal.hasAccess();
       if (!allowed) allowed = await Gal.requestAccess();
       if (!allowed) return const GallerySaveResult(saved: 0, denied: true);
@@ -55,9 +52,9 @@ abstract final class PhotoSaver {
     for (final path in paths) {
       try {
         if (video) {
-          await Gal.putVideo(path);
+          await Gal.putVideo(path, album: albumName);
         } else {
-          await Gal.putImage(path);
+          await Gal.putImage(path, album: albumName);
         }
         saved++;
       } catch (error) {

@@ -5,7 +5,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'models.dart';
+import 'request_cache.dart';
 import 'scraper.dart';
+import 'stream_resolver.dart';
 
 abstract class VideoCatalogRepository {
   List<String> get categories;
@@ -32,7 +34,12 @@ abstract class VideoCatalogRepository {
 
   Future<List<Video>> getRelated(Video video, {int limit = 6});
 
-  Future<Video> resolveForPlayback(Video video);
+  /// The playable version of [video]. The answer is reused for a few minutes;
+  /// [refresh] asks the site again (expired link / reconnect).
+  Future<Video> resolveForPlayback(Video video, {bool refresh = false});
+
+  /// Forgets remembered playback answers and cookie checks.
+  void clearPlaybackCaches();
 
   /// The models / channel that published [video] (empty when unknown).
   Future<List<ModelRef>> getVideoModels(Video video);
@@ -51,6 +58,7 @@ abstract class VideoCatalogRepository {
     required Uri streamUri,
     String? pageUrl,
     required String userAgent,
+    bool refresh = false,
   });
 }
 
@@ -172,6 +180,26 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   final Map<String, _RepositoryCookie> _cookieJar =
       <String, _RepositoryCookie>{};
 
+  /// Detail-page answers (stream link, title, poster) by video id. Shared
+  /// while running, so the card preview, the player and a download that ask
+  /// for the same video read its page once.
+  final TtlCache<Video> _playable = TtlCache<Video>(
+    ttl: const Duration(minutes: 8),
+    maxEntries: 40,
+  );
+
+  /// When the site's cookie pages were last visited, by page address.
+  static const Duration _cookieTtl = Duration(minutes: 10);
+  final Map<String, DateTime> _cookieVisits = <String, DateTime>{};
+  final Map<String, Future<void>> _cookieRunning = <String, Future<void>>{};
+
+  @override
+  void clearPlaybackCaches() {
+    _playable.clear();
+    _cookieVisits.clear();
+    clearFinalStreamUris();
+  }
+
   @override
   List<String> get categories => scraper.config.categories;
 
@@ -199,15 +227,10 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     String? category,
   }) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: getVideos page=$page category=$category');
     if (category != null && category.trim().isNotEmpty && category != 'All') {
-      final videos = await scraper.category(category, page: page + 1);
-      debugPrint('[FLOW] repository: category returned ${videos.length} videos');
-      return videos;
+      return scraper.category(category, page: page + 1);
     }
-    final videos = await scraper.home(page: page);
-    debugPrint('[FLOW] repository: homepage returned ${videos.length} videos');
-    return videos;
+    return scraper.home(page: page);
   }
 
   @override
@@ -218,19 +241,13 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     String? sortBy,
   }) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: search query="$query" page=$page sort=$sortBy');
-    final videos = await scraper.search(query, page: page + 1, sortBy: sortBy);
-    debugPrint('[FLOW] repository: search returned ${videos.length} videos');
-    return videos;
+    return scraper.search(query, page: page + 1, sortBy: sortBy);
   }
 
   @override
   Future<List<Video>> getRelated(Video video, {int limit = 6}) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: related videos for video=${video.id}');
-    final videos = await scraper.related(video, limit: limit);
-    debugPrint('[FLOW] repository: related returned ${videos.length} videos');
-    return videos;
+    return scraper.related(video, limit: limit);
   }
 
   @override
@@ -254,10 +271,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   @override
   Future<ModelPageResult> getModelPage(ModelRef model, {int page = 1}) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: model ${model.name} page=$page');
-    final result = await scraper.modelPage(model, page: page);
-    debugPrint('[FLOW] repository: model page returned ${result.videos.length} videos');
-    return result;
+    return scraper.modelPage(model, page: page);
   }
 
   @override
@@ -273,12 +287,23 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   }
 
   @override
-  Future<Video> resolveForPlayback(Video video) async {
+  Future<Video> resolveForPlayback(Video video, {bool refresh = false}) async {
     _ensureConfigured();
-    debugPrint('[FLOW] repository: resolving playback for video=${video.id}');
-    final resolved = await scraper.resolveForPlayback(video);
-    debugPrint('[FLOW] repository: stream URL resolved=${resolved.streamUrl.isNotEmpty}');
-    return resolved;
+    if (video.streamUrl.trim().isNotEmpty) return video;
+    final resolved = await _playable.fetch(
+      video.id,
+      () => scraper.resolveForPlayback(video, fresh: refresh),
+      force: refresh,
+    );
+    // The cached answer may come from another list's copy of the same video:
+    // keep this caller's own fields and take only what the page provided.
+    return video.copyWith(
+      title: resolved.title,
+      streamUrl: resolved.streamUrl,
+      description: resolved.description,
+      thumbnailUrl: resolved.thumbnailUrl,
+      pageUrl: resolved.pageUrl,
+    );
   }
 
   @override
@@ -286,6 +311,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     required Uri streamUri,
     String? pageUrl,
     required String userAgent,
+    bool refresh = false,
   }) async {
     _ensureConfigured();
     final configuredUri = Uri.parse(scraper.config.baseUrl.trim());
@@ -296,15 +322,36 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
         parsedPage.host.isNotEmpty &&
         _sameConfiguredSite(parsedPage.host, configuredUri.host);
 
-    await _fetchCookieResponse(configuredRoot, userAgent);
-    if (validPage && parsedPage != null && parsedPage.toString() != configuredRoot.toString()) {
-      await _fetchCookieResponse(parsedPage, userAgent);
+    await _visitForCookies(configuredRoot, userAgent, refresh);
+    if (validPage && parsedPage.toString() != configuredRoot.toString()) {
+      await _visitForCookies(parsedPage, userAgent, refresh);
     }
 
     return _cookieHeaderForUri(streamUri);
   }
 
-  Future<void> _fetchCookieResponse(Uri initialUri, String userAgent) async {
+  /// Visits [uri] to collect its cookies, unless that was done a moment ago
+  /// (the cookies are kept in the jar). Simultaneous callers share one visit.
+  Future<void> _visitForCookies(Uri uri, String userAgent, bool refresh) {
+    final key = uri.toString();
+    if (!refresh) {
+      final last = _cookieVisits[key];
+      if (last != null && DateTime.now().difference(last) < _cookieTtl) {
+        return Future<void>.value();
+      }
+      final running = _cookieRunning[key];
+      if (running != null) return running;
+    }
+    final task = _fetchCookieResponse(uri, userAgent).then((ok) {
+      if (ok) _cookieVisits[key] = DateTime.now();
+    }).whenComplete(() {
+      _cookieRunning.remove(key);
+    });
+    _cookieRunning[key] = task;
+    return task;
+  }
+
+  Future<bool> _fetchCookieResponse(Uri initialUri, String userAgent) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
     var currentUri = initialUri;
@@ -349,8 +396,10 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
         await response.drain<void>().timeout(const Duration(seconds: 10));
         break;
       }
+      return true;
     } catch (error) {
       debugPrint('[FLOW] Cookie response fetch failed (${error.runtimeType}).');
+      return false;
     } finally {
       client.close(force: true);
     }

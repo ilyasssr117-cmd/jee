@@ -23,6 +23,14 @@ class TtlCache<V> {
       LinkedHashMap<String, _Entry<V>>();
   final Map<String, Future<V>> _running = <String, Future<V>>{};
 
+  /// The cached value for [key] if it is still fresh, otherwise null. Lets a
+  /// page show a remembered answer in the same frame, with no loading state.
+  V? peek(String key) {
+    final hit = _entries[key];
+    if (hit != null && DateTime.now().isBefore(hit.expires)) return hit.value;
+    return null;
+  }
+
   /// Returns the cached value for [key] while it is fresh; otherwise runs
   /// [loader]. [force] skips the cache (pull-to-refresh).
   Future<V> fetch(

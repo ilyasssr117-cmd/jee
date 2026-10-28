@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 
@@ -145,6 +147,9 @@ class AppChip extends StatelessWidget {
 }
 
 /// Round icon button (back, close, player controls).
+/// Smallest comfortable touch target (Apple's guideline).
+const double kMinTapSize = 44;
+
 class RoundIconButton extends StatelessWidget {
   const RoundIconButton({
     super.key,
@@ -152,6 +157,7 @@ class RoundIconButton extends StatelessWidget {
     required this.onTap,
     required this.label,
     this.size = 38,
+    this.tapSize = 0,
     this.iconSize,
     this.background = const Color(0x8C000000),
     this.color = Colors.white,
@@ -162,6 +168,10 @@ class RoundIconButton extends StatelessWidget {
   final VoidCallback onTap;
   final String label;
   final double size;
+
+  /// Touch area when it should be larger than the circle (the circle keeps
+  /// its look). 0 = same as [size].
+  final double tapSize;
   final double? iconSize;
   final Color background;
   final Color color;
@@ -169,20 +179,27 @@ class RoundIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final box = math.max(size, tapSize);
     return Pressable(
       semanticLabel: label,
       onTap: onTap,
       haptic: haptic,
       pressedScale: 0.88,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: background,
-          border: Border.all(color: const Color(0x26FFFFFF)),
+      child: SizedBox(
+        width: box,
+        height: box,
+        child: Center(
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: background,
+              border: Border.all(color: const Color(0x26FFFFFF)),
+            ),
+            child: Icon(icon, size: iconSize ?? size * 0.55, color: color),
+          ),
         ),
-        child: Icon(icon, size: iconSize ?? size * 0.55, color: color),
       ),
     );
   }

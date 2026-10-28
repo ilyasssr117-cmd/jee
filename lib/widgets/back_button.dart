@@ -11,11 +11,16 @@ class PageBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return RoundIconButton(
-      icon: Icons.arrow_back_ios_new_rounded,
-      iconSize: 18,
-      label: 'Back',
-      onTap: onPressed ?? () => Navigator.of(context).maybePop(),
+    // The circle stays where it was; only the touch area grows to 44 pt.
+    return Transform.translate(
+      offset: const Offset(-3, -3),
+      child: RoundIconButton(
+        icon: Icons.arrow_back_ios_new_rounded,
+        iconSize: 18,
+        tapSize: kMinTapSize,
+        label: 'Back',
+        onTap: onPressed ?? () => Navigator.of(context).maybePop(),
+      ),
     );
   }
 }

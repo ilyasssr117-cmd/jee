@@ -5,16 +5,20 @@ import 'package:flutter/services.dart';
 
 import 'models.dart';
 import 'playback_launcher.dart';
+import 'playback_source.dart';
 import 'playback_progress.dart';
 
 /// Navigator of the whole app (used to re-open the player from outside it).
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 class _PipSession {
-  const _PipSession(this.video, this.queue);
+  const _PipSession(this.video, this.queue, this.source);
 
   final Video video;
   final List<Video>? queue;
+
+  /// What the player was using; reused when the full player comes back.
+  final PlaybackSource? source;
 }
 
 /// Talks to the small iOS part of the app (see ios/Runner/AppDelegate.swift):
@@ -64,18 +68,18 @@ class NativeBridge {
             'rate': rate,
           }) ??
           false;
-      if (started) _session = _PipSession(video, queue);
+      if (started) {
+        _session = _PipSession(
+          video,
+          queue,
+          isFile ? null : PlaybackSource(url, headers),
+        );
+      }
       return started;
     } catch (error) {
       debugPrint('[PIP] start failed: ${error.runtimeType}');
       return false;
     }
-  }
-
-  Future<void> stopPip() async {
-    try {
-      await _channel.invokeMethod<void>('pipStop');
-    } catch (_) {}
   }
 
   /// Opens the iOS share sheet for a saved video (Save Video, Save to Files…).
@@ -136,7 +140,13 @@ class NativeBridge {
     final overlay = rootNavigatorKey.currentState?.overlay?.context;
     if (overlay == null || !overlay.mounted) return;
     unawaited(
-      launchPlayer(overlay, session.video, startAt: position, queue: session.queue),
+      launchPlayer(
+        overlay,
+        session.video,
+        startAt: position,
+        queue: session.queue,
+        source: session.source,
+      ),
     );
   }
 }

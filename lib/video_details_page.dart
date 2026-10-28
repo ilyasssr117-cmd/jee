@@ -173,27 +173,40 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       fallbackToCategory: false,
     );
 
-    return SizedBox(
-      height: _headerHeight(size),
+    // At least the usual height, but it grows when the text and buttons need
+    // more room (small screens, long titles) instead of running under the
+    // back button.
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: _headerHeight(size)),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
         child: Stack(
-        fit: StackFit.expand,
+        alignment: Alignment.bottomLeft,
         children: [
-          VideoArtwork(video: video, showLabel: false),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0x330B0D12), Color(0xE60B0D12)],
-              ),
+          Positioned.fill(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                VideoArtwork(video: video, showLabel: false),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x330B0D12), Color(0xE60B0D12)],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          Positioned(
-            left: margin,
-            right: margin,
-            bottom: Gaps.md,
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              margin,
+              context.safe.top + Gaps.sm + kMinTapSize + Gaps.md,
+              margin,
+              Gaps.md,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -81,10 +81,13 @@ Future<void> _bootstrap() async {
     HistoryStore.instance.load();
     SearchHistory.instance.load();
     PlaybackProgress.instance.load();
-    await DownloadStore.instance.init();
-    await PhotoStore.instance.init();
     FavoriteModelsStore.instance.init();
-    await NativeBridge.instance.init();
+    // Independent of each other: start together instead of one after another.
+    await Future.wait<void>(<Future<void>>[
+      DownloadStore.instance.init(),
+      PhotoStore.instance.init(),
+      NativeBridge.instance.init(),
+    ]);
   } catch (error) {
     debugPrint('[STARTUP] Local data failed to load: $error');
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../app_theme.dart';
 import '../favorites_store.dart';
@@ -27,7 +28,9 @@ class FavoritesView extends StatelessWidget {
       builder: (context, _) {
         final items = FavoritesStore.instance.items;
         return CustomScrollView(
-          cacheExtent: MediaQuery.sizeOf(context).height,
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            MediaQuery.sizeOf(context).height,
+          ),
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
@@ -39,7 +42,7 @@ class FavoritesView extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.star_rounded,
                       size: 24,
                       color: AppColors.star,

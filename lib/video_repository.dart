@@ -393,9 +393,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   void _storeCookie(Cookie cookie, Uri responseUri) {
     final rawDomain = cookie.domain?.trim().toLowerCase();
     final hostOnly = rawDomain == null || rawDomain.isEmpty;
-    final domain = hostOnly
+    final domain = rawDomain == null || rawDomain.isEmpty
         ? responseUri.host.toLowerCase()
-        : rawDomain!.replaceFirst(RegExp(r'^\.'), '');
+        : rawDomain.replaceFirst(RegExp(r'^\.'), '');
     final responseHost = responseUri.host.toLowerCase();
 
     if (domain.isEmpty ||

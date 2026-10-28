@@ -559,6 +559,7 @@ class Scraper {
               ),
             );
           } on ScraperException {
+            return;
           }
         }(),
     ]);
@@ -607,6 +608,7 @@ class Scraper {
               albums.putIfAbsent(album.id, () => album);
             }
           } on ScraperException {
+            return;
           }
         }(),
     ]);

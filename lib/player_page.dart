@@ -21,14 +21,6 @@ import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
 
-/// Full-screen touch player.
-///
-///  * Tap ............... show / hide the controls (they fade)
-///  * Double-tap sides .. skip 10 s back / forward
-///  * Hold the screen ... 2x speed while held
-///  * Drag the bar ...... scrub
-///  * Speed button ...... 0.5x – 2x
-
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
     super.key,
@@ -41,25 +33,18 @@ class PlayerPage extends StatefulWidget {
 
   final Video video;
 
-  /// Already resolved address + headers (coming back from Picture in
-  /// Picture): used for the first start so nothing is looked up again.
   final PlaybackSource? initialSource;
 
-  /// The list the video was opened from. When one video ends, Autoplay Next
-  /// continues with the following entry (null / last entry: nothing to play).
   final List<Video>? queue;
 
-  /// A saved copy on the phone: plays offline when set and the file exists.
   final String? localPath;
 
-  /// Optional position to resume from.
   final Duration? startAt;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-/// A playback problem described for the viewer.
 class _PlaybackProblem {
   const _PlaybackProblem(this.title, this.message, this.icon);
 
@@ -69,8 +54,6 @@ class _PlaybackProblem {
 }
 
 class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
-  // VideoPlayer uses a native decoder/texture. Keep its asynchronous teardown
-  // visible to the next player so opening a second video cannot race disposal.
   static final Expando<Future<void>> _disposalFutures =
       Expando<Future<void>>('tvTubePlayerDisposal');
   static Future<void> _pendingDisposals = Future<void>.value();
@@ -86,7 +69,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   VideoPlayerController? _controller;
   Timer? _hideTimer;
   Timer? _scrubTimer;
-  // Reload in place: the old picture stays while a fresh connection prepares.
   final ValueNotifier<bool> _reloading = ValueNotifier<bool>(false);
   int _reloadToken = 0;
   Timer? _spinnerTimer;
@@ -95,15 +77,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int? _sleepMinutes;
   bool _pipBusy = false;
 
-  // What the active controller is playing (Picture in Picture continues it).
   String? _activeUrl;
   Map<String, String>? _activeHeaders;
   bool _activeIsFile = false;
 
-  bool _scrubBadge = true; // Centre badge for bar drags / buttons only.
+  bool _scrubBadge = true;
   String _scrubText = '';
   double _speed = 1.0;
-  bool _boosting = false; // Holding the screen: temporary 2x.
+  bool _boosting = false;
   final ValueNotifier<bool> _boost = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _dragging = ValueNotifier<bool>(false);
   final ValueNotifier<_SeekFlash?> _flash = ValueNotifier<_SeekFlash?>(null);
@@ -121,11 +102,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   _PlaybackProblem? _problem;
   int _initializationGeneration = 0;
 
-  // Reload / reconnect state.
   static const int _maxAutoRetries = 3;
   static const Duration _stallAfter = Duration(seconds: 8);
   final ValueNotifier<bool> _stalled = ValueNotifier<bool>(false);
-  late Video _video = widget.video; // May be replaced by a fresh stream URL.
+  late Video _video = widget.video;
   late String? _localPath = widget.localPath;
   PlaybackSource? _initialSource;
   bool _usedKnownSource = false;
@@ -139,12 +119,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _reconnecting = false;
   bool _manualReload = false;
 
-  // Vertical (9:16) videos: the screen flips to portrait on phones.
   bool _portrait = false;
-  bool _orientationForced = false; // The viewer used the rotate button.
+  bool _orientationForced = false;
 
-  // Autoplay Next. The countdown lives in a ValueNotifier so the one-second
-  // tick rebuilds only the small number label, never the whole page.
   static const int _autoplaySeconds = 5;
   final ValueNotifier<int?> _countdown = ValueNotifier<int?>(null);
   Timer? _autoplayTimer;
@@ -154,20 +131,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Landscape + immersive while watching (phones are portrait elsewhere).
     unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
     _initialSource = widget.initialSource;
     _initializePlayer();
   }
 
-  // -------------------------------------------------------------------------
-  // Initialisation & teardown
-  // -------------------------------------------------------------------------
-
-  /// Starts (or restarts) playback. With [refreshSource] the detail page is
-  /// re-read first, because stream URLs can expire, and playback resumes from
-  /// where it stopped instead of from the beginning.
   Future<void> _initializePlayer({bool refreshSource = false}) async {
     if (_isLeaving) return;
     final generation = ++_initializationGeneration;
@@ -200,7 +169,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _showControls = true;
     });
 
-    if (refreshSource && _localPath == null) {
+    final lookAgain = refreshSource && !(_reconnecting && _autoRetries < 2);
+    if (lookAgain && _localPath == null) {
       try {
         final fresh = await videoRepository.resolveForPlayback(
           _video.copyWith(streamUrl: ''),
@@ -208,7 +178,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         );
         if (fresh.streamUrl.trim().isNotEmpty) _video = fresh;
       } catch (error) {
-        // Fall back to the URL we already have; init will report real errors.
         debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
       }
       if (!mounted || generation != _initializationGeneration || _isLeaving) {
@@ -218,7 +187,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
     VideoPlayerController? controller;
     try {
-      controller = await _createController(generation, refresh: refreshSource);
+      controller = await _createController(generation, refresh: lookAgain);
       if (controller == null) return;
       _controller = controller;
       await controller.initialize().timeout(_initTimeout);
@@ -271,7 +240,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         return;
       }
       if (_usedKnownSource) {
-        // The handed-over address no longer works: look it up the normal way.
         _usedKnownSource = false;
         unawaited(_initializePlayer(refreshSource: true));
         return;
@@ -294,9 +262,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Phones only: a vertical video (width < height) flips the screen to
-  /// portrait so it fills it; anything else stays landscape. Once the viewer
-  /// presses the rotate button their choice wins for this video.
   void _applyVideoOrientation(VideoPlayerController controller) {
     if (_orientationForced) return;
     final size = controller.value.size;
@@ -310,28 +275,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(applyPlayerOrientation(portrait: portrait));
   }
 
-  /// Rotate button: flip between portrait and landscape by hand.
   void _toggleOrientation() {
     _orientationForced = true;
     _setPortrait(!_portrait);
     _revealControls();
   }
 
-  /// Builds (but does not initialise) a controller for the current video.
-  ///
-  /// The cookie comes from the repository, exactly as before. The stream link
-  /// is resolved once to its final address with the same headers, so the
-  /// player talks to the final server directly (no redirect on every range
-  /// request, and the cookie reaches that server). Both answers are reused
-  /// from earlier lookups (preview, previous open) unless [refresh] is set.
-  /// Returns null when this attempt is no longer wanted.
   Future<VideoPlayerController?> _createController(
     int generation, {
     bool refresh = false,
   }) async {
     final localPath = _localPath;
     if (localPath != null && File(localPath).existsSync()) {
-      // Saved on the phone: no network needed.
       _activeUrl = localPath;
       _activeIsFile = true;
       _activeHeaders = null;
@@ -340,8 +295,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _localPath = null;
     _activeIsFile = false;
 
-    // Coming back from Picture in Picture: the address and headers are
-    // already known, so there is nothing to look up. Used once.
     final known = _initialSource;
     if (known != null && !refresh) {
       _initialSource = null;
@@ -385,10 +338,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Reload without a black screen. The current picture stays, and the
-  /// play/pause button turns into a spinner while a fresh connection is
-  /// prepared in the background. Tap the button (or pause) to cancel; when
-  /// the new connection is ready it takes over at the exact same moment.
   Future<void> _reloadInPlace({bool auto = false}) async {
     final old = _controller;
     if (old == null || !old.value.isInitialized || _isLeaving) return;
@@ -408,9 +357,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _isLeaving ||
         generation != _initializationGeneration;
 
+    final lookAgain = !auto || _autoRetries >= 2;
     VideoPlayerController? fresh;
     try {
-      if (_localPath == null) {
+      if (lookAgain && _localPath == null) {
         try {
           final next = await videoRepository.resolveForPlayback(
             _video.copyWith(streamUrl: ''),
@@ -423,7 +373,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
       if (cancelled()) return;
 
-      fresh = await _createController(generation, refresh: true);
+      fresh = await _createController(generation, refresh: lookAgain);
       if (fresh == null || cancelled()) {
         if (fresh != null) await _disposeController(fresh);
         return;
@@ -443,7 +393,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         return;
       }
 
-      // Swap: the new connection takes over where the old one was.
       old.removeListener(_onControllerChanged);
       fresh.addListener(_onControllerChanged);
       _controller = fresh;
@@ -471,8 +420,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// The viewer tapped the spinner / paused: stop reloading, keep the video
-  /// paused where it is.
   void _cancelReload() {
     if (!_reloading.value) return;
     _reloadToken++;
@@ -484,9 +431,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Picture in Picture: a second native player continues from the exact
-  /// position, this screen closes (nothing stays on screen), and closing the
-  /// PiP window releases everything.
   Future<void> _enterPip() async {
     final controller = _controller;
     final url = _activeUrl;
@@ -501,7 +445,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _pipBusy = true;
     final position = controller.value.position;
     try {
-      await controller.pause(); // The sound must never play twice.
+      await controller.pause();
       final started = await NativeBridge.instance.startPip(
         video: _video,
         url: url,
@@ -546,8 +490,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  /// Manual reload (Reload button / "Try again"). A healthy player reloads in
-  /// place (no black screen); a broken one restarts at the same position.
   void _reload() {
     if (_reloading.value) {
       _cancelReload();
@@ -567,7 +509,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(_initializePlayer(refreshSource: true));
   }
 
-  /// Automatic recovery from a stream that dropped mid-playback.
   void _autoReconnect() {
     if (!mounted || _isLeaving || _reloading.value) return;
     if (_autoRetries >= _maxAutoRetries) {
@@ -586,7 +527,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _autoRetries++;
     final controller = _controller;
     if (controller != null && controller.value.isInitialized && !_loading) {
-      // Quietly: the picture stays and the play button shows the spinner.
       unawaited(_reloadInPlace(auto: true));
       return;
     }
@@ -599,8 +539,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final existing = _disposalFutures[controller];
     if (existing != null) return existing;
 
-    // Serialize native teardown so two platform decoders are never being
-    // released at the same time during rapid video changes.
     final disposal = _pendingDisposals.then(
       (_) => _disposeControllerSafely(controller),
     );
@@ -613,12 +551,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     VideoPlayerController controller,
   ) async {
     try {
-      // Bounded: a stuck native release must never block every later player
-      // (or the exit path) behind it.
       await controller.dispose().timeout(const Duration(seconds: 5));
     } catch (_) {
-      // A native player may already have been released while a route was
-      // closing. Never let cleanup failures prevent opening another video.
     }
   }
 
@@ -631,7 +565,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<bool> _releaseBeforeExit() {
-    // Multiple fast Back presses share one awaited release operation.
     return _releaseTask ??= _releaseControllerBeforeExit();
   }
 
@@ -655,7 +588,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       try {
         if (controller.value.isInitialized) await controller.pause();
       } catch (_) {
-        // The native player can already be stopping as the route is popped.
       }
       await _disposeController(controller);
     }
@@ -663,9 +595,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return true;
   }
 
-  /// BACK: if the controls are on screen, hide them first; BACK again leaves.
   void _handleBack() {
-    if (_popping) return; // Already leaving: ignore extra BACK presses.
+    if (_popping) return;
     final canHideControls = _showControls &&
         _problem == null &&
         !_loading &&
@@ -678,12 +609,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(_leave());
   }
 
-  /// Leaves the player after the native decoder has been released.
-  ///
-  /// `Navigator.pop` does not consult [PopScope] (only `maybePop` / the system
-  /// BACK key do), so popping here is safe even with `canPop: false`. The
-  /// release is bounded and wrapped in try/finally so a stuck or failing
-  /// native player can never leave BACK dead.
   Future<void> _leave() async {
     if (_popping) return;
     _popping = true;
@@ -709,10 +634,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       value.duration,
     );
   }
-
-  // -------------------------------------------------------------------------
-  // Errors
-  // -------------------------------------------------------------------------
 
   _PlaybackProblem _describeProblem(Object error) {
     if (error is _MissingStreamException) {
@@ -745,14 +666,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Controller events
-  // -------------------------------------------------------------------------
-
   void _onControllerChanged() {
-    // Cheap by design: this fires several times a second. Only state that the
-    // page itself depends on triggers setState; position updates are rendered
-    // by small ListenableBuilders.
     if (!mounted || _isLeaving) return;
     final controller = _controller;
     if (controller == null) return;
@@ -768,25 +682,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
     if (value.isInitialized) {
       _lastPosition = value.position;
-      // Playback is healthy again once it has advanced a little.
       if (_autoRetries > 0 &&
           value.position - _retryBase > const Duration(seconds: 10)) {
         _autoRetries = 0;
       }
     }
 
-    // The end of the stream: the position reached the duration. Some decoders
-    // keep reporting `isBuffering` (and never `isPlaying`) once they get
-    // there, which used to leave an endless spinner on a finished video.
     final atEnd = value.isInitialized &&
         value.duration > Duration.zero &&
         value.position >= value.duration - const Duration(milliseconds: 800);
 
     _playing.value = value.isPlaying;
 
-    // The spinner only appears when playback has really stopped. AVPlayer
-    // flips `isBuffering` for a moment even while the picture is moving, which
-    // used to flash the spinner on a healthy video. Moving position = healthy.
     final moving = value.position != _lastSeen && value.isPlaying;
     _lastSeen = value.position;
     final buffering = value.isBuffering && !atEnd && !moving;
@@ -818,7 +725,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (finished) {
           _showControls = false;
           _hideTimer?.cancel();
-          // Reached the end: nothing to resume, and the card shows "watched".
           PlaybackProgress.instance.markCompleted(_video.id);
         }
       });
@@ -831,11 +737,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Autoplay Next
-  // -------------------------------------------------------------------------
-
-  /// The entry after the current one in [PlayerPage.queue], if any.
   Video? get _nextVideo {
     final queue = widget.queue;
     if (queue == null) return null;
@@ -844,7 +745,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return queue[index + 1];
   }
 
-  /// The entry before the current one in [PlayerPage.queue], if any.
   Video? get _previousVideo {
     final queue = widget.queue;
     if (queue == null) return null;
@@ -878,22 +778,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  /// CANCEL: stay on the "Finished watching" screen instead.
   void _cancelAutoplay() {
     _autoplayTimer?.cancel();
     _countdown.value = null;
     setState(() => _autoplayCancelled = true);
   }
 
-  /// Switches this same player to the next video (one controller at a time;
-  /// the old one is released before the new one is created).
   Future<void> _playNext() => _switchTo(_nextVideo);
 
   Future<void> _playPrevious() => _switchTo(_previousVideo);
 
   Future<void> _switchTo(Video? next) async {
     if (next == null || _isLeaving) return;
-    if (!_completed) _saveProgress(); // Keep where we stopped in this one.
+    if (!_completed) _saveProgress();
     _autoplayTimer?.cancel();
     _countdown.value = null;
     _autoplayCancelled = false;
@@ -907,11 +804,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     await _initializePlayer(refreshSource: true);
   }
 
-  /// Buffering for too long: show the controls and put focus on Reload.
   void _onStalled() {
     if (!mounted || _isLeaving || !_buffering.value) return;
     _stalled.value = true;
-    // Still stuck a while later: reconnect on our own with a fresh URL.
     _stallTimer?.cancel();
     _stallTimer = Timer(_stallAfter, () {
       if (!mounted || _isLeaving || !_buffering.value) return;
@@ -943,13 +838,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       await action();
     } catch (_) {
-      // Ignore late platform callbacks during app pause/resume.
     }
   }
-
-  // -------------------------------------------------------------------------
-  // Controls visibility
-  // -------------------------------------------------------------------------
 
   void _scheduleHide() {
     _hideTimer?.cancel();
@@ -959,7 +849,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (!mounted || _isLeaving || !_showControls) return;
       if (!(_controller?.value.isPlaying ?? false)) return;
       if (_scrubTarget.value != null || _stalled.value) {
-        _scheduleHide(); // Still scrubbing / stalled: try again later.
+        _scheduleHide();
         return;
       }
       _hideControls();
@@ -971,16 +861,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     setState(() => _showControls = false);
   }
 
-  /// Shows the controls (if hidden) and restarts the auto-hide timer.
   void _revealControls() {
     if (!mounted) return;
     if (!_showControls) setState(() => _showControls = true);
     _scheduleHide();
   }
-
-  // -------------------------------------------------------------------------
-  // Playback actions
-  // -------------------------------------------------------------------------
 
   Future<void> _togglePlayback() async {
     final controller = _controller;
@@ -1026,11 +911,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Every skip step is exactly 10 seconds.
   static const int _seekStepSeconds = 10;
 
-  /// Moves the (debounced) seek target by [seconds]. The actual `seekTo` is
-  /// only issued once the viewer pauses, so holding a key stays smooth.
   void _scrubBySeconds(int seconds, {bool badge = true}) {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized || _isLeaving) {
@@ -1041,7 +923,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scrubTo(base + Duration(seconds: seconds), reveal: badge);
   }
 
-  /// Touch: tap or drag on the seek bar ([fraction] 0..1 of the duration).
   void _scrubToFraction(double fraction) {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized || _isLeaving) {
@@ -1080,20 +961,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     } catch (error) {
       debugPrint('[PLAYER] Seek failed: $error');
     }
-    // The page may have been closed while the seek was running.
     if (!mounted || _isLeaving) return;
-    // A newer scrub may have started while this seek was running.
     if (_scrubTimer?.isActive ?? false) return;
     _scrubTarget.value = null;
     _scheduleHide();
   }
 
-  // -------------------------------------------------------------------------
-  // Touch gestures
-  // -------------------------------------------------------------------------
-
-  /// Tap: show / hide the controls. Two quick taps on the left or right side
-  /// of the screen: skip 10 s back / forward.
   void _onScreenTap(TapUpDetails details, double width) {
     if (_problem != null || _loading || _completed) return;
     final x = details.localPosition.dx;
@@ -1134,7 +1007,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  /// Holding the screen plays at 2x until the finger lifts.
   void _startBoost() {
     final controller = _controller;
     if (controller == null ||
@@ -1229,10 +1101,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scheduleHide();
   }
 
-  // -------------------------------------------------------------------------
-  // Lifecycle
-  // -------------------------------------------------------------------------
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1267,14 +1135,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // -------------------------------------------------------------------------
-  // Build
-  // -------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    // Non-null only while there is a healthy, initialised controller.
     final VideoPlayerController? live =
         (controller != null && controller.value.isInitialized && _problem == null)
             ? controller
@@ -1293,7 +1156,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             return Stack(
               fit: StackFit.expand,
               children: [
-                // The picture fades in once it is ready.
                 if (live != null)
                   Positioned.fill(
                     child: _FadeIn(
@@ -1308,7 +1170,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
-                // Touch layer: tap, double-tap sides, hold for 2x.
                 Positioned.fill(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -1324,7 +1185,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 _buildScrubBadge(),
                 if (live != null) _buildControls(live),
                 _buildLoading(),
-                // Error / finished / up-next cross-fade in and out.
                 AnimatedSwitcher(
                   duration: Motion.fade,
                   child: _buildOverlay() ??
@@ -1393,7 +1253,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Error, "Finished watching" or "Up next" (null while playing).
   Widget? _buildOverlay() {
     final problem = _problem;
     if (problem != null) {
@@ -1439,7 +1298,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// "Up next" with a short countdown.
   Widget _buildUpNext(Video next) {
     return ColoredBox(
       key: const ValueKey<String>('upnext'),
@@ -1497,7 +1355,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Centre pill shown while the bar is dragged or a skip button is pending.
   Widget _buildScrubBadge() {
     return IgnorePointer(
       child: ValueListenableBuilder<Duration?>(
@@ -1524,7 +1381,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// "2x" badge while the screen is held.
   Widget _buildBoostBadge() {
     return IgnorePointer(
       child: ValueListenableBuilder<bool>(
@@ -1553,7 +1409,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Fading "10s" marks on the side that was double-tapped.
   Widget _buildSeekFlash(double width) {
     return IgnorePointer(
       child: ValueListenableBuilder<_SeekFlash?>(
@@ -1616,7 +1471,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !visible,
-        // Slow, soft fade in and out (never a sudden pop).
         child: AnimatedOpacity(
           opacity: visible ? 1 : 0,
           duration: Duration(milliseconds: visible ? 260 : 420),
@@ -1786,7 +1640,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             child: Center(
               child: Container(
                 height: 38,
-                // Keeps the visible gap to the next button at 8 pt.
                 margin: const EdgeInsets.only(right: 3),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 alignment: Alignment.center,
@@ -1861,7 +1714,6 @@ const TextStyle _pillText = TextStyle(
   fontFeatures: [FontFeature.tabularFigures()],
 );
 
-/// Dark rounded badge used for "+10s", "2x" and the scrub time.
 class _Pill extends StatelessWidget {
   const _Pill({required this.child});
 
@@ -1882,7 +1734,6 @@ class _Pill extends StatelessWidget {
   }
 }
 
-/// Fades its child from transparent to opaque the first time it appears.
 class _FadeIn extends StatelessWidget {
   const _FadeIn({super.key, required this.child});
 
@@ -1901,7 +1752,6 @@ class _FadeIn extends StatelessWidget {
   }
 }
 
-/// Seek bar with elapsed / total time. Tap or drag to seek.
 class _ProgressRow extends StatelessWidget {
   const _ProgressRow({
     required this.controller,
@@ -1961,7 +1811,7 @@ class _ProgressRow extends StatelessWidget {
               ),
               Expanded(
                 child: SizedBox(
-                  height: 40, // Big, forgiving touch target.
+                  height: 40,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final width = constraints.maxWidth;
@@ -2043,7 +1893,6 @@ class _ProgressRow extends StatelessWidget {
   }
 }
 
-/// Replaces the play/pause button while a reload runs. Tap = cancel + pause.
 class _ReloadingButton extends StatelessWidget {
   const _ReloadingButton({required this.onTap});
 

@@ -10,14 +10,11 @@ import 'image_headers.dart';
 import 'local_store.dart';
 import 'models.dart';
 
-/// One picture saved on the phone.
 class SavedPhoto {
   const SavedPhoto({required this.id, required this.file});
 
-  /// Same id as [AlbumPhoto.id] (the file part of the site's address).
   final String id;
 
-  /// File name inside the album's folder.
   final String file;
 
   Map<String, Object?> toJson() => <String, Object?>{'id': id, 'file': file};
@@ -31,7 +28,6 @@ class SavedPhoto {
   }
 }
 
-/// A photo album saved on the phone (shown in Library > Albums).
 class SavedAlbum {
   SavedAlbum({
     required this.id,
@@ -48,7 +44,6 @@ class SavedAlbum {
   final String title;
   final String url;
 
-  /// Folder name inside the photos folder.
   final String dir;
   final String? modelName;
   final List<SavedPhoto> photos;
@@ -97,7 +92,6 @@ class SavedAlbum {
   }
 }
 
-/// Progress of the photos being saved for one album.
 class PhotoJob {
   PhotoJob(this.total);
 
@@ -107,15 +101,9 @@ class PhotoJob {
   bool cancelled = false;
 }
 
-/// Saves album pictures on the phone (documents/photos/<album>/...) and keeps
-/// the list of saved albums.
-///
-/// From there the pictures can be opened offline in Library > Albums or sent
-/// to the Photos app with the iOS share sheet.
 class PhotoStore extends ChangeNotifier {
   PhotoStore._();
 
-  /// For tests: a folder and an HTTP client of your own.
   @visibleForTesting
   PhotoStore.forTesting({required Directory root, http.Client? client})
       : _root = root,
@@ -131,17 +119,11 @@ class PhotoStore extends ChangeNotifier {
   final List<SavedAlbum> _albums = <SavedAlbum>[];
   final Map<String, PhotoJob> _jobs = <String, PhotoJob>{};
 
-  /// Newest first.
   List<SavedAlbum> get albums => List<SavedAlbum>.unmodifiable(_albums);
 
   int get totalPhotos =>
       _albums.fold<int>(0, (sum, album) => sum + album.photos.length);
 
-  // -------------------------------------------------------------------------
-  // Start-up
-  // -------------------------------------------------------------------------
-
-  /// Call once at start-up (after [LocalStore.init]).
   Future<void> init() async {
     if (_root == null) {
       try {
@@ -156,7 +138,6 @@ class PhotoStore extends ChangeNotifier {
     load();
   }
 
-  /// Reads the saved list; albums whose files vanished are dropped.
   void load() {
     _albums.clear();
     final raw = LocalStore.readString(_key);
@@ -184,10 +165,6 @@ class PhotoStore extends ChangeNotifier {
         jsonEncode(<Object?>[for (final a in _albums) a.toJson()]),
       );
 
-  // -------------------------------------------------------------------------
-  // Queries
-  // -------------------------------------------------------------------------
-
   SavedAlbum? album(String id) {
     for (final album in _albums) {
       if (album.id == id) return album;
@@ -200,7 +177,6 @@ class PhotoStore extends ChangeNotifier {
     return saved != null && saved.photos.any((p) => p.id == photoId);
   }
 
-  /// How many of [photos] are already saved in [albumId].
   int savedCount(String albumId, Iterable<AlbumPhoto> photos) =>
       photos.where((p) => isSaved(albumId, p.id)).length;
 
@@ -211,12 +187,6 @@ class PhotoStore extends ChangeNotifier {
   File _fileOf(SavedAlbum album, SavedPhoto photo) =>
       File('${_root?.path ?? ''}/${album.dir}/${photo.file}');
 
-  // -------------------------------------------------------------------------
-  // Saving
-  // -------------------------------------------------------------------------
-
-  /// Saves [photos] of [album]; pictures that are already saved are skipped.
-  /// Returns how many were saved now. Only one job per album runs at a time.
   Future<int> savePhotos(
     AlbumRef album,
     List<AlbumPhoto> photos, {
@@ -258,7 +228,7 @@ class PhotoStore extends ChangeNotifier {
           final name = await _download(photo, dir, requestHeaders);
           saved!.photos.add(SavedPhoto(id: photo.id, file: name));
           if (isNew && this.album(album.id) == null) {
-            _albums.insert(0, saved); // Appears in the Library with its 1st photo.
+            _albums.insert(0, saved);
           }
           ok++;
         } catch (error) {
@@ -285,7 +255,6 @@ class PhotoStore extends ChangeNotifier {
     return ok;
   }
 
-  /// Stops after the pictures being downloaded right now.
   void cancel(String albumId) => _jobs[albumId]?.cancelled = true;
 
   Future<String> _download(
@@ -302,7 +271,6 @@ class PhotoStore extends ChangeNotifier {
     final bytes = response.bodyBytes;
     final extension = _imageExtension(bytes);
     if (extension == null) {
-      // An HTML error page (expired token) is not a picture.
       throw const FormatException('Not an image');
     }
     final name = '${_safeName(photo.id, fallback: 'photo')}.$extension';
@@ -316,10 +284,6 @@ class PhotoStore extends ChangeNotifier {
         'User-Agent': kBrowserUserAgent,
         'Accept': 'image/*,*/*;q=0.8',
       };
-
-  // -------------------------------------------------------------------------
-  // Removing
-  // -------------------------------------------------------------------------
 
   Future<void> removePhoto(String albumId, String photoId) async {
     final saved = album(albumId);
@@ -355,12 +319,6 @@ class PhotoStore extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
-
-  /// `jpg` / `png` / `webp` / `gif` from the first bytes, or null when the data
-  /// is not a picture.
   static String? _imageExtension(List<int> b) {
     if (b.length < 12) return null;
     if (b[0] == 0xFF && b[1] == 0xD8) return 'jpg';
@@ -375,7 +333,6 @@ class PhotoStore extends ChangeNotifier {
     return null;
   }
 
-  /// A file / folder name made of letters, digits, `.`, `-` and `_` only.
   static String _safeName(String value, {required String fallback}) {
     var name = value.replaceAll(RegExp(r'\.[A-Za-z0-9]{2,5}/?$'), '');
     name = name.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '_');
@@ -384,7 +341,6 @@ class PhotoStore extends ChangeNotifier {
     return name.isEmpty ? fallback : name;
   }
 
-  /// Site order: by the number in the file name (`29944.jpg`), else by text.
   static int _compareIds(String a, String b) {
     final na = _trailingNumber(a);
     final nb = _trailingNumber(b);

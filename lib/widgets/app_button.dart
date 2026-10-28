@@ -8,7 +8,6 @@ import '../touch.dart';
 
 enum AppButtonStyle { primary, secondary }
 
-/// Compact phone button (40 pt high).
 class AppButton extends StatelessWidget {
   const AppButton({
     super.key,
@@ -28,13 +27,10 @@ class AppButton extends StatelessWidget {
   final AppButtonStyle style;
   final bool loading;
 
-  /// Icon colour override (e.g. gold star).
   final Color? iconColor;
 
-  /// Fill the available width instead of hugging the label.
   final bool expand;
 
-  /// Sits on top of artwork / video: secondary buttons turn translucent white.
   final bool onDark;
 
   @override
@@ -51,7 +47,6 @@ class AppButton extends StatelessWidget {
         : (onDark ? const Color(0x26FFFFFF) : AppColors.outline);
     return Pressable(
       semanticLabel: label,
-      // Ignore taps while busy so a slow request can't be started twice.
       onTap: loading ? null : onPressed,
       child: AnimatedContainer(
         duration: Motion.quick,
@@ -90,7 +85,6 @@ class AppButton extends StatelessWidget {
   }
 }
 
-/// Pill-shaped filter chip (categories), 32 pt high.
 class AppChip extends StatelessWidget {
   const AppChip({
     super.key,
@@ -104,7 +98,6 @@ class AppChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onPressed;
 
-  /// Sits on a dark sheet / video: unselected chips are translucent white.
   final bool onDark;
 
   @override
@@ -146,8 +139,6 @@ class AppChip extends StatelessWidget {
   }
 }
 
-/// Round icon button (back, close, player controls).
-/// Smallest comfortable touch target (Apple's guideline).
 const double kMinTapSize = 44;
 
 class RoundIconButton extends StatelessWidget {
@@ -169,8 +160,6 @@ class RoundIconButton extends StatelessWidget {
   final String label;
   final double size;
 
-  /// Touch area when it should be larger than the circle (the circle keeps
-  /// its look). 0 = same as [size].
   final double tapSize;
   final double? iconSize;
   final Color background;

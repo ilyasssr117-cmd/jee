@@ -1,5 +1,3 @@
-
-
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -18,7 +16,6 @@ abstract class VideoCatalogRepository {
     String? category,
   });
 
-  /// [sortBy]: `post_date` (newest) or `duration` (longest); null = relevance.
   Future<List<Video>> searchVideos({
     required String query,
     required int page,
@@ -26,32 +23,22 @@ abstract class VideoCatalogRepository {
     String? sortBy,
   });
 
-  /// Models and albums matching [query] (the "Models & Albums" search).
   Future<PeopleSearchResult> searchPeople(String query);
 
-  /// Name and photo of a model.
   Future<ModelProfile> getModelProfile(ModelRef model);
 
   Future<List<Video>> getRelated(Video video, {int limit = 6});
 
-  /// The playable version of [video]. The answer is reused for a few minutes;
-  /// [refresh] asks the site again (expired link / reconnect).
   Future<Video> resolveForPlayback(Video video, {bool refresh = false});
 
-  /// Forgets remembered playback answers and cookie checks.
   void clearPlaybackCaches();
 
-  /// The models / channel that published [video] (empty when unknown).
   Future<List<ModelRef>> getVideoModels(Video video);
 
-  /// One page (1-based) of [model]'s videos. Empty after the last page.
   Future<ModelPageResult> getModelPage(ModelRef model, {int page = 1});
 
-  /// One page (1-based) of [model]'s photo albums. Empty after the last page.
   Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1});
 
-  /// One chunk of an album's photos: 0 = the album page, N >= 1 = the site's
-  /// "load more" request `from=N`. Empty after the last chunk.
   Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0});
 
   Future<String> getPlaybackCookieHeader({
@@ -180,15 +167,11 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   final Map<String, _RepositoryCookie> _cookieJar =
       <String, _RepositoryCookie>{};
 
-  /// Detail-page answers (stream link, title, poster) by video id. Shared
-  /// while running, so the card preview, the player and a download that ask
-  /// for the same video read its page once.
   final TtlCache<Video> _playable = TtlCache<Video>(
     ttl: const Duration(minutes: 8),
     maxEntries: 40,
   );
 
-  /// When the site's cookie pages were last visited, by page address.
   static const Duration _cookieTtl = Duration(minutes: 10);
   final Map<String, DateTime> _cookieVisits = <String, DateTime>{};
   final Map<String, Future<void>> _cookieRunning = <String, Future<void>>{};
@@ -197,6 +180,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   void clearPlaybackCaches() {
     _playable.clear();
     _cookieVisits.clear();
+    _cookieRunning.clear();
     clearFinalStreamUris();
   }
 
@@ -289,14 +273,16 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   @override
   Future<Video> resolveForPlayback(Video video, {bool refresh = false}) async {
     _ensureConfigured();
-    if (video.streamUrl.trim().isNotEmpty) return video;
+    final given = video.streamUrl.trim();
+    if (given.isNotEmpty && given != video.previewUrl.trim()) return video;
     final resolved = await _playable.fetch(
       video.id,
-      () => scraper.resolveForPlayback(video, fresh: refresh),
+      () => scraper.resolveForPlayback(
+        video.copyWith(streamUrl: ''),
+        fresh: refresh,
+      ),
       force: refresh,
     );
-    // The cached answer may come from another list's copy of the same video:
-    // keep this caller's own fields and take only what the page provided.
     return video.copyWith(
       title: resolved.title,
       streamUrl: resolved.streamUrl,
@@ -330,8 +316,6 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     return _cookieHeaderForUri(streamUri);
   }
 
-  /// Visits [uri] to collect its cookies, unless that was done a moment ago
-  /// (the cookies are kept in the jar). Simultaneous callers share one visit.
   Future<void> _visitForCookies(Uri uri, String userAgent, bool refresh) {
     final key = uri.toString();
     if (!refresh) {
@@ -342,10 +326,11 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       final running = _cookieRunning[key];
       if (running != null) return running;
     }
-    final task = _fetchCookieResponse(uri, userAgent).then((ok) {
+    late final Future<void> task;
+    task = _fetchCookieResponse(uri, userAgent).then((ok) {
       if (ok) _cookieVisits[key] = DateTime.now();
     }).whenComplete(() {
-      _cookieRunning.remove(key);
+      if (identical(_cookieRunning[key], task)) _cookieRunning.remove(key);
     });
     _cookieRunning[key] = task;
     return task;

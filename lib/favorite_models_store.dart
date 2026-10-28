@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'local_store.dart';
 import 'models.dart';
 
-/// Models the viewer marked as favourite (Library > Models).
 class FavoriteModelsStore extends ChangeNotifier {
   FavoriteModelsStore._();
 
@@ -15,10 +14,8 @@ class FavoriteModelsStore extends ChangeNotifier {
 
   final List<ModelRef> _items = <ModelRef>[];
 
-  /// Newest first.
   List<ModelRef> get items => List<ModelRef>.unmodifiable(_items);
 
-  /// Reads the saved list. Call once at start-up (after [LocalStore.init]).
   void init() {
     _items.clear();
     final raw = LocalStore.readString(_key);
@@ -48,8 +45,6 @@ class FavoriteModelsStore extends ChangeNotifier {
 
   bool isFavorite(String modelUrl) => _items.any((m) => m.url == modelUrl);
 
-  /// Adds the model, or removes it when it is already a favourite. Returns
-  /// true when it is a favourite afterwards.
   bool toggle(ModelRef model) {
     final index = _items.indexWhere((m) => m.url == model.url);
     final nowFavorite = index < 0;
@@ -63,7 +58,6 @@ class FavoriteModelsStore extends ChangeNotifier {
     return nowFavorite;
   }
 
-  /// Remembers the photo of a favourite once it is known.
   void updateImage(String modelUrl, String? imageUrl) {
     if (imageUrl == null || imageUrl.isEmpty) return;
     final index = _items.indexWhere((m) => m.url == modelUrl);

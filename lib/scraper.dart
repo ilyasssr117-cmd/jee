@@ -9,8 +9,6 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 import 'request_cache.dart';
 
-/// HTML catalogue configuration for a source you own or are authorized to use.
-/// Selectors and paths are configurable because each website has its own markup.
 class ScraperConfig {
   const ScraperConfig({
     required this.baseUrl,
@@ -24,11 +22,8 @@ class ScraperConfig {
     this.imageSelector = 'img',
     this.titleSelector =
         '[itemprop="name"], .thumb-spot__title, .thumb__title, .video-title, .title, h2, h3',
-    // Fallbacks only: the icon selectors below are tried first.
     this.durationSelector = '.duration, [data-duration]',
     this.viewsSelector = '.views, [data-views]',
-    // The number sits in the *parent* of an icon element, e.g.
-    // <li><i class="icon-view"></i> 12.3K</li>
     this.durationIconSelector = '.icon-duration',
     this.dateIconSelector = '.icon-calendar',
     this.viewsIconSelector = '.icon-view',
@@ -72,11 +67,8 @@ class ScraperConfig {
   final String descriptionSelector;
   final String likesSelector;
 
-  /// A card is a video only if its link path matches this pattern.
-  /// Leave empty to accept every link.
   final String videoPathPattern;
 
-  /// Cards whose link path matches this are skipped (photo albums, galleries).
   final String excludePathPattern;
   final String relatedCardSelector;
   final String streamUrlPattern;
@@ -100,8 +92,6 @@ class ScraperConfig {
   Uri searchUri(String query, int page) {
     final safePage = page < 1 ? 1 : page;
     var template = searchPathTemplate;
-    // Most catalogue sites omit the page number on page one and use /2/, /3/…
-    // for later pages. Keep query-parameter templates configurable too.
     if (safePage == 1 && template.contains('/{page}/')) {
       template = template.replaceFirst('/{page}/', '/');
     }
@@ -142,8 +132,6 @@ class ScraperException implements Exception {
   String toString() => message;
 }
 
-/// Fetches and parses HTML pages. It does not run JavaScript or bypass
-/// encrypted, authenticated, DRM-protected, or otherwise protected streams.
 class Scraper {
   Scraper(this.config, {http.Client? client})
       : _client = client ?? http.Client();
@@ -158,8 +146,6 @@ class Scraper {
         'Referer': '${config.baseUri}/',
       };
 
-  /// A video's detail page is needed by "related", "models" and "play" at
-  /// about the same moment: read it once and share it for a short while.
   final TtlCache<String> _detailPages = TtlCache<String>(
     ttl: const Duration(seconds: 90),
     maxEntries: 4,
@@ -170,14 +156,13 @@ class Scraper {
 
   Future<String> _get(Uri uri, {Map<String, String>? extraHeaders}) async {
     ScraperException? lastError;
-    // One automatic retry for network hiccups and 5xx responses.
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         return await _getOnce(uri, extraHeaders);
       } on ScraperException catch (error) {
         final status = error.statusCode;
         if (status != null && status < 500) {
-          rethrow; // 4xx: retrying is useless.
+          rethrow;
         }
         lastError = error;
       }
@@ -199,8 +184,6 @@ class Scraper {
           statusCode: response.statusCode,
         );
       }
-      // `response.body` falls back to Latin-1 when the server omits a charset,
-      // which garbles non-ASCII titles. Decode as UTF-8 unless told otherwise.
       final contentType = response.headers['content-type']?.toLowerCase() ?? '';
       final declaresOther =
           contentType.contains('charset') && !contentType.contains('utf-8');
@@ -223,12 +206,10 @@ class Scraper {
     return list(page == 0 ? config.homeUri() : config.pageUri(page));
   }
 
-  /// [sortBy]: `post_date` (newest) or `duration` (longest); null = relevance.
   Future<List<Video>> search(String query, {int page = 1, String? sortBy}) {
     if (query.trim().isEmpty) return Future.value(const <Video>[]);
     var uri = config.searchUri(query, page);
     if (sortBy != null && sortBy.isNotEmpty) {
-      // e.g. /search/Playwithanny/?by=post_date, kept on every page.
       uri = uri.replace(queryParameters: <String, String>{
         ...uri.queryParameters,
         'by': sortBy,
@@ -249,12 +230,9 @@ class Scraper {
       uri: uri,
       selector: related ? config.relatedCardSelector : config.cardSelector,
     );
-    // Parsing a whole HTML page is heavy: keep it off the UI thread so
-    // scrolling and taps never stall while a page loads.
-    return _offMainThread(() => _parseListJob(job));
+    return _runInBackground(_parseListJob, job);
   }
 
-  /// Every valid, non-duplicate video card of [document].
   List<Video> _videosFrom(dom.Document document, Uri uri, String selector) {
     if (selector.trim().isEmpty) return const <Video>[];
 
@@ -269,17 +247,12 @@ class Scraper {
         }
         videos.add(video);
       } catch (error) {
-        // Ignore malformed cards without throwing away valid cards on the page.
         debugPrint('[SCRAPER] Skipped an invalid video card: $error');
       }
     }
     return videos;
   }
 
-  // ---- Models (the channel / performer of a video) -------------------------
-
-  /// `https://site/models/slug/` for any link that points into a model page,
-  /// or null when [uri] is not a model link.
   Uri? _modelBase(Uri uri) {
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
     if (segments.length < 2 || segments.first.toLowerCase() != 'models') {
@@ -292,7 +265,6 @@ class Scraper {
     );
   }
 
-  /// The models listed under a video ("Models:" row of the video page).
   Future<List<ModelRef>> videoModels(Video video) async {
     final pageUrl = video.pageUrl;
     if (pageUrl == null || pageUrl.trim().isEmpty) return const <ModelRef>[];
@@ -300,7 +272,6 @@ class Scraper {
     final uri = config.baseUri.resolve(pageUrl);
     final document = html.parse(await _getDetailPage(uri));
 
-    // Preferred: the dedicated row; fallback: any model link in the info block.
     var anchors = document.querySelectorAll('.media-models a[href]');
     if (anchors.isEmpty) {
       anchors = document.querySelectorAll('.media-info a[href*="/models/"]');
@@ -316,7 +287,6 @@ class Scraper {
       var name = _collapse(anchor.text);
       if (name.isEmpty) name = _collapse(anchor.attributes['title'] ?? '');
       if (name.isEmpty) {
-        // Last resort: a readable name from the slug ("play-with-anny").
         name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ').trim();
       }
       if (name.isEmpty) continue;
@@ -325,9 +295,6 @@ class Scraper {
     return models;
   }
 
-  /// One page of a model's videos: `.../models/slug/videos/`, then
-  /// `.../videos/2/`, `.../videos/3/`, ... An out-of-range page (HTTP 404)
-  /// returns an empty result instead of an error.
   Future<ModelPageResult> modelPage(ModelRef model, {int page = 1}) async {
     final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
     final uri = page <= 1 ? base.resolve('videos/') : base.resolve('videos/$page/');
@@ -349,9 +316,6 @@ class Scraper {
     );
   }
 
-  /// First usable address of an <img>: lazy-load attributes come before `src`
-  /// (usually a 1px `data:` placeholder). Empty values and `data:` URIs are
-  /// skipped.
   String? _imageSource(dom.Element? image) {
     if (image == null) return null;
     const names = ['data-src', 'data-original', 'data-webp', 'src'];
@@ -364,10 +328,6 @@ class Scraper {
     return null;
   }
 
-  // ---- Photo albums of a model -------------------------------------------
-
-  /// One page of a model's albums: `.../models/slug/albums/`, then
-  /// `.../albums/2/`. A page past the end (HTTP 404) is empty.
   Future<List<AlbumRef>> modelAlbums(ModelRef model, {int page = 1}) async {
     final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
     final uri = page <= 1 ? base.resolve('albums/') : base.resolve('albums/$page/');
@@ -383,7 +343,6 @@ class Scraper {
     return albums;
   }
 
-  /// Album cards of a page (`.thumb--albums`, or any card linking to /albums/).
   List<AlbumRef> _albumsFrom(dom.Document document, Uri uri, {String? modelName}) {
     var cards = document.querySelectorAll('.thumb--albums');
     if (cards.isEmpty) {
@@ -428,14 +387,6 @@ class Scraper {
     return albums;
   }
 
-  /// Photos of an album, in chunks. Chunk 0 is the album page itself; chunk
-  /// N >= 1 is the site's "load more" request
-  /// `?mode=async&function=get_block&block_id=album_view_album_view&load=more&from=N`
-  /// (from=1, 2, 3, ... until a request returns no picture at all).
-  ///
-  /// The async request is sent like the page's own script does (AJAX header,
-  /// the album as Referer); without that the site may answer with the whole
-  /// page again and the later pictures never arrive.
   Future<List<AlbumPhoto>> albumPhotos(AlbumRef album, {int chunk = 0}) async {
     final base = Uri.parse(album.url);
     final Uri uri;
@@ -481,7 +432,7 @@ class Scraper {
     final seen = <String>{};
     for (final anchor in anchors) {
       final image = anchor.querySelector('img');
-      if (image == null) continue; // Not a picture tile.
+      if (image == null) continue;
       final full = _absoluteUrl(anchor.attributes['href'], uri);
       if (full == null) continue;
       final thumb = _absoluteUrl(_imageSource(image), uri) ?? full;
@@ -492,17 +443,12 @@ class Scraper {
     return photos;
   }
 
-  /// Stable id of a picture: the file part of its address (the access token in
-  /// the query changes on every request).
   static String _photoId(String url) {
     final path = Uri.tryParse(url)?.path ?? url;
     final match = RegExp(r'/sources/(.+?)/?$').firstMatch(path);
     return match?.group(1) ?? path;
   }
 
-  /// Name and photo of a model: the schema.org `Person` block first, then the
-  /// `og:image` / `twitter:image` meta tags, then any `"image"` value in the
-  /// page's JSON. Models without a photo simply end up with no image.
   ModelProfile _modelProfile(dom.Document document, Uri pageUri, ModelRef model) {
     String? name;
     String? image;
@@ -537,7 +483,6 @@ class Scraper {
       try {
         walk(jsonDecode(script.text));
       } catch (_) {
-        // Not valid JSON: the fallbacks below still look at the text.
       }
     }
 
@@ -550,7 +495,6 @@ class Scraper {
         final element = document.querySelector(selector);
         final value = element?.attributes['content'] ?? element?.attributes['href'];
         final url = _absoluteUrl(value, pageUri);
-        // `og:image` of these pages is often just the site logo: not a photo.
         if (url != null && !RegExp(r'logo|/static/', caseSensitive: false).hasMatch(url)) {
           image = url;
           break;
@@ -558,7 +502,6 @@ class Scraper {
       }
     }
     if (image == null) {
-      // Broken JSON-LD: read the image straight from the text.
       for (final script in blocks) {
         final match = RegExp(r'"image"\s*:\s*"([^"]+)"').firstMatch(script.text);
         final url = _absoluteUrl(match?.group(1)?.replaceAll(r'\/', '/'), pageUri);
@@ -581,30 +524,18 @@ class Scraper {
     return ModelProfile(name: name ?? model.name, imageUrl: image);
   }
 
-  /// Profile only (name + photo) of a model.
   Future<ModelProfile> modelProfile(ModelRef model) async {
     final result = await modelPage(model);
     return result.profile ?? ModelProfile(name: model.name);
   }
 
-  // ---- "Models & Albums" search --------------------------------------------
-
-  /// Smart search for models and albums:
-  ///
-  /// 1. the query is also tried as a model address (`play with anny` ->
-  ///    `/models/play-with-anny/`, `/models/playwithanny/`), so typing a model
-  ///    name finds it directly;
-  /// 2. model links and album cards found on the site's search page;
-  /// 3. the albums of the best matching models, so their photos are one tap
-  ///    away.
   Future<PeopleSearchResult> searchPeople(String query) async {
     final q = query.trim();
     if (q.isEmpty) return const PeopleSearchResult(models: [], albums: []);
 
-    final models = <String, ModelRef>{}; // by address
-    final albums = <String, AlbumRef>{}; // by id
+    final models = <String, ModelRef>{};
+    final albums = <String, AlbumRef>{};
 
-    // 1. Direct guesses.
     final slugs = <String>{
       ScraperConfig._slugify(q),
       q.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
@@ -628,12 +559,10 @@ class Scraper {
               ),
             );
           } on ScraperException {
-            // No such model: ignore.
           }
         }(),
     ]);
 
-    // 2. The site's own search page.
     try {
       final uri = config.searchUri(q, 1);
       final document = html.parse(await _get(uri));
@@ -658,7 +587,6 @@ class Scraper {
       debugPrint('[SCRAPER] People search page failed: ${error.message}');
     }
 
-    // Best matches first: exact name, then names starting with the query.
     final lower = q.toLowerCase();
     int rank(ModelRef m) {
       final n = m.name.toLowerCase();
@@ -671,7 +599,6 @@ class Scraper {
     final sorted = models.values.toList()
       ..sort((a, b) => rank(a).compareTo(rank(b)));
 
-    // 3. Albums of the best matches.
     await Future.wait<void>([
       for (final model in sorted.take(3))
         () async {
@@ -680,7 +607,6 @@ class Scraper {
               albums.putIfAbsent(album.id, () => album);
             }
           } on ScraperException {
-            // That model has no albums page.
           }
         }(),
     ]);
@@ -690,8 +616,6 @@ class Scraper {
       albums: albums.values.toList(),
     );
   }
-
-  // ---- Card parsing -------------------------------------------------------
 
   late final RegExp? _videoPathRe = _safeRegExp(config.videoPathPattern);
   late final RegExp? _excludePathRe = _safeRegExp(config.excludePathPattern);
@@ -733,9 +657,6 @@ class Scraper {
     }
   }
 
-  /// Photo albums, galleries etc. use the same card markup as videos, so the
-  /// link decides: it must look like a video page and must not look like an
-  /// album.
   bool _isVideoUri(Uri uri) {
     final path = uri.path;
     final video = _videoPathRe;
@@ -745,12 +666,9 @@ class Scraper {
     return true;
   }
 
-  /// Text that still contains the "99%", views and age fragments of a card.
   static bool _isPolluted(String text) =>
       _leadingLikeRe.hasMatch(text) || _viewsRe.hasMatch(text);
 
-  /// Removes like %, duration, views and "30 seconds ago" from card text,
-  /// leaving only the title.
   static String _cleanTitle(String text) {
     var title = text.replaceFirst(RegExp(r'^\s*\d{1,3}\s*%\s*'), '');
     final duration = _durationRe.firstMatch(title)?.group(0);
@@ -759,8 +677,6 @@ class Scraper {
     return _collapse(title);
   }
 
-  /// Text of the element that holds an icon, e.g. for
-  /// `<li><i class="icon-view"></i> 12.3K</li>` the result is `12.3K`.
   String? _iconText(dom.Element element, String selector) {
     if (selector.trim().isEmpty) return null;
     final icon = element.querySelector(selector);
@@ -774,9 +690,6 @@ class Scraper {
       ? v.round().toString()
       : v.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
 
-  /// Turns whatever the site prints into a short label:
-  /// `1,234` -> `1.2K views`, `2.5M` -> `2.5M views`, `812` -> `812 views`.
-  /// Returns '' when the text doesn't look like a view count.
   static String _normalizeViews(String raw) {
     final text = _collapse(
       raw.replaceAll(RegExp(r'views?', caseSensitive: false), ''),
@@ -791,12 +704,10 @@ class Scraper {
     final suffix = match.group(2)?.toUpperCase();
 
     if (suffix != null) {
-      // "1.2K" or "1,2K": the separator is a decimal point.
       final value = double.tryParse(number.replaceAll(',', '.'));
       return value == null ? '' : '${_compactNumber(value)}$suffix views';
     }
 
-    // Plain digits: "1,234" / "1.234" / "1 234" use the separator for thousands.
     final count = int.tryParse(number.replaceAll(RegExp(r'[^\d]'), ''));
     if (count == null) return '';
     if (count >= 1000000000) return '${_compactNumber(count / 1e9)}B views';
@@ -806,7 +717,6 @@ class Scraper {
   }
 
   Video? _parseCard(dom.Element element, Uri pageUri) {
-    // 1. Find the link that really is a video page (skips albums).
     final anchors = <dom.Element>[
       if (element.localName == 'a') element,
       ...element.querySelectorAll(config.anchorSelector),
@@ -833,12 +743,10 @@ class Scraper {
     final classes = element.className.toLowerCase();
     if (classes.contains('album') || classes.contains('gallery')) return null;
 
-    // 2. Text of the card: the link text first, the whole card as fallback.
     final anchorText = _collapse(anchor?.text ?? '');
     final cardText = _collapse(element.text);
     final texts = <String>[anchorText, cardText];
 
-    // Like percentage, e.g. "99%" at the start of the link text.
     var likes = '';
     for (final text in texts) {
       final match = _leadingLikeRe.firstMatch(text);
@@ -855,7 +763,6 @@ class Scraper {
       if (match != null) likes = '${match.group(1)}%';
     }
 
-    // Duration, e.g. "9:00" or "1:12:35": icon first, then looser fallbacks.
     var duration = _durationRe
             .firstMatch(_iconText(element, config.durationIconSelector) ?? '')
             ?.group(1) ??
@@ -877,10 +784,8 @@ class Scraper {
     }
     if (duration.isEmpty) duration = element.attributes['data-duration'] ?? '';
 
-    // Albums have no duration and show a photo count instead.
     if (duration.isEmpty && _photosRe.hasMatch(cardText)) return null;
 
-    // Views: the text next to the "view" icon is the source of truth.
     var views = _normalizeViews(
       _iconText(element, config.viewsIconSelector) ?? '',
     );
@@ -901,10 +806,8 @@ class Scraper {
       );
     }
 
-    // Upload date / age, e.g. "2 months ago".
     final date = _collapse(_iconText(element, config.dateIconSelector) ?? '');
 
-    // 3. Image and title.
     final image = element.querySelector(config.imageSelector);
     final thumbnailRaw = image?.attributes['data-src'] ??
         image?.attributes['data-original'] ??
@@ -927,7 +830,6 @@ class Scraper {
     final id = element.attributes['data-id'] ??
         '${videoPage.host}${videoPage.path}${videoPage.hasQuery ? '?${videoPage.query}' : ''}';
     final directStream = _directStreamFromCard(element, pageUri);
-    // KVS-style cards carry the preview clip as data-preview on the <img>.
     final previewUrl = _absoluteUrl(
           image?.attributes['data-preview'] ??
               element.querySelector('[data-preview]')?.attributes['data-preview'],
@@ -990,8 +892,6 @@ class Scraper {
     }
   }
 
-  // ---- Stream resolution --------------------------------------------------
-
   static final RegExp _mediaExtRe = RegExp(
     r'\.(?:mp4|m3u8|webm|mkv|mov|m4v|mpd)(?:$|[/?#&])',
     caseSensitive: false,
@@ -1012,9 +912,6 @@ class Scraper {
       .replaceAll(r'\u003d', '=')
       .replaceAll('&amp;', '&');
 
-  /// Only things a player can really open: a media extension, an HLS/DASH
-  /// manifest, or a KVS-style `/get_file/` endpoint. Images, scripts, embed
-  /// pages and API URLs are rejected.
   static bool _looksPlayable(String url) {
     final uri = Uri.tryParse(url);
     if (uri == null || uri.host.isEmpty) return false;
@@ -1048,9 +945,6 @@ class Scraper {
     }
   }
 
-  /// Collects every plausible stream URL on a detail page and picks the best:
-  /// real videos before previews, then the highest quality up to 1080p (4K is
-  /// ranked just below it because older phones may not decode it smoothly).
   ({String? best, bool needsDecoding}) _extractStreams(
     String body,
     dom.Document document,
@@ -1063,7 +957,6 @@ class Scraper {
       if (raw == null) return;
       final value = _unescape(raw);
       if (value.isEmpty) return;
-      // KVS "function/0/<url>" needs a licence-code transform: unsupported.
       if (value.startsWith('function/')) {
         needsDecoding = true;
         return;
@@ -1082,7 +975,6 @@ class Scraper {
       );
     }
 
-    // 1. Player variables: video_url, video_alt_url, video_alt_url2, ...
     final urls = <String, String>{};
     final labels = <String, String>{};
     for (final m in RegExp(
@@ -1099,7 +991,6 @@ class Scraper {
     }
     urls.forEach((key, value) => add(value, 0, label: labels[key] ?? ''));
 
-    // 2. <video> / <source> tags.
     for (final node in document.querySelectorAll('video source[src], video[src]')) {
       final label = node.attributes['label'] ??
           node.attributes['title'] ??
@@ -1110,7 +1001,6 @@ class Scraper {
       add(node.attributes['src'], 1, label: label);
     }
 
-    // 3. Open Graph / Twitter player metadata.
     for (final selector in const [
       'meta[property="og:video"]',
       'meta[property="og:video:url"]',
@@ -1120,17 +1010,14 @@ class Scraper {
       add(document.querySelector(selector)?.attributes['content'], 2);
     }
 
-    // 4. JSON-LD contentUrl.
     for (final value in _captureAll(body, r'"contentUrl"\s*:\s*"([^"]+)"')) {
       add(value, 3);
     }
 
-    // 5. The configurable pattern: every match, kept only if it looks playable.
     for (final value in _captureAll(body, config.streamUrlPattern)) {
       add(value, 4);
     }
 
-    // 6. Last resort: any media-looking URL in the page source.
     final plain = body.replaceAll(r'\/', '/');
     for (final value in _captureAll(
       plain,
@@ -1156,8 +1043,6 @@ class Scraper {
     );
   }
 
-  /// Resolves a catalogue page to a direct stream only when one is exposed in
-  /// the page HTML. It does not bypass protected/encrypted player formats.
   Future<Video> resolveForPlayback(Video video, {bool fresh = false}) async {
     if (video.streamUrl.trim().isNotEmpty) return video;
     final pageUrl = video.pageUrl;
@@ -1168,10 +1053,9 @@ class Scraper {
     final uri = config.baseUri.resolve(pageUrl);
     final body = await _getDetailPage(uri, fresh: fresh);
     final job = (config: config, video: video, body: body, uri: uri);
-    return _offMainThread(() => _resolveJob(job));
+    return _runInBackground(_resolveJob, job);
   }
 
-  /// The parsing half of [resolveForPlayback] (pure: needs no network).
   Video _videoFromPage(Video video, String body, Uri uri) {
     final document = html.parse(body);
 
@@ -1185,7 +1069,6 @@ class Scraper {
       );
     }
 
-    // Prefer the page's own title over generic `title: '...'` script matches.
     final title =
         _capture(body, r"""video_title\s*[:=]\s*["']([^"']*)["']""") ??
             document.querySelector('h1')?.text.trim() ??
@@ -1235,15 +1118,11 @@ class Scraper {
   void close() => _client.close();
 }
 
-/// Runs [job] on a background isolate. Falls back to running it here when an
-/// isolate can't be used, so parsing never fails just because of that.
-Future<T> _offMainThread<T>(T Function() job) async {
+Future<R> _runInBackground<A, R>(R Function(A) job, A argument) async {
   try {
-    return await Isolate.run<T>(job);
-  } on ScraperException {
-    rethrow;
-  } catch (_) {
-    return job();
+    return await Isolate.run<R>(() => job(argument));
+  } on IsolateSpawnException {
+    return job(argument);
   }
 }
 
@@ -1280,15 +1159,11 @@ class _StreamCandidate {
 
   final String url;
 
-  /// Where it was found (lower = more trustworthy source).
   final int rank;
 
-  /// Discovery order, used as the final tie-break.
   final int order;
   final int quality;
   final bool preview;
 
-  /// Higher is better. Unknown quality sorts below any known one; 4K sorts just
-  /// under 1080p so older phones are not handed streams they may not decode.
   int get score => quality <= 0 ? 1 : (quality > 1080 ? 1000 : quality);
 }

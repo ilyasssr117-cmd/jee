@@ -9,48 +9,32 @@ import 'stream_headers.dart';
 import 'playback_source.dart';
 import 'video_repository.dart';
 
-/// The one live card preview.
 class PreviewSession {
   const PreviewSession(this.id, this.controller, {this.fadingOut = false});
 
   final String id;
   final VideoPlayerController controller;
 
-  /// True while the preview fades out (the controller is still alive).
   final bool fadingOut;
 
   PreviewSession faded() => PreviewSession(id, controller, fadingOut: true);
 }
 
-/// Owns the single preview shared by every card (with sound by default).
-///
-/// * The preview is started by the viewer (long-press on a card), never by
-///   itself, and starts at once.
-/// * At most ONE [VideoPlayerController] exists at any time.
-/// * It stops when the viewer scrolls, opens something, long-presses another
-///   card, leaves the app, or after [_maxPlay].
-/// * Native teardown is serialised ([_disposing]) so two decoders are never
-///   released (or the player opened) on top of each other.
 class PreviewManager {
   PreviewManager._();
 
   static final PreviewManager instance = PreviewManager._();
 
-  /// Fade in / fade out of the preview over the thumbnail.
   static const Duration fadeDuration = Duration(milliseconds: 300);
 
-  /// A preview stops by itself so it never streams forever.
   static const Duration _maxPlay = Duration(seconds: 30);
   static const Duration _initTimeout = Duration(seconds: 12);
 
-  /// The live (or fading-out) preview surface.
   final ValueNotifier<PreviewSession?> session =
       ValueNotifier<PreviewSession?>(null);
 
-  /// Id of the card the viewer asked a preview for (null = none).
   final ValueNotifier<String?> active = ValueNotifier<String?>(null);
 
-  /// True between the long-press and the first preview frame.
   final ValueNotifier<bool> loading = ValueNotifier<bool>(false);
 
   Timer? _limitTimer;
@@ -61,11 +45,6 @@ class PreviewManager {
   Future<void> _pendingTeardown = Future<void>.value();
   _LifecycleObserver? _observer;
 
-  // -------------------------------------------------------------------------
-  // Called by widgets
-  // -------------------------------------------------------------------------
-
-  /// Starts [video]'s preview now (stopping any other one).
   void requestPreview(Video video) {
     _observer ??= _LifecycleObserver(this);
     if (active.value == video.id) return;
@@ -77,13 +56,11 @@ class PreviewManager {
     unawaited(_start(video, generation));
   }
 
-  /// Forgets the resolved stream URLs (Settings → Clear cache).
   void clearCaches() {
     stopNow(fade: false);
     videoRepository.clearPlaybackCaches();
   }
 
-  /// The card for [id] went away. Safe to call from dispose().
   void release(String id) {
     scheduleMicrotask(() {
       if (active.value == id) stopNow();
@@ -98,21 +75,15 @@ class PreviewManager {
     _teardown(fade: fade);
   }
 
-  /// Stops the preview and waits until its native decoder is released. Call
-  /// before opening the real player.
   Future<void> stopAndWait() async {
     stopNow(fade: false);
-    await Future<void>.delayed(Duration.zero); // Let the teardown start.
-    await _pendingTeardown; // Includes a fade-out that was already running.
+    await Future<void>.delayed(Duration.zero);
+    await _pendingTeardown;
     try {
       await _initializing?.timeout(const Duration(seconds: 2));
     } catch (_) {}
     await _disposing;
   }
-
-  // -------------------------------------------------------------------------
-  // Internals
-  // -------------------------------------------------------------------------
 
   Future<void> _start(Video video, int generation) async {
     if (generation != _generation) return;
@@ -120,17 +91,13 @@ class PreviewManager {
       final wantSound = AppSettings.instance.previewSound;
       final clip = video.previewUrl.trim();
 
-      // 1. Sound off: the short clip the site puts on the card (data-preview)
-      //    is tiny and cheap. With sound on we skip it, because those clips
-      //    are very often silent.
       if (!wantSound && clip.isNotEmpty && await _play(video, clip, generation)) {
         return;
       }
       if (generation != _generation) return;
 
-      // 2. The real stream (with sound). The repository remembers the page
-      //    answer, so a later tap on the card (the player) reuses it.
       var url = video.streamUrl.trim();
+      if (url == clip) url = '';
       var pageUrl = video.pageUrl;
       if (url.isEmpty) {
         final resolved = await videoRepository
@@ -145,23 +112,17 @@ class PreviewManager {
       }
       if (generation != _generation) return;
 
-      // 3. Last resort: the clip, even if it may be silent.
       if (wantSound && clip.isNotEmpty) await _play(video, clip, generation);
     } catch (error) {
-      // A preview is a nicety: on any failure the thumbnail simply stays.
       debugPrint('[PREVIEW] ${video.id}: $error');
     } finally {
       if (generation == _generation) {
         loading.value = false;
-        // Nothing could be played: drop the "active" mark and its spinner.
         if (_live == null) active.value = null;
       }
     }
   }
 
-  /// Plays [url] in a fresh controller. Returns true when the attempt is
-  /// finished (playing, or no longer wanted) and false when [url] failed and
-  /// the caller may try something else.
   Future<bool> _play(
     Video video,
     String url,
@@ -179,9 +140,6 @@ class PreviewManager {
     var headers = streamHeaders(uri, pageUrl ?? video.pageUrl);
     var playUri = uri;
     if (real) {
-      // The real video needs the same cookie as the player (from the
-      // repository) and talks to its final server directly. Both answers are
-      // remembered, so opening the player afterwards asks for nothing again.
       final source = await resolvePlaybackSource(
         uri,
         pageUrl ?? video.pageUrl,
@@ -198,8 +156,6 @@ class PreviewManager {
         playUri,
         httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(
-          // With sound it plays like a normal video (works with the silent
-          // switch on); without sound it never interrupts the viewer's music.
           mixWithOthers: !AppSettings.instance.previewSound,
         ),
       );
@@ -214,7 +170,6 @@ class PreviewManager {
       }
       await controller.setVolume(AppSettings.instance.previewSound ? 1.0 : 0.0);
       await controller.setLooping(true);
-      // A long video previews from a little way in (skips logos / intros).
       final length = controller.value.duration;
       if (real && length > const Duration(seconds: 90)) {
         await controller.seekTo(length * 0.12);
@@ -245,11 +200,9 @@ class PreviewManager {
     }
   }
 
-  /// Fades the surface out, then releases the controller. Always runs outside
-  /// any build phase (see [_runTeardown]).
   void _teardown({bool fade = true}) {
     final controller = _live;
-    if (controller == null) return; // Nothing alive (or already retiring).
+    if (controller == null) return;
     _live = null;
     _pendingTeardown = Future<void>.microtask(
       () => _runTeardown(controller, fade),
@@ -278,7 +231,6 @@ class PreviewManager {
   }
 
   Future<void> _disposeAfterFrame(VideoPlayerController controller) async {
-    // Let the tree drop the VideoPlayer texture before the controller dies.
     try {
       final binding = WidgetsBinding.instance;
       binding.scheduleFrame();
@@ -287,12 +239,10 @@ class PreviewManager {
     try {
       await controller.dispose().timeout(const Duration(seconds: 5));
     } catch (_) {
-      // Already released, or a stuck native release: never block later ones.
     }
   }
 }
 
-/// Stops the preview whenever the app leaves the foreground.
 class _LifecycleObserver with WidgetsBindingObserver {
   _LifecycleObserver(this._manager) {
     WidgetsBinding.instance.addObserver(this);

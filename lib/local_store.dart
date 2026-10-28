@@ -3,11 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Thin wrapper around [SharedPreferences].
-///
-/// [init] runs once at start-up; after that every read is synchronous, so the
-/// stores below never need to be awaited from widgets. If storage is not
-/// available the app simply keeps everything in memory.
 abstract final class LocalStore {
   static SharedPreferences? _prefs;
 

@@ -8,7 +8,6 @@ import 'playback_launcher.dart';
 import 'playback_source.dart';
 import 'playback_progress.dart';
 
-/// Navigator of the whole app (used to re-open the player from outside it).
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 class _PipSession {
@@ -17,13 +16,9 @@ class _PipSession {
   final Video video;
   final List<Video>? queue;
 
-  /// What the player was using; reused when the full player comes back.
   final PlaybackSource? source;
 }
 
-/// Talks to the small iOS part of the app (see ios/Runner/AppDelegate.swift):
-/// Picture in Picture and the iOS share sheet ("Save Video" / "Save to
-/// Files"). Everything returns false / does nothing on platforms without it.
 class NativeBridge {
   NativeBridge._();
 
@@ -34,21 +29,17 @@ class NativeBridge {
   _PipSession? _session;
   bool _pipSupported = false;
 
-  /// Whether this phone can show Picture in Picture.
   bool get pipSupported => _pipSupported;
 
-  /// Call once at start-up.
   Future<void> init() async {
     _channel.setMethodCallHandler(_onCall);
     try {
       _pipSupported = await _channel.invokeMethod<bool>('pipSupported') ?? false;
     } catch (_) {
-      _pipSupported = false; // Not iOS, or the native part isn't installed.
+      _pipSupported = false;
     }
   }
 
-  /// Starts PiP with a second, native player that continues from [position].
-  /// Completes with true once the PiP window is really showing.
   Future<bool> startPip({
     required Video video,
     required String url,
@@ -82,7 +73,6 @@ class NativeBridge {
     }
   }
 
-  /// Opens the iOS share sheet for a saved video (Save Video, Save to Files…).
   Future<bool> shareFile(String path) async {
     try {
       return await _channel.invokeMethod<bool>('shareFile', <String, Object?>{
@@ -94,9 +84,6 @@ class NativeBridge {
     }
   }
 
-  /// Opens the iOS share sheet for several files at once ("Save N Images" puts
-  /// them all in the Photos app). Needs the `shareFiles` method on the iOS
-  /// side; returns false when it is missing, so the caller can tell the viewer.
   Future<bool> shareFiles(List<String> paths) async {
     if (paths.isEmpty) return false;
     if (paths.length == 1) return shareFile(paths.first);
@@ -121,8 +108,6 @@ class NativeBridge {
     return null;
   }
 
-  /// The PiP window closed. Nothing stays on screen: the native player is
-  /// already released. "Restore" brings the full player back at the same spot.
   void _pipEnded(int positionMs, int durationMs, bool restore) {
     final session = _session;
     _session = null;

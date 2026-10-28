@@ -8,7 +8,6 @@ import '../app_theme.dart';
 import '../touch.dart';
 import 'bottom_bar.dart';
 
-/// Native iOS confirmation alert. Returns true when the viewer confirms.
 Future<bool> confirmDialog(
   BuildContext context, {
   required String title,
@@ -46,9 +45,6 @@ Future<bool> confirmDialog(
 OverlayEntry? _toastEntry;
 Timer? _toastTimer;
 
-/// Small pill that fades in, waits, and fades out (no snack bar). It floats
-/// above the tab bar, or near the screen edge when [aboveBar] is false (pages
-/// without the bar).
 void showToast(BuildContext context, String message, {bool aboveBar = true}) {
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   if (overlay == null) return;
@@ -161,7 +157,6 @@ class _ToastViewState extends State<_ToastView>
   }
 }
 
-/// "12.3 MB" style size.
 String formatBytes(int bytes) {
   if (bytes <= 0) return '0 MB';
   const kb = 1024;

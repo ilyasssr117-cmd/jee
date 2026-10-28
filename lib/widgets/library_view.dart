@@ -21,7 +21,6 @@ import 'video_preview.dart';
 
 enum LibrarySegment { favorites, models, history, downloads, albums }
 
-/// The Library tab: Favorites, History, Downloads and saved photo Albums.
 class LibraryView extends StatefulWidget {
   const LibraryView({
     super.key,
@@ -30,11 +29,9 @@ class LibraryView extends StatefulWidget {
     required this.bottomInset,
   });
 
-  /// Opens [video]'s page; [queue] is the list it came from.
   final void Function(Video video, List<Video> queue) onOpen;
   final VoidCallback onBrowse;
 
-  /// Space kept free at the bottom (the floating bar).
   final double bottomInset;
 
   @override
@@ -130,10 +127,6 @@ class _LibraryViewState extends State<LibraryView> {
     if (ok) HistoryStore.instance.clear();
   }
 
-  // -------------------------------------------------------------------------
-  // Favorites
-  // -------------------------------------------------------------------------
-
   Widget _buildFavorites(double margin) {
     return ListenableBuilder(
       listenable: FavoritesStore.instance,
@@ -169,10 +162,6 @@ class _LibraryViewState extends State<LibraryView> {
       },
     );
   }
-
-  // -------------------------------------------------------------------------
-  // History
-  // -------------------------------------------------------------------------
 
   static String _group(DateTime time) {
     final now = DateTime.now();
@@ -274,10 +263,6 @@ class _LibraryViewState extends State<LibraryView> {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Downloads
-  // -------------------------------------------------------------------------
-
   Future<void> _playSaved(DownloadItem item) async {
     final queue = <Video>[
       for (final entry in DownloadStore.instance.items)
@@ -359,10 +344,6 @@ class _LibraryViewState extends State<LibraryView> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Pieces
-// ---------------------------------------------------------------------------
-
 class _TextAction extends StatelessWidget {
   const _TextAction({required this.label, required this.onTap});
 
@@ -425,7 +406,6 @@ class _DeleteBackground extends StatelessWidget {
   }
 }
 
-/// Thumbnail on the left, text on the right.
 class _VideoRow extends StatelessWidget {
   const _VideoRow({
     required this.video,
@@ -444,7 +424,6 @@ class _VideoRow extends StatelessWidget {
   final Color? subtitleColor;
   final double? watchedFraction;
 
-  /// Extra line under the subtitle (download progress bar).
   final Widget? below;
   final Widget? trailing;
   final VoidCallback? onTap;
@@ -460,7 +439,6 @@ class _VideoRow extends StatelessWidget {
               PreviewManager.instance.stopNow(fade: false);
               onTap!();
             },
-      // Hold the thumbnail to play a preview (with sound), like on the cards.
       onLongPress: () => PreviewManager.instance.requestPreview(video),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -602,7 +580,6 @@ class _DownloadRow extends StatelessWidget {
           title: video.title,
           subtitle: '${formatBytes(item.bytesTotal)} \u00b7 Saved offline',
           onTap: onTap,
-          // Straight into the Photos app.
           trailing: _IconAction(
             icon: Icons.photo_library_outlined,
             label: 'Save to Photos',

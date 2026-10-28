@@ -8,7 +8,6 @@ import 'package:watch_tube/local_store.dart';
 import 'package:watch_tube/models.dart';
 import 'package:watch_tube/photo_store.dart';
 
-/// 12+ bytes starting like a JPEG file.
 final List<int> _jpeg = <int>[0xFF, 0xD8, 0xFF, 0xE0, ...List<int>.filled(24, 7)];
 
 const AlbumRef _album = AlbumRef(
@@ -53,7 +52,6 @@ void main() {
     expect(saved, 3);
     final album = store.album(_album.id)!;
     expect(album.modelName, 'Playwithanny');
-    // Kept in the site's order (by the number in the file name).
     expect(album.photos.map((p) => p.id),
         <String>['0/37/29944.jpg', '0/37/29945.jpg', '0/37/29946.jpg']);
     for (final photo in album.photos) {

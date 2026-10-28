@@ -5,11 +5,6 @@ import 'package:flutter/widgets.dart';
 
 import 'local_store.dart';
 
-/// Remembers how far the viewer got in each video, and which ones are
-/// finished. Both survive closing and reopening the app (local storage).
-///
-/// Writes are batched (at most one every couple of seconds) and flushed when
-/// the player closes or the app leaves the foreground.
 class PlaybackProgress {
   PlaybackProgress._();
 
@@ -25,7 +20,6 @@ class PlaybackProgress {
 
   final Map<String, _Entry> _entries = <String, _Entry>{};
 
-  /// Videos watched to the end, oldest first.
   final Set<String> _completed = <String>{};
 
   Timer? _persistTimer;
@@ -35,12 +29,10 @@ class PlaybackProgress {
     if (duration <= Duration.zero) return;
     if (position < _minimumResume) return;
     if (position >= duration - _finishedMargin) {
-      if (_entries.remove(id) != null) _schedulePersist(); // Finished.
+      if (_entries.remove(id) != null) _schedulePersist();
       return;
     }
-    // Watching it again: it is in progress, no longer "completed".
     if (_completed.remove(id)) _persistCompleted();
-    // Re-insert so the map stays ordered by recency, and cap its size.
     _entries
       ..remove(id)
       ..[id] = _Entry(position, duration);
@@ -48,10 +40,8 @@ class PlaybackProgress {
     _schedulePersist();
   }
 
-  /// Position to resume from, or null if there is nothing worth resuming.
   Duration? resumePosition(String id) => _entries[id]?.position;
 
-  /// Watched fraction in (0, 1), or null.
   double? fraction(String id) {
     final entry = _entries[id];
     if (entry == null || entry.duration <= Duration.zero) return null;
@@ -64,9 +54,6 @@ class PlaybackProgress {
     if (_entries.remove(id) != null) _schedulePersist();
   }
 
-  // ---- Completed ----------------------------------------------------------
-
-  /// Loads saved progress and completed videos (call once at start-up).
   void load() {
     _completed
       ..clear()
@@ -87,7 +74,6 @@ class PlaybackProgress {
           Duration(milliseconds: duration),
         );
       } catch (_) {
-        // Skip a corrupt entry.
       }
     }
     while (_entries.length > _maxEntries) {
@@ -100,7 +86,6 @@ class PlaybackProgress {
     }
   }
 
-  /// Writes any pending progress now (player closed / app backgrounded).
   void flush() {
     _persistTimer?.cancel();
     _persistTimer = null;
@@ -126,7 +111,6 @@ class PlaybackProgress {
         ],
       );
 
-  /// Forgets every resume point and every "watched" mark.
   void clearAll() {
     _entries.clear();
     _completed.clear();
@@ -136,7 +120,6 @@ class PlaybackProgress {
 
   bool isCompleted(String id) => _completed.contains(id);
 
-  /// The video reached its end: nothing to resume, and it is marked watched.
   void markCompleted(String id) {
     if (_entries.remove(id) != null) _schedulePersist();
     _completed

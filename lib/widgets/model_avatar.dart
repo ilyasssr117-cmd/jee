@@ -4,12 +4,6 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../image_headers.dart';
 
-/// Round photo of a model. Models without a photo (or whose photo cannot be
-/// loaded) show their first letter instead.
-///
-/// A picture the site refuses is retried with simpler headers before giving
-/// up: first the model's page as Referer, then the site address, then no extra
-/// headers at all.
 class ModelAvatar extends StatefulWidget {
   const ModelAvatar({
     super.key,
@@ -22,7 +16,6 @@ class ModelAvatar extends StatefulWidget {
   final String name;
   final String? imageUrl;
 
-  /// Address of the model page: gives the site the picture is requested for.
   final String pageUrl;
   final double size;
 

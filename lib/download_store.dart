@@ -16,10 +16,8 @@ import 'touch.dart';
 import 'video_json.dart';
 import 'video_repository.dart';
 
-/// New values are only ever added at the END (the index is saved to disk).
 enum DownloadStatus { queued, downloading, done, failed, paused }
 
-/// One saved (or saving) video.
 class DownloadItem {
   DownloadItem({
     required this.video,
@@ -42,16 +40,12 @@ class DownloadItem {
   String? error;
   final DateTime addedAt;
 
-  /// Bytes written so far. Own notifier, so a progress tick rebuilds only the
-  /// small progress widgets and never whole lists.
   final ValueNotifier<int> bytes = ValueNotifier<int>(0);
 
-  /// 0..1, or null while the total size is unknown.
   double? get progress => bytesTotal > 0
       ? (bytes.value / bytesTotal).clamp(0.0, 1.0).toDouble()
       : null;
 
-  /// Part of the file is already on the phone (a resume continues from it).
   bool get hasPartial => status != DownloadStatus.done && bytes.value > 0;
 }
 
@@ -69,14 +63,6 @@ class _DownloadFailure implements Exception {
   final String message;
 }
 
-/// Saves videos (plain MP4 links) to the phone for offline watching.
-///
-/// * Needs the `path_provider` package in pubspec.yaml.
-/// * The request carries the same headers + cookie as the player (the cookie
-///   comes from `videoRepository.getPlaybackCookieHeader`, untouched).
-/// * RESUME: the half-downloaded file is kept and continues with a Range
-///   request, also automatically when the server drops the connection.
-/// * The thumbnail is saved next to the video, so lists look right offline.
 class DownloadStore extends ChangeNotifier {
   DownloadStore._();
 
@@ -84,7 +70,6 @@ class DownloadStore extends ChangeNotifier {
 
   static const String _key = 'downloads_v1';
 
-  /// Silent reconnects without progress before giving up.
   static const int _maxStalledAttempts = 5;
 
   final List<DownloadItem> _items = <DownloadItem>[];
@@ -98,7 +83,6 @@ class DownloadStore extends ChangeNotifier {
   Directory? _dir;
   bool _running = false;
 
-  /// Newest first.
   List<DownloadItem> get items => _view;
 
   DownloadItem? item(String id) {
@@ -115,11 +99,6 @@ class DownloadStore extends ChangeNotifier {
       .where((entry) => entry.status == DownloadStatus.done)
       .fold<int>(0, (sum, entry) => sum + entry.bytesTotal);
 
-  // -------------------------------------------------------------------------
-  // Start-up
-  // -------------------------------------------------------------------------
-
-  /// Call once at start-up (after [LocalStore.init]).
   Future<void> init() async {
     try {
       final documents = await getApplicationDocumentsDirectory();
@@ -146,7 +125,6 @@ class DownloadStore extends ChangeNotifier {
             index is int && index >= 0 && index < DownloadStatus.values.length
                 ? DownloadStatus.values[index]
                 : DownloadStatus.failed;
-        // The app was closed while it was saving: keep the part, offer resume.
         if (status == DownloadStatus.queued ||
             status == DownloadStatus.downloading) {
           status = DownloadStatus.paused;
@@ -167,7 +145,6 @@ class DownloadStore extends ChangeNotifier {
 
         if (status == DownloadStatus.done) {
           entry.bytes.value = entry.bytesTotal;
-          // The file vanished (storage cleaned by the system): forget it.
           if (localPathOf(entry) == null) continue;
         } else if (dir != null && fileName != null) {
           final part = File('${dir.path}/$fileName.part');
@@ -182,14 +159,12 @@ class DownloadStore extends ChangeNotifier {
         }
         _items.add(entry);
       } catch (_) {
-        // Skip a corrupt entry.
       }
     }
     _items.sort((a, b) => b.addedAt.compareTo(a.addedAt));
     _cleanOrphans();
   }
 
-  /// Deletes `.part` files that no list entry owns any more.
   void _cleanOrphans() {
     final dir = _dir;
     if (dir == null) return;
@@ -208,10 +183,6 @@ class DownloadStore extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // -------------------------------------------------------------------------
-  // Queries
-  // -------------------------------------------------------------------------
-
   String? localPathOf(DownloadItem entry) {
     final dir = _dir;
     final name = entry.fileName;
@@ -222,34 +193,25 @@ class DownloadStore extends ChangeNotifier {
     return File(path).existsSync() ? path : null;
   }
 
-  /// Path of the saved file for [id], or null when it isn't downloaded.
   String? localPath(String id) {
     final entry = item(id);
     return entry == null ? null : localPathOf(entry);
   }
 
-  /// Path of the saved thumbnail for [id] (a plain map lookup, safe in build).
   String? thumbPath(String id) => _thumbs[id];
 
-  /// Saves the downloaded video straight into the Photos app.
   Future<GallerySaveResult> saveToPhotos(String id) async {
     final path = localPath(id);
     if (path == null) return const GallerySaveResult(saved: 0, failed: 1);
     return PhotoSaver.saveVideoToGallery(path);
   }
 
-  /// Opens the iOS share sheet (last resort: "Save to Files").
   Future<bool> shareFile(String id) async {
     final path = localPath(id);
     if (path == null) return false;
     return NativeBridge.instance.shareFile(path);
   }
 
-  // -------------------------------------------------------------------------
-  // Actions
-  // -------------------------------------------------------------------------
-
-  /// Adds [video] to the queue (does nothing when already saved / saving).
   void enqueue(Video video) {
     final existing = item(video.id);
     if (existing != null) {
@@ -265,7 +227,6 @@ class DownloadStore extends ChangeNotifier {
     unawaited(_pump());
   }
 
-  /// Continues a paused / failed download from where it stopped.
   void resume(String id) {
     final entry = item(id);
     if (entry == null ||
@@ -281,13 +242,12 @@ class DownloadStore extends ChangeNotifier {
     unawaited(_pump());
   }
 
-  /// Stops a running download but keeps what is already saved.
   void pause(String id) {
     final entry = item(id);
     if (entry == null) return;
     if (entry.status == DownloadStatus.downloading) {
       _paused.add(id);
-      _clients[id]?.close(); // _download() ends in the paused state.
+      _clients[id]?.close();
     } else if (entry.status == DownloadStatus.queued) {
       entry.status = DownloadStatus.paused;
       _persist();
@@ -295,14 +255,13 @@ class DownloadStore extends ChangeNotifier {
     }
   }
 
-  /// Cancels a download (partial data is deleted) or deletes a saved video.
   Future<void> remove(String id) async {
     final entry = item(id);
     if (entry == null) return;
     if (entry.status == DownloadStatus.downloading) {
       _cancelled.add(id);
       _clients[id]?.close();
-      return; // _download() cleans up and removes the entry itself.
+      return;
     }
     _items.remove(entry);
     _thumbs.remove(id);
@@ -317,17 +276,12 @@ class DownloadStore extends ChangeNotifier {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Queue
-  // -------------------------------------------------------------------------
-
   Future<void> _pump() async {
     if (_running) return;
     _running = true;
     try {
       while (true) {
         DownloadItem? next;
-        // Oldest waiting item first.
         for (final entry in _items.reversed) {
           if (entry.status == DownloadStatus.queued) {
             next = entry;
@@ -375,17 +329,14 @@ class DownloadStore extends ChangeNotifier {
         );
       }
 
-      // The same file name is kept across pauses so a resume finds its part.
       entry.fileName ??= _newFileName(id);
       final fileName = entry.fileName!;
       final part = File('${dir.path}/$fileName.part');
       final target = File('${dir.path}/$fileName');
       partRef = part;
 
-      // Thumbnail first (small): lists keep working offline.
       unawaited(_saveThumbnail(entry, dir, resolved.pageUrl ?? entry.video.pageUrl));
 
-      // Same cookie + headers as the player (cookie comes from the repository).
       final pageUrl = resolved.pageUrl ?? entry.video.pageUrl;
       final pageUri = Uri.tryParse(pageUrl?.trim() ?? '');
       final validPage = pageUri != null &&
@@ -431,7 +382,6 @@ class DownloadStore extends ChangeNotifier {
         );
 
         if (response.statusCode == 416) {
-          // The saved part doesn't match the server's file: start again.
           await response.stream.drain<void>().timeout(
                 const Duration(seconds: 3),
                 onTimeout: () {},
@@ -454,7 +404,6 @@ class DownloadStore extends ChangeNotifier {
           throw const _DownloadFailure('This video can\u2019t be downloaded.');
         }
 
-        // 200 while we asked for a part: the server ignored Range. Restart.
         var append = offset > 0;
         if (response.statusCode == 200 && offset > 0) {
           offset = 0;
@@ -463,7 +412,7 @@ class DownloadStore extends ChangeNotifier {
         total = _totalSize(response, offset);
         if (total > 0 && entry.bytesTotal != total) {
           entry.bytesTotal = total;
-          notifyListeners(); // The total size is known now.
+          notifyListeners();
         }
 
         final output = part.openWrite(
@@ -484,7 +433,6 @@ class DownloadStore extends ChangeNotifier {
             }
           }
         } finally {
-          // Whatever happened, what arrived is on disk and a resume uses it.
           await output.flush();
           await output.close();
           sink = null;
@@ -492,8 +440,6 @@ class DownloadStore extends ChangeNotifier {
         }
 
         if (total > 0 && written < total) {
-          // The server closed early (speed limit / bad connection): carry on
-          // from where it stopped, without bothering the viewer.
           stalled = written > startedAt ? 0 : stalled + 1;
           if (stalled > _maxStalledAttempts) {
             throw const _DownloadFailure('Connection lost. Tap resume.');
@@ -548,7 +494,6 @@ class DownloadStore extends ChangeNotifier {
       _cancelled.remove(id);
       _paused.remove(id);
       if (!finished && partRef != null && entry.status == DownloadStatus.paused) {
-        // Keep the part: remember how much there is.
         try {
           entry.bytes.value = partRef.existsSync() ? partRef.lengthSync() : 0;
         } catch (_) {}
@@ -558,14 +503,11 @@ class DownloadStore extends ChangeNotifier {
     }
   }
 
-  /// Throws when the viewer paused or cancelled this download.
   void _checkStop(String id) {
     if (_cancelled.contains(id)) throw const _Cancelled();
     if (_paused.contains(id)) throw const _Paused();
   }
 
-  /// Follows redirects by hand so the cookie and headers survive a hop to
-  /// another host (the HTTP client would drop them).
   Future<http.StreamedResponse> _open(
     http.Client client,
     Uri uri,
@@ -589,7 +531,6 @@ class DownloadStore extends ChangeNotifier {
     throw const _DownloadFailure('Too many redirects.');
   }
 
-  /// Full file size from Content-Range / Content-Length (0 when unknown).
   int _totalSize(http.StreamedResponse response, int offset) {
     final range = response.headers['content-range'];
     if (range != null) {

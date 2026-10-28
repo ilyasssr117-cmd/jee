@@ -6,10 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'local_store.dart';
 import 'models.dart';
 
-/// Favourite videos, newest first, persisted locally.
-///
-/// Only list-level metadata is stored. Stream URLs are never saved because
-/// they expire; the player re-resolves them from the page URL when needed.
 class FavoritesStore extends ChangeNotifier {
   FavoritesStore._();
 
@@ -37,12 +33,10 @@ class FavoritesStore extends ChangeNotifier {
         final video = _decode(decoded);
         if (video != null && _ids.add(video.id)) _items.add(video);
       } catch (_) {
-        // Skip a corrupt entry instead of losing the whole list.
       }
     }
   }
 
-  /// Returns the new state: true when [video] is now a favourite.
   bool toggle(Video video) {
     if (_ids.contains(video.id)) {
       remove(video.id);

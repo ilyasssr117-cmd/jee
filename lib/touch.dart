@@ -6,9 +6,7 @@ import 'app_theme.dart';
 
 enum Haptic { none, selection, light, medium, heavy }
 
-/// One place for every vibration in the app.
 abstract final class Haptics {
-  /// Flip to false to silence the whole app.
   static bool enabled = true;
 
   static void play(Haptic kind) {
@@ -28,12 +26,6 @@ abstract final class Haptics {
   }
 }
 
-/// Touch wrapper used by every tappable thing in the app.
-///
-/// * Shrinks a little while pressed and springs back (you can *see* the press).
-/// * Vibrates on tap ([haptic]) and on long press ([longPressHaptic]).
-/// * Long press fires after [longPressDuration] (shorter than the system
-///   default, so it feels responsive).
 class Pressable extends StatefulWidget {
   const Pressable({
     super.key,

@@ -15,11 +15,6 @@ import 'widgets/model_avatar.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 
-/// All the videos of one model / channel.
-///
-/// The first page is `.../models/slug/videos/`, the next ones `.../videos/2/`,
-/// `.../videos/3/`, and so on. Pages are fetched one after another until the
-/// last video, and the total at the top grows as they arrive.
 class ModelPage extends StatefulWidget {
   const ModelPage({super.key, required this.model});
 
@@ -29,7 +24,6 @@ class ModelPage extends StatefulWidget {
   State<ModelPage> createState() => _ModelPageState();
 }
 
-/// Opens the page of [model] (its videos and photos).
 void openModelPage(BuildContext context, ModelRef model) {
   Navigator.of(context).push<void>(
     MaterialPageRoute<void>(builder: (_) => ModelPage(model: model)),
@@ -39,13 +33,11 @@ void openModelPage(BuildContext context, ModelRef model) {
 enum _Mode { videos, photos }
 
 class _ModelPageState extends State<ModelPage> {
-  /// Safety stop so a misbehaving site can never loop forever.
   static const int _maxPages = 300;
   static const int _maxAlbumPages = 60;
 
   _Mode _mode = _Mode.videos;
 
-  // Photo albums (loaded in the background next to the videos).
   final List<AlbumRef> _albums = <AlbumRef>[];
   final Set<String> _albumSeen = <String>{};
   int _albumNext = 1;
@@ -53,7 +45,6 @@ class _ModelPageState extends State<ModelPage> {
   Object? _albumsError;
   int _albumRun = 0;
 
-  /// A model with exactly one album shows its photos straight away.
   AlbumLoader? _soloLoader;
   final PhotoSelection _selection = PhotoSelection();
 
@@ -64,7 +55,6 @@ class _ModelPageState extends State<ModelPage> {
   bool _loading = true;
   Object? _error;
 
-  /// Bumped on dispose / retry so an old loop stops quietly.
   int _run = 0;
 
   @override
@@ -123,11 +113,10 @@ class _ModelPageState extends State<ModelPage> {
     }
   }
 
-  /// All albums are known: a single album opens its photos directly.
   void _albumsFinished() {
     if (!mounted) return;
     if (_albums.isEmpty && _mode == _Mode.photos && _albumsError == null) {
-      setState(() => _mode = _Mode.videos); // Nothing to show: back to videos.
+      setState(() => _mode = _Mode.videos);
     }
     if (_albums.length == 1 && _soloLoader == null) {
       _soloLoader = AlbumLoader(_albums.first);
@@ -161,8 +150,6 @@ class _ModelPageState extends State<ModelPage> {
     );
   }
 
-  /// The switch only appears once the model is known to have albums (some
-  /// models have none), or when loading them failed and can be retried.
   bool get _hasPhotos => _albums.isNotEmpty || _albumsError != null;
 
   Future<void> _loadAll() async {
@@ -189,7 +176,6 @@ class _ModelPageState extends State<ModelPage> {
           added++;
         }
       }
-      // An empty page (or one with nothing new) is the end of the list.
       final last = added == 0;
       if (result.profile?.imageUrl != null) {
         FavoriteModelsStore.instance
@@ -343,8 +329,6 @@ class _ModelPageState extends State<ModelPage> {
     );
   }
 
-  /// Slivers of the "Photos" tab: albums as a grid; a model with exactly one
-  /// album shows that album's photos straight away.
   List<Widget> _photoSlivers(double margin) {
     final padding = EdgeInsets.symmetric(horizontal: margin);
 
@@ -425,7 +409,6 @@ class _ModelPageState extends State<ModelPage> {
           modelName: widget.model.name,
           padding: padding,
         ),
-        // Room for the selection bar.
         const SliverToBoxAdapter(child: SizedBox(height: 72)),
       ];
     }
@@ -508,7 +491,6 @@ class _ModelPageState extends State<ModelPage> {
                       style: AppText.headline,
                     ),
                     const SizedBox(height: 4),
-                    // Total number of videos (grows while the pages arrive).
                     Text(
                       _countLabel,
                       style: AppText.body.copyWith(
@@ -563,7 +545,6 @@ class _ModelPageState extends State<ModelPage> {
   }
 }
 
-/// Videos | Photos switch under the model's name.
 class _ModeSwitch extends StatelessWidget {
   const _ModeSwitch({required this.mode, required this.onChanged});
 

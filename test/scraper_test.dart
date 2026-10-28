@@ -48,7 +48,6 @@ void main() {
     expect(firstPage, hasLength(1));
     expect(firstPage.first.title, 'Example Video');
     expect(firstPage.first.duration, '12:34');
-    // The scraper shortens counts: "1,234 views" becomes "1.2K views".
     expect(firstPage.first.views, '1.2K views');
     expect(
       firstPage.first.pageUrl,

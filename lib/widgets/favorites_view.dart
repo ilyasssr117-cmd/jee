@@ -6,7 +6,6 @@ import '../models.dart';
 import 'state_views.dart';
 import 'video_grid.dart';
 
-/// The Favorites tab of the home screen.
 class FavoritesView extends StatelessWidget {
   const FavoritesView({
     super.key,
@@ -15,10 +14,8 @@ class FavoritesView extends StatelessWidget {
     this.bottomInset = 0,
   });
 
-  /// Space kept free at the bottom (the floating bar).
   final double bottomInset;
 
-  /// Opens [video]; [queue] is the favourites list (used by Autoplay Next).
   final void Function(Video video, List<Video> queue) onOpen;
   final VoidCallback onBrowse;
 

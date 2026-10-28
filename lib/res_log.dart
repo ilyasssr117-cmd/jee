@@ -1,8 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-/// Debug-only playback trace. Only origins are logged: full media URLs can
-/// contain expiring signatures or access tokens and must not be written to logs.
-/// In release builds this does nothing at all.
 abstract final class ResLog {
   static const String tag = '[RES]';
 
@@ -21,7 +18,7 @@ abstract final class ResLog {
       return;
     }
     final line = '$tag ${page.origin} | ${video.origin}';
-    if (line == _last) return; // Same video re-initialised (retry / resume).
+    if (line == _last) return;
     _last = line;
     debugPrint(line);
   }

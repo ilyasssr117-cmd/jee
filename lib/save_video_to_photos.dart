@@ -3,9 +3,6 @@ import 'package:flutter/widgets.dart';
 import 'download_store.dart';
 import 'widgets/dialogs.dart';
 
-/// "Save to Photos" for a downloaded video: straight into the Photos app. The
-/// share sheet (which only offers "Save to Files" for some files) is used only
-/// when saving directly is impossible.
 Future<void> saveVideoToPhotos(
   BuildContext context,
   String videoId, {

@@ -3,11 +3,6 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../models.dart';
 
-/// One-line metadata: duration, like percentage (thumb icon), views, category.
-///
-/// Empty values are skipped, so a video without likes simply shows its views.
-/// When nothing else is known the category is shown instead (unless
-/// [fallbackToCategory] is false).
 class VideoMetaLine extends StatelessWidget {
   const VideoMetaLine({
     super.key,
@@ -26,7 +21,6 @@ class VideoMetaLine extends StatelessWidget {
   final bool showCategory;
   final bool fallbackToCategory;
 
-  /// True when there is anything to show for [video] with these options.
   bool get hasContent =>
       (showDuration && video.duration.isNotEmpty) ||
       (showDate && video.date.isNotEmpty) ||
@@ -108,7 +102,6 @@ class VideoMetaLine extends StatelessWidget {
   }
 }
 
-/// Small grey icon followed by one line of text (eye + views, calendar + date).
 class _IconText extends StatelessWidget {
   const _IconText(this.icon, this.text, this.style);
 

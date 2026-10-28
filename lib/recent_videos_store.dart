@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'local_store.dart';
 import 'models.dart';
 
-/// Recently played metadata. Expiring stream URLs are deliberately not saved.
 class RecentVideosStore extends ChangeNotifier {
   RecentVideosStore._();
 
@@ -31,7 +30,6 @@ class RecentVideosStore extends ChangeNotifier {
         final video = _decode(decoded);
         if (video != null && _ids.add(video.id)) _items.add(video);
       } catch (_) {
-        // Ignore one damaged record rather than discarding the entire history.
       }
     }
     if (_items.length > _maxItems) _items.removeRange(_maxItems, _items.length);

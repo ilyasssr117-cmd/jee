@@ -6,9 +6,6 @@ import '../app_theme.dart';
 import '../download_store.dart';
 import '../models.dart';
 
-/// Thumbnail with consistent clipping, a fade-in, and a designed placeholder
-/// for loading / missing / failed images. Fills its parent, so the parent
-/// decides the aspect ratio and the image can never cause a layout shift.
 class VideoArtwork extends StatelessWidget {
   const VideoArtwork({
     super.key,
@@ -19,10 +16,8 @@ class VideoArtwork extends StatelessWidget {
 
   final Video video;
 
-  /// Corner radius in logical pixels (0 = no clipping).
   final double borderRadius;
 
-  /// Show the title inside the placeholder when there is no usable image.
   final bool showLabel;
 
   static Map<String, String>? _headersFor(Video video) {
@@ -32,7 +27,6 @@ class VideoArtwork extends StatelessWidget {
         page.host.isEmpty) {
       return null;
     }
-    // Some CDNs reject hot-linked thumbnails without a Referer.
     return <String, String>{'Referer': '${page.origin}/'};
   }
 
@@ -42,8 +36,6 @@ class VideoArtwork extends StatelessWidget {
 
     Widget content = LayoutBuilder(
       builder: (context, constraints) {
-        // A downloaded video keeps its own copy of the thumbnail: it shows
-        // instantly, works offline and costs no request.
         final saved = DownloadStore.instance.thumbPath(video.id);
         if (saved != null) {
           return Stack(
@@ -73,7 +65,6 @@ class VideoArtwork extends StatelessWidget {
 
         if (!valid) return _Placeholder(video: video, showLabel: showLabel);
 
-        // Decode no larger than needed, quantised so the image cache is reused.
         int? cacheWidth;
         if (constraints.maxWidth.isFinite) {
           final px = constraints.maxWidth * dpr;

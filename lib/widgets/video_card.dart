@@ -10,8 +10,6 @@ import 'video_artwork.dart';
 import 'video_meta.dart';
 import 'video_preview.dart';
 
-/// Layout maths shared by every place that shows [VideoCard]s, so a card's
-/// height is always known up-front (no overflow, no layout jumps).
 abstract final class VideoCardMetrics {
   static const double titleSize = 13.5;
   static const double titleHeight = 1.25;
@@ -20,26 +18,19 @@ abstract final class VideoCardMetrics {
   static const double gapAfterThumb = 8;
   static const double gapAfterTitle = 3;
 
-  /// Height of the title + metadata block under the thumbnail.
   static double textBlock(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
     return gapAfterThumb +
         scaler.scale(titleSize) * titleHeight * 2 +
         gapAfterTitle +
         scaler.scale(metaSize) * metaHeight +
-        4; // slack for rounding
+        4;
   }
 
-  /// Total card height for a given width (16:9 thumbnail + text block).
   static double height(BuildContext context, double width) =>
       width * 9 / 16 + textBlock(context);
 }
 
-/// Video card: 16:9 thumbnail, two-line title, one metadata line.
-///
-/// * Tap ........ open the video.
-/// * Hold ....... play a preview right here (haptic buzz).
-/// * Star ....... top-right corner button toggles the favourite.
 class VideoCard extends StatelessWidget {
   const VideoCard({super.key, required this.video, required this.onTap});
 
@@ -49,7 +40,6 @@ class VideoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completed = PlaybackProgress.instance.isCompleted(video.id);
-    // A finished video shows the watched badge instead of a progress bar.
     final progress =
         completed ? null : PlaybackProgress.instance.fraction(video.id);
 
@@ -112,7 +102,6 @@ class VideoCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: VideoCardMetrics.gapAfterThumb),
-          // Reserve exactly two lines so metadata aligns across the row.
           SizedBox(
             height: MediaQuery.textScalerOf(context)
                     .scale(VideoCardMetrics.titleSize) *
@@ -133,8 +122,6 @@ class VideoCard extends StatelessWidget {
   }
 }
 
-/// Star in the thumbnail corner: its own touch target, so it never fights the
-/// long-press preview. Pops when it turns gold.
 class _FavoriteButton extends StatelessWidget {
   const _FavoriteButton({required this.video});
 
@@ -155,7 +142,6 @@ class _FavoriteButton extends StatelessWidget {
             final nowFavorite = store.toggle(video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
           },
-          // 40 pt touch target around a 26 pt visual.
           child: SizedBox(
             width: 40,
             height: 40,
@@ -189,7 +175,6 @@ class _FavoriteButton extends StatelessWidget {
   }
 }
 
-/// Small round status marker drawn on the thumbnail corner.
 class _Badge extends StatelessWidget {
   const _Badge({
     required this.icon,

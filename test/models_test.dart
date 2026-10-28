@@ -218,7 +218,6 @@ void main() {
       seen.add(request.url);
       final from = request.url.queryParameters['from'];
       if (from == null) {
-        // The album page: the first batch (one tile only has a lazy data-webp).
         return http.Response('''
           <div class="album-view photo-holder"><div class="grid" id="albumGallery">
             ${tile('aaa', '29944.jpg', 'T1')}
@@ -228,12 +227,12 @@ void main() {
       }
       asyncHeaders.add(request.headers);
       switch (from) {
-        case '1': // Repeats the page (new token) and adds one picture.
+        case '1':
           return http.Response(
               '${tile('aaa', '29944.jpg', 'T2')}${tile('ccc', '29946.jpg', 'T2')}', 200);
         case '2':
           return http.Response(tile('ddd', '29947.jpg', 'T2'), 200);
-        default: // No picture at all = the end.
+        default:
           return http.Response('<div></div>', 200);
       }
     });
@@ -264,7 +263,6 @@ void main() {
     expect(first['from'], '1');
     expect(seen.map((u) => u.queryParameters['from']),
         <String?>[null, '1', '2', '3']);
-    // Sent like the site's own script does.
     expect(asyncHeaders.first['X-Requested-With'], 'XMLHttpRequest');
     expect(asyncHeaders.first['Referer'], album.url);
     scraper.close();
@@ -305,7 +303,6 @@ void main() {
           ?.imageUrl,
       'https://x.example.test/contents/m.jpg',
     );
-    // Trailing comma = invalid JSON: the photo is still read from the text.
     expect(
       (await profileOf('''<html><head><script type="application/ld+json">
         { "@type": "Person", "name": "M", "image": "https:\\/\\/x.example.test\\/contents\\/models\\/290\\/s1.jpg", }
@@ -314,7 +311,6 @@ void main() {
       'https://x.example.test/contents/models/290/s1.jpg',
     );
     expect((await profileOf('<html><head></head></html>'))?.imageUrl, isNull);
-    // The site logo in og:image is not the model's photo.
     expect(
       (await profileOf('<html><head><meta property="og:image" content="https://x.example.test/static/images/logo.png"></head></html>'))
           ?.imageUrl,

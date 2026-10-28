@@ -1,4 +1,3 @@
-/// Mobile browser headers for native stream requests, shared with the card preview.
 Map<String, String> streamHeaders(Uri streamUri, String? pageUrl) {
   final pageUri = Uri.tryParse(pageUrl?.trim() ?? '');
   final hasPage = pageUri != null &&

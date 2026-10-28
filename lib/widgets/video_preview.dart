@@ -7,11 +7,6 @@ import '../app_theme.dart';
 import '../models.dart';
 import '../preview_manager.dart';
 
-/// Preview surface on top of one card's thumbnail.
-///
-/// It costs nothing while idle: it only mounts its real content while the
-/// viewer holds *this* card (or while its preview is still fading out), so
-/// there is at most one video texture in the whole tree.
 class PreviewSlot extends StatefulWidget {
   const PreviewSlot({super.key, required this.video});
 
@@ -41,7 +36,6 @@ class _PreviewSlotState extends State<PreviewSlot> {
     if (!mounted) return;
     final next = _compute();
     if (next == _mine) return;
-    // Never rebuild in the middle of a build / layout pass.
     if (SchedulerBinding.instance.schedulerPhase ==
         SchedulerPhase.persistentCallbacks) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
@@ -105,7 +99,6 @@ class _PreviewView extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (showVideo) _VideoFade(session: mine),
-              // Soft dim + spinner while the clip loads.
               AnimatedOpacity(
                 opacity: waiting ? 1 : 0,
                 duration: Motion.normal,
@@ -119,7 +112,6 @@ class _PreviewView extends StatelessWidget {
                   ),
                 ),
               ),
-              // Accent ring while this card is the one being previewed.
               AnimatedOpacity(
                 opacity: holding ? 1 : 0,
                 duration: Motion.normal,
@@ -138,7 +130,6 @@ class _PreviewView extends StatelessWidget {
   }
 }
 
-/// Starts transparent, fades to 1; fades back to 0 when the session retires.
 class _VideoFade extends StatelessWidget {
   const _VideoFade({required this.session});
 

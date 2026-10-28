@@ -4,7 +4,6 @@ import '../app_theme.dart';
 import '../models.dart';
 import 'video_card.dart';
 
-/// Sliver grid of [VideoCard]s with row height computed from the card width.
 class SliverVideoGrid extends StatelessWidget {
   const SliverVideoGrid({
     super.key,

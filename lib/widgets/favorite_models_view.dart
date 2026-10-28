@@ -5,7 +5,6 @@ import '../favorite_models_store.dart';
 import 'model_row.dart';
 import 'state_views.dart';
 
-/// Library > Models: the models marked with a star.
 class FavoriteModelsView extends StatelessWidget {
   const FavoriteModelsView({
     super.key,
@@ -15,7 +14,6 @@ class FavoriteModelsView extends StatelessWidget {
 
   final VoidCallback onBrowse;
 
-  /// Space kept free at the bottom (the floating bar).
   final double bottomInset;
 
   @override

@@ -17,15 +17,9 @@ import 'widgets/back_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
 
-/// Loads every photo of one album, chunk after chunk, until the last one.
-///
-/// Chunk 0 is the album page, then the site's "load more" request is repeated
-/// with from=1, 2, 3, ... until a request returns no picture at all. The photos
-/// list grows while the chunks arrive.
 class AlbumLoader extends ChangeNotifier {
   AlbumLoader(this.album);
 
-  /// Safety stop so a misbehaving site can never loop forever.
   static const int _maxChunks = 400;
 
   final AlbumRef album;
@@ -35,25 +29,20 @@ class AlbumLoader extends ChangeNotifier {
   bool finished = false;
   Object? error;
 
-  int _next = 0; // 0 = the album page, N >= 1 = "load more" from=N.
-  int _stale = 0; // Chunks in a row without any new picture.
+  int _next = 0;
+  int _stale = 0;
   int _run = 0;
   bool _disposed = false;
   Completer<void> _done = Completer<void>();
 
-  /// Some image servers refuse pictures requested without a Referer (and a
-  /// browser-like client name).
   Map<String, String>? get imageHeaders => imageHeadersFor(album.url);
 
-  /// Completes when every chunk is loaded, or when loading stopped on an
-  /// error (check [error]).
   Future<void> get done => _done.future;
 
   void _complete() {
     if (!_done.isCompleted) _done.complete();
   }
 
-  /// Starts (or, after an error, resumes) loading. Safe to call repeatedly.
   Future<void> load() async {
     if (loading || finished || _disposed) return;
     final run = ++_run;
@@ -85,10 +74,6 @@ class AlbumLoader extends ChangeNotifier {
       }
       _next++;
       _stale = added == 0 ? _stale + 1 : 0;
-      // The end: a request with no picture at all, or (safety against a site
-      // that repeats the last page forever) three requests in a row with
-      // nothing new. A repeated first page (from=1 can equal the page itself)
-      // is normal and does not stop the loading.
       if (chunk.isEmpty || _stale >= 3) {
         loading = false;
         finished = true;
@@ -122,7 +107,6 @@ class AlbumLoader extends ChangeNotifier {
   }
 }
 
-/// Which photos are ticked while "Select" mode is on.
 class PhotoSelection extends ChangeNotifier {
   bool _active = false;
   final Set<String> ids = <String>{};
@@ -147,7 +131,6 @@ class PhotoSelection extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Leaves select mode.
   void clear() {
     _active = false;
     ids.clear();
@@ -155,12 +138,6 @@ class PhotoSelection extends ChangeNotifier {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Saving to the phone
-// ---------------------------------------------------------------------------
-
-/// Saves pictures of [loader]'s album in Library > Albums. Without [only] the
-/// whole album is saved (waiting first until every photo is listed).
 Future<void> savePhotosToAlbums(
   BuildContext context,
   AlbumLoader loader, {
@@ -212,8 +189,6 @@ Future<void> savePhotosToAlbums(
   );
 }
 
-/// Saves picture files into the phone's Photos app. If that is not possible
-/// (plugin missing), the iOS share sheet is opened instead.
 Future<void> sendToPhotos(BuildContext context, List<String> paths) async {
   if (paths.isEmpty) return;
   if (paths.length > 1) {
@@ -247,8 +222,7 @@ Future<void> sendToPhotos(BuildContext context, List<String> paths) async {
     return;
   }
 
-  // Nothing could be saved directly: fall back to the share sheet.
-  const limit = 150; // The share sheet gets slow with more files than this.
+  const limit = 150;
   final batch = paths.length > limit ? paths.sublist(0, limit) : paths;
   final ok = await NativeBridge.instance.shareFiles(batch);
   if (!context.mounted) return;
@@ -263,11 +237,6 @@ Future<void> sendToPhotos(BuildContext context, List<String> paths) async {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Album page
-// ---------------------------------------------------------------------------
-
-/// A whole album: back button, title, number of photos and the photo grid.
 class AlbumPage extends StatefulWidget {
   const AlbumPage({super.key, required this.album, this.modelName});
 
@@ -301,7 +270,6 @@ class _AlbumPageState extends State<AlbumPage> {
     final darkMode = AppColors.palette.brightness == Brightness.dark;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: darkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      // Back leaves select mode first.
       child: ListenableBuilder(
         listenable: _selection,
         builder: (context, child) => PopScope(
@@ -387,7 +355,6 @@ class _AlbumPageState extends State<AlbumPage> {
   }
 }
 
-/// "Select" and "Download all" under an album's title.
 class AlbumToolbar extends StatelessWidget {
   const AlbumToolbar({
     super.key,
@@ -462,7 +429,6 @@ class AlbumToolbar extends StatelessWidget {
   }
 }
 
-/// Bar at the bottom while photos are being selected: count, All, Download.
 class PhotoSelectionBar extends StatelessWidget {
   const PhotoSelectionBar({
     super.key,
@@ -518,9 +484,6 @@ class PhotoSelectionBar extends StatelessWidget {
   }
 }
 
-/// Bottom bar of select mode: a small count + "All" on the first line and the
-/// actions below it, each taking an equal share of the width (so no label is
-/// ever squeezed into a narrow column and wrapped).
 class SelectionBarFrame extends StatelessWidget {
   const SelectionBarFrame({
     super.key,
@@ -532,7 +495,6 @@ class SelectionBarFrame extends StatelessWidget {
   final int count;
   final VoidCallback onSelectAll;
 
-  /// Usually `Expanded` buttons.
   final List<Widget> actions;
 
   @override
@@ -597,14 +559,6 @@ class SelectionBarFrame extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Photo grid
-// ---------------------------------------------------------------------------
-
-/// Photo grid (3 per row) for an [AlbumLoader]. Tapping opens the full-screen
-/// viewer; with a [selection], long-press starts select mode and taps tick
-/// photos. Shows a skeleton while the first chunk loads and a Retry row when
-/// a chunk fails.
 class PhotoGridSliver extends StatelessWidget {
   const PhotoGridSliver({
     super.key,
@@ -764,7 +718,6 @@ class PhotoGridSliver extends StatelessWidget {
   );
 }
 
-/// An album: its (portrait) preview picture and title.
 class AlbumCard extends StatelessWidget {
   const AlbumCard({
     super.key,
@@ -834,8 +787,6 @@ class AlbumCard extends StatelessWidget {
   }
 }
 
-/// One grid tile: the picture, a tick while selecting and a small badge when
-/// it is already saved on the phone.
 class _PhotoTile extends StatelessWidget {
   const _PhotoTile({
     super.key,
@@ -935,12 +886,6 @@ class _SavedBadge extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Full-screen viewer
-// ---------------------------------------------------------------------------
-
-/// One picture in the viewer. [remote] is set for pictures that can still be
-/// downloaded; [localPath] for pictures already saved on the phone.
 class ViewerItem {
   const ViewerItem({
     required this.id,
@@ -969,9 +914,6 @@ void openPhotoViewer(BuildContext context, PhotoViewerPage page) {
   );
 }
 
-/// Full-screen photo viewer: swipe between photos, pinch or double-tap to
-/// zoom. Top right: download (save in Albums) and share (Save to Photos).
-/// Photos still loading are added to the end while the viewer is open.
 class PhotoViewerPage extends StatefulWidget {
   const PhotoViewerPage({
     super.key,
@@ -983,13 +925,11 @@ class PhotoViewerPage extends StatefulWidget {
     this.modelName,
   });
 
-  /// Notifies when [items] changed.
   final Listenable listenable;
   final List<ViewerItem> Function() items;
   final int initialIndex;
   final bool Function()? isLoading;
 
-  /// Needed to save remote pictures.
   final AlbumRef? album;
   final String? modelName;
 
@@ -1010,7 +950,6 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
     super.dispose();
   }
 
-  /// Local file of [item]: saved before, or saved right now.
   Future<String?> _ensureLocalPath(ViewerItem item) async {
     final local = item.localPath;
     if (local != null) return local;
@@ -1097,7 +1036,6 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
               children: [
                 PageView.builder(
                   controller: _pages,
-                  // While zoomed in, dragging pans the picture instead.
                   physics: _zoomed
                       ? const NeverScrollableScrollPhysics()
                       : const PageScrollPhysics(),
@@ -1218,12 +1156,10 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto> {
     }
     const scale = 2.5;
     final p = _doubleTapAt;
-    // Column-major matrix: uniform scale + translation that keeps the tapped
-    // point under the finger.
     _controller.value = Matrix4(
-      scale, 0, 0, 0, //
-      0, scale, 0, 0, //
-      0, 0, 1, 0, //
+      scale, 0, 0, 0,
+      0, scale, 0, 0,
+      0, 0, 1, 0,
       -p.dx * (scale - 1), -p.dy * (scale - 1), 0, 1,
     );
   }
@@ -1244,8 +1180,6 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto> {
             fit: BoxFit.contain,
             loadingBuilder: (context, child, progress) {
               if (progress == null) return child;
-              // The small thumbnail is already cached: show it while the big
-              // picture downloads.
               return Stack(
                 alignment: Alignment.center,
                 children: [

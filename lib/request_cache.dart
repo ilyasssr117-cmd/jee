@@ -2,9 +2,6 @@ import 'dart:collection';
 
 import 'models.dart';
 
-/// Small in-memory cache with a time limit. Also shares one running request
-/// between callers that ask for the same key at the same time, so the app
-/// never sends the same request twice.
 class TtlCache<V> {
   TtlCache({
     this.ttl = const Duration(minutes: 5),
@@ -15,24 +12,18 @@ class TtlCache<V> {
   final Duration ttl;
   final int maxEntries;
 
-  /// Results for which this returns false are handed to the caller but not
-  /// kept (an empty answer caused by a hiccup must not stick for minutes).
   final bool Function(V value)? cacheable;
 
   final LinkedHashMap<String, _Entry<V>> _entries =
       LinkedHashMap<String, _Entry<V>>();
   final Map<String, Future<V>> _running = <String, Future<V>>{};
 
-  /// The cached value for [key] if it is still fresh, otherwise null. Lets a
-  /// page show a remembered answer in the same frame, with no loading state.
   V? peek(String key) {
     final hit = _entries[key];
     if (hit != null && DateTime.now().isBefore(hit.expires)) return hit.value;
     return null;
   }
 
-  /// Returns the cached value for [key] while it is fresh; otherwise runs
-  /// [loader]. [force] skips the cache (pull-to-refresh).
   Future<V> fetch(
     String key,
     Future<V> Function() loader, {
@@ -41,7 +32,7 @@ class TtlCache<V> {
     if (!force) {
       final hit = _entries[key];
       if (hit != null && DateTime.now().isBefore(hit.expires)) {
-        _entries.remove(key); // Mark as recently used.
+        _entries.remove(key);
         _entries[key] = hit;
         return Future<V>.value(hit.value);
       }
@@ -49,8 +40,10 @@ class TtlCache<V> {
       if (running != null) return running;
     }
 
+    late final Future<V> tracked;
     final future = loader().then((value) {
-      if (cacheable == null || cacheable!(value)) {
+      if (identical(_running[key], tracked) &&
+          (cacheable == null || cacheable!(value))) {
         _entries.remove(key);
         _entries[key] = _Entry<V>(value, DateTime.now().add(ttl));
         while (_entries.length > maxEntries) {
@@ -59,19 +52,19 @@ class TtlCache<V> {
       }
       return value;
     });
-    // IMPORTANT: block body, not `=> _running.remove(key)`. `Map.remove`
-    // returns the removed value, which here is `tracked` itself. whenComplete
-    // waits for a Future returned by its callback, so the arrow form made the
-    // request wait for itself forever: the data arrived but the page stayed on
-    // its loading skeleton.
-    final tracked = future.whenComplete(() {
-      _running.remove(key);
+    tracked = future.whenComplete(() {
+      if (identical(_running[key], tracked)) {
+        _running.remove(key);
+      }
     });
     _running[key] = tracked;
     return tracked;
   }
 
-  void clear() => _entries.clear();
+  void clear() {
+    _entries.clear();
+    _running.clear();
+  }
 }
 
 class _Entry<V> {
@@ -81,26 +74,21 @@ class _Entry<V> {
   final DateTime expires;
 }
 
-/// Lists of videos by "category|page" and "query|page".
 final TtlCache<List<Video>> listingCache =
     TtlCache<List<Video>>(ttl: const Duration(minutes: 4), maxEntries: 60);
 
-/// "More like this" lists by video id.
 final TtlCache<List<Video>> relatedCache =
     TtlCache<List<Video>>(ttl: const Duration(minutes: 15), maxEntries: 30);
 
-/// "Models:" row of a video, by video id.
 final TtlCache<List<ModelRef>> modelsCache =
     TtlCache<List<ModelRef>>(ttl: const Duration(minutes: 30), maxEntries: 60);
 
-/// "Models & Albums" searches, by text.
 final TtlCache<PeopleSearchResult> peopleCache = TtlCache<PeopleSearchResult>(
   ttl: const Duration(minutes: 10),
   maxEntries: 30,
   cacheable: (result) => !result.isEmpty,
 );
 
-/// Name and photo of models seen in the search results, by model address.
 final TtlCache<ModelProfile> profileCache =
     TtlCache<ModelProfile>(ttl: const Duration(hours: 6), maxEntries: 120);
 

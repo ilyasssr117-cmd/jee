@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import 'app_button.dart';
 
-/// Horizontally scrolling category chips.
 class CategoryBar extends StatelessWidget {
   const CategoryBar({
     super.key,

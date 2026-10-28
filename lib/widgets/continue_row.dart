@@ -7,8 +7,6 @@ import '../playback_progress.dart';
 import '../touch.dart';
 import 'video_artwork.dart';
 
-/// "Continue watching": the videos you started and didn't finish. One tap
-/// resumes at the exact second.
 class ContinueRow extends StatelessWidget {
   const ContinueRow({super.key, required this.onPlay});
 

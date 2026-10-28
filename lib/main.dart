@@ -21,7 +21,6 @@ import 'preview_manager.dart';
 import 'search_history.dart';
 
 void main() {
-  // Any error thrown anywhere is logged instead of silently killing the app.
   runZonedGuarded<Future<void>>(
     _bootstrap,
     (error, stack) => debugPrint('[FATAL][zone] $error\n$stack'),
@@ -37,10 +36,9 @@ Future<void> _bootstrap() async {
   };
   ui.PlatformDispatcher.instance.onError = (error, stack) {
     debugPrint('[FATAL][platform] $error\n$stack');
-    return true; // Handled: do not take the process down.
+    return true;
   };
 
-  // In release builds a widget error is normally a blank grey screen.
   ErrorWidget.builder = (details) {
     final message = details.exceptionAsString();
     return Directionality(
@@ -73,7 +71,6 @@ Future<void> _bootstrap() async {
 
   await applyBrowseOrientation();
 
-  // A failure here must never block start-up: the app just starts empty.
   try {
     await LocalStore.init();
     AppSettings.instance.load();
@@ -82,7 +79,6 @@ Future<void> _bootstrap() async {
     SearchHistory.instance.load();
     PlaybackProgress.instance.load();
     FavoriteModelsStore.instance.init();
-    // Independent of each other: start together instead of one after another.
     await Future.wait<void>(<Future<void>>[
       DownloadStore.instance.init(),
       PhotoStore.instance.init(),
@@ -106,9 +102,6 @@ class _FlowAppState extends State<FlowApp>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late Brightness _brightness = _resolve();
 
-  /// Picture of the screen taken just before a theme switch. It is laid over
-  /// the new theme and faded out, so the whole app changes in one smooth
-  /// cross-fade instead of piece by piece.
   final GlobalKey _boundaryKey = GlobalKey();
   ui.Image? _snapshot;
   late final AnimationController _fade = AnimationController(
@@ -122,7 +115,6 @@ class _FlowAppState extends State<FlowApp>
       }
     });
 
-  /// Dark, light, or whatever the iPhone is set to.
   Brightness _resolve() {
     switch (AppSettings.instance.themeMode) {
       case AppThemeMode.dark:
@@ -172,14 +164,14 @@ class _FlowAppState extends State<FlowApp>
         );
       }
     } catch (_) {
-      shot = null; // No picture: the switch is simply instant.
+      shot = null;
     }
     if (!mounted) {
       shot?.dispose();
       return;
     }
 
-    final next = _resolve(); // May have changed again while we waited.
+    final next = _resolve();
     if (next == _brightness) {
       shot?.dispose();
       return;
@@ -189,8 +181,6 @@ class _FlowAppState extends State<FlowApp>
     _snapshot?.dispose();
     setState(() => _snapshot = shot);
 
-    // Colours are read when a widget builds, so every widget builds again
-    // (state, scroll positions and loaded videos are all kept).
     void markDirty(Element element) {
       element.markNeedsBuild();
       element.visitChildren(markDirty);
@@ -221,14 +211,12 @@ class _FlowAppState extends State<FlowApp>
               RepaintBoundary(
                 key: _boundaryKey,
                 child: MediaQuery(
-                  // Respect the iPhone's text-size setting, within limits.
                   data: media.copyWith(
                     textScaler: media.textScaler.clamp(
                       minScaleFactor: 0.9,
                       maxScaleFactor: 1.25,
                     ),
                   ),
-                  // A card preview stops as soon as the finger starts scrolling.
                   child: NotificationListener<ScrollStartNotification>(
                     onNotification: (notification) {
                       if (notification.dragDetails != null &&

@@ -14,7 +14,6 @@ class HistoryEntry {
   final DateTime playedAt;
 }
 
-/// Videos the viewer started playing, newest first, persisted locally.
 class HistoryStore extends ChangeNotifier {
   HistoryStore._();
 
@@ -44,13 +43,11 @@ class HistoryStore extends ChangeNotifier {
           HistoryEntry(video, DateTime.fromMillisecondsSinceEpoch(time)),
         );
       } catch (_) {
-        // Skip a corrupt entry instead of losing the whole list.
       }
     }
     _items.sort((a, b) => b.playedAt.compareTo(a.playedAt));
   }
 
-  /// [video] was just played: move it to the top with the current time.
   void record(Video video) {
     _items.removeWhere((entry) => entry.video.id == video.id);
     _items.insert(0, HistoryEntry(video.copyWith(streamUrl: ''), DateTime.now()));

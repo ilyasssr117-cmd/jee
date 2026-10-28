@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_tube/request_cache.dart';
 
@@ -61,5 +63,35 @@ void main() {
     await expectLater(cache.fetch('key', loader), throwsStateError);
     expect(await cache.fetch('key', loader), 5);
     expect(calls, 2);
+  });
+
+  test('an older request finishing late does not overwrite a newer result',
+      () async {
+    final cache = TtlCache<int>();
+    final slow = Completer<int>();
+    final first = cache.fetch('key', () => slow.future);
+    final second = cache.fetch('key', () async => 2, force: true);
+
+    expect(await second, 2);
+    slow.complete(1);
+    expect(await first, 1);
+    expect(await cache.fetch('key', () async => 3), 2);
+  });
+
+  test('an older request finishing late keeps the newer one shared', () async {
+    final cache = TtlCache<int>();
+    final slowOld = Completer<int>();
+    final slowNew = Completer<int>();
+    final first = cache.fetch('key', () => slowOld.future);
+    cache.fetch('key', () => slowNew.future, force: true);
+
+    slowOld.complete(1);
+    expect(await first, 1);
+
+    var calls = 0;
+    final third = cache.fetch('key', () async => ++calls);
+    slowNew.complete(2);
+    expect(await third, 2);
+    expect(calls, 0);
   });
 }

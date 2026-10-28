@@ -1,7 +1,5 @@
 import 'models.dart';
 
-/// List-level metadata of a video as JSON (favourites, history, downloads).
-/// Stream URLs are never saved because they expire.
 Map<String, dynamic> videoToJson(Video video) => <String, dynamic>{
       'id': video.id,
       'title': video.title,

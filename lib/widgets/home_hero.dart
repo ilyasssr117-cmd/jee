@@ -9,10 +9,6 @@ import 'state_views.dart';
 import 'video_artwork.dart';
 import 'video_meta.dart';
 
-/// Top of the home page: brand bar + featured video.
-///
-/// The hero lives inside the page's single scroll view, so it scrolls away
-/// naturally and never takes screen space permanently.
 class HomeHero extends StatelessWidget {
   const HomeHero({
     super.key,
@@ -24,7 +20,6 @@ class HomeHero extends StatelessWidget {
     required this.onDetails,
   });
 
-  /// Featured video, or null while loading / when there is nothing to show.
   final Video? video;
   final bool loading;
   final String playLabel;
@@ -38,7 +33,6 @@ class HomeHero extends StatelessWidget {
     final topPad = context.safe.top + Gaps.sm;
     const topBar = _TopBar();
 
-    // Error / empty: keep only the brand bar so the status view has room.
     if (video == null && !loading) {
       return Padding(
         padding: EdgeInsets.fromLTRB(margin, topPad, margin, 0),
@@ -69,7 +63,6 @@ class HomeHero extends StatelessWidget {
                 ),
               ),
             ),
-          // Scrims: top for the brand bar, bottom to blend into the page.
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(

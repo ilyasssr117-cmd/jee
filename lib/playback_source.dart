@@ -2,9 +2,6 @@ import 'stream_headers.dart';
 import 'stream_resolver.dart';
 import 'video_repository.dart';
 
-/// Everything a player needs to open one video: the final address and the
-/// exact headers (cookie included). Handing it on lets the next player skip
-/// all the lookups that produced it (e.g. when Picture in Picture closes).
 class PlaybackSource {
   const PlaybackSource(this.url, this.headers);
 
@@ -12,9 +9,6 @@ class PlaybackSource {
   final Map<String, String> headers;
 }
 
-/// The cookie plus the final address for [streamUri], using the repository's
-/// remembered answers whenever they are fresh. [refresh] asks again (reconnect
-/// after a failure). With [tolerant] a cookie problem only drops the cookie.
 Future<PlaybackSource> resolvePlaybackSource(
   Uri streamUri,
   String? pageUrl, {

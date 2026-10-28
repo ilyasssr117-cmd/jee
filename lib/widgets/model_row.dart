@@ -9,9 +9,6 @@ import '../touch.dart';
 import '../video_repository.dart';
 import 'model_avatar.dart';
 
-/// A model in a list (search results, favourite models): photo, name, a star
-/// to favourite it, and a tap that opens the model's page. A missing photo is
-/// looked up once on the model's page.
 class ModelRow extends StatefulWidget {
   const ModelRow({super.key, required this.model});
 
@@ -41,7 +38,6 @@ class _ModelRowState extends State<ModelRow> {
       FavoriteModelsStore.instance.updateImage(widget.model.url, profile.imageUrl);
       setState(() => _image = profile.imageUrl);
     } catch (_) {
-      // No photo: the initial letter stays.
     }
   }
 

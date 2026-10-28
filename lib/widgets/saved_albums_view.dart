@@ -12,7 +12,6 @@ import 'back_button.dart';
 import 'dialogs.dart';
 import 'state_views.dart';
 
-/// Library > Albums: photo albums saved on the phone.
 class SavedAlbumsView extends StatelessWidget {
   const SavedAlbumsView({
     super.key,
@@ -22,7 +21,6 @@ class SavedAlbumsView extends StatelessWidget {
 
   final VoidCallback onBrowse;
 
-  /// Space kept free at the bottom (the floating bar).
   final double bottomInset;
 
   @override
@@ -44,7 +42,6 @@ class SavedAlbumsView extends StatelessWidget {
             onAction: onBrowse,
           );
         }
-        // One section per model, so albums of different models never mix.
         final groups = <String, List<SavedAlbum>>{};
         for (final album in albums) {
           final name = (album.modelName ?? '').trim();
@@ -206,8 +203,6 @@ class _SavedAlbumCard extends StatelessWidget {
   }
 }
 
-/// One saved album: its pictures (offline), with Select, Save to Photos and
-/// Delete.
 class SavedAlbumPage extends StatefulWidget {
   const SavedAlbumPage({super.key, required this.albumId});
 

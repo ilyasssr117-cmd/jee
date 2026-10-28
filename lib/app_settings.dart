@@ -5,7 +5,6 @@ import 'touch.dart';
 
 enum AppThemeMode { system, dark, light }
 
-/// User preferences (Settings tab), saved locally.
 class AppSettings extends ChangeNotifier {
   AppSettings._();
 

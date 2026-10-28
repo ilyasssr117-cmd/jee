@@ -7,10 +7,8 @@ import '../touch.dart';
 
 enum AppTab { home, search, library, settings }
 
-/// Space the floating bar occupies at the bottom (without the safe area).
 const double kBottomBarHeight = 76;
 
-/// Floating pill with the tabs: Home, Search, Library, Settings.
 class AppBottomBar extends StatelessWidget {
   const AppBottomBar({
     super.key,
@@ -22,7 +20,6 @@ class AppBottomBar extends StatelessWidget {
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
 
-  /// Space under the pill (defaults to the home-indicator gap).
   final double? bottomGap;
 
   @override
@@ -71,7 +68,6 @@ class AppBottomBar extends StatelessWidget {
       ),
     );
 
-    // A Row (not Align) so the bar is only as tall as the pill.
     return Padding(
       padding: EdgeInsets.only(bottom: bottom),
       child: Row(

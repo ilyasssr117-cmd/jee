@@ -12,11 +12,9 @@ import '../search_history.dart';
 import '../touch.dart';
 import 'dialogs.dart';
 
-/// The Settings tab.
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key, required this.bottomInset});
 
-  /// Space kept free at the bottom (the floating bar).
   final double bottomInset;
 
   @override
@@ -192,7 +190,6 @@ class _SettingsViewState extends State<SettingsView> {
   }
 }
 
-/// iOS-style inset group: small title above a rounded card of rows.
 class _Group extends StatelessWidget {
   const _Group({required this.title, required this.children});
 
@@ -335,7 +332,6 @@ class _Toggle extends StatelessWidget {
   }
 }
 
-/// Native iOS sliding segmented control (the thumb glides between options).
 class _Segmented<T extends Object> extends StatelessWidget {
   const _Segmented({
     required this.value,

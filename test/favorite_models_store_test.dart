@@ -33,7 +33,7 @@ void main() {
     store.toggle(model);
     store.updateImage(model.url, 'https://x.example.test/contents/m.jpg');
 
-    store.init(); // Reads what was saved.
+    store.init();
 
     expect(store.items, hasLength(1));
     expect(store.items.single.imageUrl, 'https://x.example.test/contents/m.jpg');

@@ -12,26 +12,29 @@ class _FinalUri {
 
 const Duration _finalUriTtl = Duration(minutes: 10);
 const int _finalUriMax = 32;
+
 final LinkedHashMap<String, _FinalUri> _finalUris =
     LinkedHashMap<String, _FinalUri>();
 final Map<String, Future<Uri>> _finalUriRunning = <String, Future<Uri>>{};
 
-/// Forgets every remembered final address (Settings -> Clear cache).
-void clearFinalStreamUris() => _finalUris.clear();
+void clearFinalStreamUris() {
+  _finalUris.clear();
+  _finalUriRunning.clear();
+}
 
-/// Finds the address a stream link finally points to.
-///
-/// The video link usually answers with a redirect (Location header) to the
-/// real file. Following it once, here, with the SAME headers and cookie that
-/// the player uses, means the video player can talk to the final server
-/// directly: no redirect on every range request, and the cookie is not lost
-/// on the way to the second host.
-///
-/// The answer is remembered for a few minutes and shared between callers that
-/// ask at the same time, so the same link is never probed twice. [refresh]
-/// skips the remembered answer (reconnect after a failure).
-///
-/// Never throws: any problem returns [uri] unchanged (and is not remembered).
+String _contextKey(Uri uri, Map<String, String> headers) {
+  final names = headers.keys.toList()..sort();
+  final buffer = StringBuffer(uri.toString());
+  for (final name in names) {
+    buffer
+      ..write('\n')
+      ..write(name.toLowerCase())
+      ..write(':')
+      ..write(headers[name]);
+  }
+  return buffer.toString();
+}
+
 Future<Uri> resolveFinalStreamUri(
   Uri uri,
   Map<String, String> headers, {
@@ -39,7 +42,7 @@ Future<Uri> resolveFinalStreamUri(
   Duration timeout = const Duration(seconds: 10),
   bool refresh = false,
 }) {
-  final key = uri.toString();
+  final key = _contextKey(uri, headers);
   if (!refresh) {
     final hit = _finalUris[key];
     if (hit != null && DateTime.now().isBefore(hit.expires)) {
@@ -48,8 +51,10 @@ Future<Uri> resolveFinalStreamUri(
     final running = _finalUriRunning[key];
     if (running != null) return running;
   }
-  final future = _probe(uri, headers, maxHops, timeout).then((result) {
-    if (result.ok) {
+
+  late final Future<Uri> tracked;
+  final probe = _probe(uri, headers, maxHops, timeout).then((result) {
+    if (result.ok && identical(_finalUriRunning[key], tracked)) {
       _finalUris.remove(key);
       _finalUris[key] = _FinalUri(result.uri, DateTime.now().add(_finalUriTtl));
       while (_finalUris.length > _finalUriMax) {
@@ -58,8 +63,10 @@ Future<Uri> resolveFinalStreamUri(
     }
     return result.uri;
   });
-  final tracked = future.whenComplete(() {
-    _finalUriRunning.remove(key);
+  tracked = probe.whenComplete(() {
+    if (identical(_finalUriRunning[key], tracked)) {
+      _finalUriRunning.remove(key);
+    }
   });
   _finalUriRunning[key] = tracked;
   return tracked;
@@ -72,8 +79,8 @@ Future<({Uri uri, bool ok})> _probe(
   Duration timeout,
 ) async {
   final client = http.Client();
+  var current = uri;
   try {
-    var current = uri;
     for (var hop = 0; hop < maxHops; hop++) {
       final request = http.Request('GET', current)
         ..followRedirects = false
@@ -88,9 +95,10 @@ Future<({Uri uri, bool ok})> _probe(
         current = current.resolve(location);
         continue;
       }
-      return (uri: current, ok: true); // The real file; closed without a body.
+      final status = response.statusCode;
+      return (uri: current, ok: status >= 200 && status < 300);
     }
-    return (uri: current, ok: true);
+    return (uri: current, ok: false);
   } catch (_) {
     return (uri: uri, ok: false);
   } finally {

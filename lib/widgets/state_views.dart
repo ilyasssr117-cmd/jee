@@ -5,7 +5,6 @@ import '../app_theme.dart';
 import 'app_button.dart';
 import 'video_card.dart';
 
-/// Centered loading / error / empty message with optional actions.
 class StatusView extends StatelessWidget {
   const StatusView({
     super.key,
@@ -20,7 +19,6 @@ class StatusView extends StatelessWidget {
     this.dark = false,
   });
 
-  /// On top of video (player): always light text.
   final bool dark;
 
   final IconData icon;
@@ -93,13 +91,11 @@ class StatusView extends StatelessWidget {
   }
 }
 
-/// Native iOS activity indicator, centred.
 class Spinner extends StatelessWidget {
   const Spinner({super.key, this.size = 28, this.color});
 
   final double size;
 
-  /// Defaults to the theme's secondary text colour.
   final Color? color;
 
   @override
@@ -113,7 +109,6 @@ class Spinner extends StatelessWidget {
   }
 }
 
-/// Pulsing grey block used by skeletons.
 class SkeletonPulse extends StatefulWidget {
   const SkeletonPulse({super.key, required this.child});
 
@@ -171,7 +166,6 @@ class SkeletonBlock extends StatelessWidget {
   }
 }
 
-/// Placeholder with exactly the same footprint as a real [VideoCard].
 class SkeletonCard extends StatelessWidget {
   const SkeletonCard({super.key});
 
@@ -195,7 +189,6 @@ class SkeletonCard extends StatelessWidget {
   }
 }
 
-/// Skeleton grid sharing [VideoCardMetrics] with the real grid.
 class SliverSkeletonGrid extends StatelessWidget {
   const SliverSkeletonGrid({
     super.key,

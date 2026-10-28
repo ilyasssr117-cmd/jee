@@ -1,7 +1,3 @@
-/// Headers for pictures loaded from the video site (model photos, album
-/// covers, photos). Some of its servers refuse hot-linked pictures, and the
-/// main domain also refuses the default "Dart" client name, so the request
-/// looks like it comes from Safari and from the site itself.
 Map<String, String>? imageHeadersFor(String? pageUrl) {
   final uri = Uri.tryParse(pageUrl ?? '');
   if (uri == null ||

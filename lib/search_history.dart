@@ -2,10 +2,6 @@ import 'package:flutter/foundation.dart';
 
 import 'local_store.dart';
 
-/// Last few searches, newest first, persisted locally.
-///
-/// These are plain history entries, never suggestions: nothing is ever
-/// inferred or completed from them.
 class SearchHistory extends ChangeNotifier {
   SearchHistory._();
 
@@ -27,7 +23,6 @@ class SearchHistory extends ChangeNotifier {
       ..addAll(LocalStore.readList(_key).take(maxItems));
   }
 
-  /// Adds [query] at the front, removing any earlier copy (case-insensitive).
   void add(String query) {
     final value = normalize(query);
     if (value.isEmpty) return;
@@ -48,7 +43,6 @@ class SearchHistory extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Removes only [query].
   void remove(String query) {
     final before = _items.length;
     _items.remove(query);

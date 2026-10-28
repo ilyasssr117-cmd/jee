@@ -38,12 +38,10 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const int _pageSize = 12;
 
-  /// Stop paginating after this many consecutive pages that added nothing new.
   static const int _maxEmptyPages = 3;
 
   static const String _hintsKey = 'hints_v1';
 
-  // One controller for the whole page: hero, chips and grid scroll together.
   final ScrollController _scroll = ScrollController();
 
   final List<Video> _videos = <Video>[];
@@ -57,8 +55,6 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
   bool _hasMore = true;
   bool _playingFeatured = false;
-  /// Search is its own notifier so opening it never rebuilds the video grid
-  /// (that rebuild was what made the keyboard open with a stutter).
   final ValueNotifier<bool> _search = ValueNotifier<bool>(false);
   bool get _searchOpen => _search.value;
   _Section _section = _Section.home;
@@ -84,11 +80,6 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  // -------------------------------------------------------------------------
-  // Loading
-  // -------------------------------------------------------------------------
-
-  /// Light status-bar icons only while the dark hero is under them.
   bool _heroVisible = true;
   double _heroLimit = 200;
 
@@ -107,7 +98,6 @@ class _HomePageState extends State<HomePage> {
   void _scheduleFillViewport() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _loading || !_hasMore || !_scroll.hasClients) return;
-      // Short first pages: keep loading so the viewer can always scroll.
       if (_scroll.position.maxScrollExtent < 100) _loadPage();
     });
   }
@@ -119,7 +109,6 @@ class _HomePageState extends State<HomePage> {
         : const <Video>[];
   }
 
-  /// Adds one page of results to the list (call inside setState).
   void _applyPage(List<Video> result, int requestedPage) {
     final seenIds = _videos.map((video) => video.id).toSet();
     final fresh = <Video>[];
@@ -129,8 +118,6 @@ class _HomePageState extends State<HomePage> {
     _videos.addAll(fresh);
     _recomputeDerived();
     _page = requestedPage + 1;
-    // A page of only duplicates must not end pagination by itself; only
-    // an empty source or repeated duplicates do.
     _emptyPages = fresh.isEmpty ? _emptyPages + 1 : 0;
     _hasMore = result.isNotEmpty && _emptyPages < _maxEmptyPages;
     _loading = false;
@@ -142,8 +129,6 @@ class _HomePageState extends State<HomePage> {
     final requestedPage = reset ? 0 : _page;
     final key = 'home|$_category|$requestedPage';
 
-    // Remembered for a few minutes: coming back to a category, or scrolling
-    // back up, shows it in the same frame (no skeleton, no request).
     final cached = listingCache.peek(key);
     if (cached != null) {
       setState(() {
@@ -195,8 +180,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// Pull-to-refresh: reloads the first page in the background and swaps the
-  /// list in when it arrives, so the page never jumps to a skeleton.
   Future<void> _refresh() async {
     Haptics.play(Haptic.light);
     final generation = ++_generation;
@@ -208,7 +191,7 @@ class _HomePageState extends State<HomePage> {
           pageSize: _pageSize,
           category: _category == 'All' ? null : _category,
         ),
-        force: true, // Pull-to-refresh always asks the server.
+        force: true,
       );
       if (!mounted || generation != _generation) return;
       final seen = <String>{};
@@ -235,7 +218,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// One-time tip that explains the long-press preview.
   void _maybeShowPreviewHint() {
     if (_videos.isEmpty) return;
     final shown = LocalStore.readList(_hintsKey);
@@ -247,10 +229,6 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Navigation
-  // -------------------------------------------------------------------------
-
   void _scrollToTop() {
     if (!_scroll.hasClients || _scroll.offset <= 0) return;
     _scroll.animateTo(0, duration: Motion.scroll, curve: Motion.curve);
@@ -258,7 +236,6 @@ class _HomePageState extends State<HomePage> {
 
   void _toast(String message) => showToast(context, message);
 
-  /// System back (Android): close search, then leave the tab, then exit.
   void _handleBack() {
     if (_searchOpen) {
       _closeSearch();
@@ -287,12 +264,10 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (!mounted) return;
-    setState(() {}); // Refresh progress, watched and favourite marks.
+    setState(() {});
   }
 
   void _onTabSelect(AppTab tab) {
-    // Home stays alive behind the other tabs: a card preview must not keep
-    // playing there.
     PreviewManager.instance.stopNow(fade: false);
     switch (tab) {
       case AppTab.home:
@@ -317,7 +292,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// "Continue watching": resume at the saved second.
   Future<void> _resume(Video video) async {
     final error = await launchPlayer(
       context,
@@ -325,7 +299,7 @@ class _HomePageState extends State<HomePage> {
       startAt: PlaybackProgress.instance.resumePosition(video.id),
     );
     if (!mounted) return;
-    setState(() {}); // Progress bars and the row itself.
+    setState(() {});
     if (error != null) _toast(error);
   }
 
@@ -350,10 +324,6 @@ class _HomePageState extends State<HomePage> {
     _loadPage(reset: true);
   }
 
-  // -------------------------------------------------------------------------
-  // Build
-  // -------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
@@ -368,11 +338,6 @@ class _HomePageState extends State<HomePage> {
     _heroLimit = math.min(screen.height * 0.42, 380.0) - context.safe.top - 30;
     final darkMode = AppColors.palette.brightness == Brightness.dark;
 
-    // The pages do not depend on the search or the keyboard, so they are built
-    // once here and handed to the builder below as `child`. Sections are built the first time they are opened and then kept, so
-    // switching tabs never rebuilds a whole page or loses its scroll
-    // position. A hidden section keeps its last built widget (no work) and
-    // gets a fresh one the moment it is shown again.
     final libraryActive = _section == _Section.library;
     final settingsActive = _section == _Section.settings;
     if (libraryActive) {
@@ -438,13 +403,11 @@ class _HomePageState extends State<HomePage> {
             },
             child: Scaffold(
               backgroundColor: AppColors.background,
-              // The search screen owns the keyboard; nothing resizes under it.
               resizeToAvoidBottomInset: false,
               body: Stack(
                 fit: StackFit.expand,
                 children: [
                   page!,
-                  // Search fades in and out instead of popping.
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 160),
                     child: searchOpen
@@ -458,7 +421,6 @@ class _HomePageState extends State<HomePage> {
                             key: ValueKey<String>('no-search'),
                           ),
                   ),
-                  // The tab bar never hides: it rides on top of the keyboard.
                   Positioned.fill(
                     child: Align(
                       alignment: Alignment.bottomCenter,
@@ -491,8 +453,6 @@ class _HomePageState extends State<HomePage> {
     bool firstLoad,
     Duration? resume,
   ) {
-    // A small circle drops from the top while you pull; the page itself stays
-    // put (no bouncing / stretching of the whole screen).
     return RefreshIndicator(
       onRefresh: _refresh,
       color: AppColors.accent,
@@ -500,7 +460,6 @@ class _HomePageState extends State<HomePage> {
       edgeOffset: context.safe.top + Gaps.sm,
       displacement: 44,
       child: CustomScrollView(
-      // Restores the scroll position when coming back from other tabs.
       key: const PageStorageKey<String>('home-scroll'),
       controller: _scroll,
       physics: const ClampingScrollPhysics(
@@ -626,9 +585,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// One tab's page. Hidden pages stay mounted (state and scroll position are
-/// kept) but are not painted, cannot be touched and do not run animations.
-/// A page fades in when it is shown again.
 class _SectionHost extends StatefulWidget {
   const _SectionHost({super.key, required this.active, required this.child});
 
@@ -676,8 +632,6 @@ class _SectionHostState extends State<_SectionHost>
   }
 }
 
-/// The tab bar, lifted by the keyboard height so it stays visible and glides
-/// with the keyboard. Only this tiny widget listens to the keyboard.
 class _RidingTabBar extends StatelessWidget {
   const _RidingTabBar({required this.selected, required this.onSelect});
 
@@ -688,7 +642,6 @@ class _RidingTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final restingGap = math.max(context.safe.bottom - 4, 10.0);
-    // As the keyboard rises, the home-indicator gap shrinks to a fixed 10 pt.
     final gap = math.max(10.0, restingGap - keyboard);
     return Padding(
       padding: EdgeInsets.only(bottom: keyboard),

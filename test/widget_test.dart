@@ -24,8 +24,6 @@ void main() {
         builders[TargetPlatform.iOS],
         isA<CupertinoPageTransitionsBuilder>(),
       );
-      // Keep the project's existing Android/Android TV transition builder;
-      // don't replace it with a guessed class or a hard-coded alternative.
       expect(builders[TargetPlatform.android], isNotNull);
 
       await tester.runAsync(

@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 
 import 'scraper.dart';
 
-/// User-facing description of a failure. Raw exception text never reaches the
-/// viewer; it is only printed to the debug console.
 class FriendlyError {
   const FriendlyError({
     required this.title,
@@ -20,8 +18,6 @@ class FriendlyError {
   final bool offline;
 }
 
-/// Converts any thrown object into something a viewer can act on.
-/// [subject] completes the title, e.g. "Unable to load videos".
 FriendlyError describeError(Object error, {String subject = 'videos'}) {
   debugPrint('[ERROR] $subject: ${error.runtimeType}');
 

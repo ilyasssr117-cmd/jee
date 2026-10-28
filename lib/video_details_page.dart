@@ -27,7 +27,6 @@ class VideoDetailsPage extends StatefulWidget {
 
   final Video video;
 
-  /// The list this video was opened from; Autoplay Next continues through it.
   final List<Video>? queue;
 
   @override
@@ -39,7 +38,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   late Future<List<ModelRef>> _modelsFuture;
   final ScrollController _scroll = ScrollController();
 
-  /// Status-bar icons are light while the dark header is under them.
   final ValueNotifier<bool> _overHeader = ValueNotifier<bool>(true);
   double _headerLimit = 200;
   bool _preparing = false;
@@ -68,7 +66,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         () => videoRepository.getRelated(widget.video),
       );
 
-  /// The models / channel that published this video (from its page).
   Future<List<ModelRef>> _loadModels() => modelsCache.fetch(
         widget.video.id,
         () => videoRepository.getVideoModels(widget.video),
@@ -108,9 +105,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     });
   }
 
-  /// Replaces this page instead of stacking another one on top, so browsing
-  /// related videos can't build an unbounded route stack and BACK returns to
-  /// where the viewer came from.
   void _openRelated(Video video, List<Video> related) {
     Navigator.of(context).pushReplacement<void, void>(
       MaterialPageRoute<void>(
@@ -173,9 +167,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       fallbackToCategory: false,
     );
 
-    // At least the usual height, but it grows when the text and buttons need
-    // more room (small screens, long titles) instead of running under the
-    // back button.
     return ConstrainedBox(
       constraints: BoxConstraints(minHeight: _headerHeight(size)),
       child: ClipRRect(
@@ -297,7 +288,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  /// Star toggle. Active (gold, filled star) when the video is a favourite.
   Widget _buildFavoriteButton() {
     return ListenableBuilder(
       listenable: FavoritesStore.instance,
@@ -318,7 +308,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  /// Download / pause / resume / saved buttons (plain MP4 links only).
   Widget _buildDownloadButton() {
     return ListenableBuilder(
       listenable: DownloadStore.instance,
@@ -361,7 +350,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   if (ok) await store.remove(id);
                 },
               ),
-              // Straight into the Photos app.
               AppButton(
                 label: 'Save to Photos',
                 icon: Icons.photo_library_outlined,
@@ -373,7 +361,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           );
         }
 
-        // Saving / waiting / paused / failed: live percentage.
         return ValueListenableBuilder<int>(
           valueListenable: item.bytes,
           builder: (context, _, __) {
@@ -415,8 +402,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   double _headerHeight(Size size) => math.min(size.height * 0.5, 460.0);
 
-  /// "Models:" under the video: who published it. Tap one to see all of that
-  /// model's videos. Hidden while loading, on failure and when there is none.
   Widget _buildModels(double margin) {
     return FutureBuilder<List<ModelRef>>(
       future: _modelsFuture,
@@ -460,7 +445,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       future: _relatedFuture,
       builder: (context, snapshot) {
         final waiting = snapshot.connectionState != ConnectionState.done;
-        // Nothing to recommend: hide the title with the section.
         if (!waiting && !snapshot.hasError && (snapshot.data ?? const []).isEmpty) {
           return const SizedBox.shrink();
         }
@@ -472,7 +456,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  /// Related videos as a grid (2 per row) under the title, not one long strip.
   Widget _buildRelated(double margin) {
     final padding = EdgeInsets.symmetric(horizontal: margin);
     return FutureBuilder<List<Video>>(
@@ -526,7 +509,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 }
 
-/// Pill with the model's name; opens that model's page.
 class _ModelChip extends StatelessWidget {
   const _ModelChip({required this.name, required this.onPressed});
 

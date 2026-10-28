@@ -17,21 +17,16 @@ class Video {
   final String id;
   final String title;
   final String streamUrl;
-  /// Optional page URL for catalogues that resolve the playable stream on demand.
   final String? pageUrl;
   final String description;
   final String? thumbnailUrl;
 
-  /// Short muted preview clip exposed on the list card (`data-preview`).
-  /// Empty when the source doesn't provide one. Not persisted (it can expire).
   final String previewUrl;
   final String duration;
   final String views;
 
-  /// Like ratio as shown by the source, e.g. `99%` (empty when unknown).
   final String likes;
 
-  /// Upload date / age as shown by the source, e.g. `2 months ago`.
   final String date;
   final String category;
 
@@ -66,16 +61,13 @@ class Video {
   }
 }
 
-/// A model / channel that published a video (the "Models:" row of its page).
 class ModelRef {
   const ModelRef({required this.name, required this.url, this.imageUrl});
 
   final String name;
 
-  /// Model page, always ending with a slash: `https://site/models/slug/`.
   final String url;
 
-  /// Photo of the model when it is known (some models have none).
   final String? imageUrl;
 
   ModelRef withImage(String? image) =>
@@ -88,7 +80,6 @@ class ModelRef {
   int get hashCode => url.hashCode;
 }
 
-/// Name and photo of a model. The photo is missing for some models.
 class ModelProfile {
   const ModelProfile({required this.name, this.imageUrl});
 
@@ -96,7 +87,6 @@ class ModelProfile {
   final String? imageUrl;
 }
 
-/// One page of a model's videos. [profile] is only read from the first page.
 class ModelPageResult {
   const ModelPageResult({required this.videos, this.profile});
 
@@ -104,7 +94,6 @@ class ModelPageResult {
   final ModelProfile? profile;
 }
 
-/// A photo album of a model (`/albums/<id>/<slug>/`).
 class AlbumRef {
   const AlbumRef({
     required this.id,
@@ -118,10 +107,8 @@ class AlbumRef {
   final String title;
   final String url;
 
-  /// The model the album belongs to, when it is known.
   final String? modelName;
 
-  /// The album's preview picture (portrait), when the card has one.
   final String? thumbnailUrl;
 
   @override
@@ -131,8 +118,6 @@ class AlbumRef {
   int get hashCode => id.hashCode;
 }
 
-/// One picture of an album: a small thumbnail for the grid and the address of
-/// the full-size picture for the viewer.
 class AlbumPhoto {
   const AlbumPhoto({
     required this.id,
@@ -145,7 +130,6 @@ class AlbumPhoto {
   final String fullUrl;
 }
 
-/// Result of the "Models & Albums" search.
 class PeopleSearchResult {
   const PeopleSearchResult({required this.models, required this.albums});
 

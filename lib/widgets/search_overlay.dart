@@ -15,10 +15,8 @@ import 'model_row.dart';
 import 'state_views.dart';
 import 'video_grid.dart';
 
-/// What the search looks for.
 enum SearchScope { videos, people }
 
-/// Order of the video results (the site's `?by=` filter).
 enum SearchSort {
   relevant(null, 'Relevant'),
   newest('post_date', 'Newest'),
@@ -26,17 +24,10 @@ enum SearchSort {
 
   const SearchSort(this.param, this.label);
 
-  /// Value of `?by=` on the site; null = the site's default order.
   final String? param;
   final String label;
 }
 
-/// Full-screen search that lives *on top of* the home page (no route).
-///
-/// * Live search: results follow the text after a short typing pause.
-/// * Recent searches: shown while the field is empty. Plain history only.
-/// * Closing is the owner's job ([onClose]); the page underneath is never
-///   rebuilt or scrolled by this widget.
 class SearchOverlay extends StatefulWidget {
   const SearchOverlay({
     super.key,
@@ -45,12 +36,10 @@ class SearchOverlay extends StatefulWidget {
     this.bottomInset = 0,
   });
 
-  /// Space kept free at the bottom (the floating bar).
   final double bottomInset;
 
   final VoidCallback onClose;
 
-  /// Opens [video]; [queue] is the current result list (Autoplay Next).
   final void Function(Video video, List<Video> queue) onOpen;
 
   @override
@@ -58,11 +47,9 @@ class SearchOverlay extends StatefulWidget {
 }
 
 class SearchOverlayState extends State<SearchOverlay> {
-  /// Wait for a typing pause before hitting the network.
   static const Duration _debounce = Duration(milliseconds: 450);
   static const int _pageSize = 12;
 
-  /// No request is sent for a single letter.
   static const int _minLength = 2;
   static const int _maxEmptyPages = 3;
 
@@ -74,7 +61,7 @@ class SearchOverlayState extends State<SearchOverlay> {
   final List<Video> _videos = <Video>[];
   String _query = '';
   bool _hasText = false;
-  bool _awaiting = false; // Text typed, request not started yet.
+  bool _awaiting = false;
   int _page = 0;
   int _generation = 0;
   int _emptyPages = 0;
@@ -82,11 +69,9 @@ class SearchOverlayState extends State<SearchOverlay> {
   bool _hasMore = false;
   FriendlyError? _error;
 
-  // Filters.
   SearchScope _scope = SearchScope.videos;
   SearchSort _sort = SearchSort.relevant;
 
-  // "Models & Albums" results.
   PeopleSearchResult? _people;
   bool _peopleLoading = false;
   FriendlyError? _peopleError;
@@ -95,7 +80,6 @@ class SearchOverlayState extends State<SearchOverlay> {
   void initState() {
     super.initState();
     _scroll.addListener(_maybeLoadMore);
-    // Show the search first, then bring the keyboard up.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future<void>.delayed(const Duration(milliseconds: 220), () {
         if (mounted) _fieldNode.requestFocus();
@@ -106,7 +90,7 @@ class SearchOverlayState extends State<SearchOverlay> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
-    _generation++; // Ignore any response that is still in flight.
+    _generation++;
     _scroll
       ..removeListener(_maybeLoadMore)
       ..dispose();
@@ -114,10 +98,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     _fieldNode.dispose();
     super.dispose();
   }
-
-  // -------------------------------------------------------------------------
-  // Typing → debounced search
-  // -------------------------------------------------------------------------
 
   void _onChanged(String raw) {
     final value = SearchHistory.normalize(raw);
@@ -129,7 +109,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     }
     if (value == _query && !_awaiting) return;
     if (value.length < _minLength) {
-      // Too short to search: wait for more letters, show matching recents.
       _generation++;
       setState(() {
         _hasText = true;
@@ -151,7 +130,6 @@ class SearchOverlayState extends State<SearchOverlay> {
         _awaiting = true;
       });
     }
-    // Only the last keystroke of a burst (c → ca → cat) reaches the network.
     _debounceTimer = Timer(_debounce, () => _runSearch(value));
   }
 
@@ -173,7 +151,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     });
   }
 
-  /// The × inside the field.
   void _clearField() {
     _text.clear();
     _debounceTimer?.cancel();
@@ -204,7 +181,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     _searchAgain();
   }
 
-  /// A filter changed: repeat the current search with it.
   void _searchAgain() {
     final value = SearchHistory.normalize(_text.text);
     if (value.length >= _minLength) {
@@ -244,7 +220,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     }
   }
 
-  /// The keyboard's Search key: search right now, remember it, hide keyboard.
   void _submit() {
     _debounceTimer?.cancel();
     final value = SearchHistory.normalize(_text.text);
@@ -262,15 +237,11 @@ class SearchOverlayState extends State<SearchOverlay> {
       text: term,
       selection: TextSelection.collapsed(offset: term.length),
     );
-    SearchHistory.instance.add(term); // Becomes the newest entry.
+    SearchHistory.instance.add(term);
     _fieldNode.unfocus();
     setState(() => _hasText = true);
     _runSearch(term);
   }
-
-  // -------------------------------------------------------------------------
-  // Loading
-  // -------------------------------------------------------------------------
 
   void _maybeLoadMore() {
     if (!_scroll.hasClients || _loading || !_hasMore) return;
@@ -295,8 +266,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     });
 
     try {
-      // The same search (and its next pages) is answered from memory for a
-      // few minutes, and two identical requests never run together.
       final searchText = _query;
       final pageIndex = _page;
       final result = await listingCache.fetch(
@@ -341,20 +310,14 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 
   void _openVideo(Video video) {
-    // Opening a result is a clear sign this search was useful: remember it.
     SearchHistory.instance.add(_query);
     _fieldNode.unfocus();
     widget.onOpen(video, List<Video>.of(_videos));
   }
 
-  // -------------------------------------------------------------------------
-  // Build
-  // -------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
-    // Solid page: nothing from the home screen shows through.
     return ColoredBox(
       color: AppColors.background,
       child: Column(
@@ -411,9 +374,6 @@ class SearchOverlayState extends State<SearchOverlay> {
                       child: TextField(
                         controller: _text,
                         focusNode: _fieldNode,
-                        // No autofocus: the keyboard is requested after the
-                        // screen is on display (see initState), so the first
-                        // keyboard start-up never delays opening the search.
                         autofocus: false,
                         maxLines: 1,
                         textAlignVertical: TextAlignVertical.center,
@@ -440,7 +400,6 @@ class SearchOverlayState extends State<SearchOverlay> {
                         ),
                       ),
                     ),
-                    // The × only exists while there is something to clear.
                     ListenableBuilder(
                       listenable: _text,
                       builder: (context, _) => AnimatedSwitcher(
@@ -492,7 +451,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     );
   }
 
-  /// Scope (Videos / Models & Albums) and, for videos, the order.
   Widget _buildFilters(double margin) {
     return SizedBox(
       height: 44,
@@ -533,7 +491,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     );
   }
 
-  /// Results of the "Models & Albums" search: models as rows, albums as cards.
   Widget _buildPeopleBody(double margin) {
     final typed = SearchHistory.normalize(_text.text);
     if (_awaiting || typed.length < _minLength) {
@@ -671,7 +628,6 @@ class SearchOverlayState extends State<SearchOverlay> {
 
     final List<Widget> slivers;
     if (waiting && _videos.isEmpty && (suggestions.isNotEmpty || typed.length < _minLength)) {
-      // Typing: matching recent searches (or a hint) instead of a skeleton.
       slivers = [
         SliverList(
           delegate: SliverChildListDelegate([
@@ -765,7 +721,6 @@ class SearchOverlayState extends State<SearchOverlay> {
 
     return CustomScrollView(
       controller: _scroll,
-      // Swiping the results down hides the keyboard.
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       scrollCacheExtent: ScrollCacheExtent.pixels(
         MediaQuery.sizeOf(context).height,
@@ -774,7 +729,6 @@ class SearchOverlayState extends State<SearchOverlay> {
     );
   }
 
-  /// Empty field: recent searches as a simple list (or a quiet hint).
   Widget _buildRecents(double margin) {
     return ListenableBuilder(
       listenable: SearchHistory.instance,
@@ -842,7 +796,6 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 }
 
-/// One recent search: tap the row to search again, × removes only this one.
 class _RecentRow extends StatelessWidget {
   const _RecentRow({
     super.key,

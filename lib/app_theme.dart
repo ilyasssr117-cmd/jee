@@ -1,12 +1,6 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
-// ---------------------------------------------------------------------------
-// Colours
-// ---------------------------------------------------------------------------
-
-/// Fixed dark colours: used on top of artwork and video (hero, player), where
-/// the background is dark in both light and dark mode.
 abstract final class OnDark {
   static const Color background = Color(0xFF0B0D12);
   static const Color surface = Color(0xFF151923);
@@ -19,7 +13,6 @@ abstract final class OnDark {
   static const Color error = Color(0xFFFF8A80);
 }
 
-/// The colours that change between dark and light mode.
 class Palette {
   const Palette({
     required this.brightness,
@@ -72,8 +65,6 @@ class Palette {
   );
 }
 
-/// Colour tokens. The ones that depend on the mode are getters: they read the
-/// active [palette], which `FlowApp` switches (and then rebuilds the tree).
 abstract final class AppColors {
   static Palette palette = Palette.dark;
 
@@ -87,22 +78,14 @@ abstract final class AppColors {
   static Color get blueSoft => palette.blueSoft;
   static Color get error => palette.error;
 
-  /// Brand accent (same in both modes).
   static const Color accent = Color(0xFF8B7CFF);
 
-  /// Darker accent used for filled buttons so white labels stay legible.
   static const Color accentStrong = Color(0xFF6C5CE7);
 
-  /// Active tab / search cursor.
   static const Color blue = Color(0xFF4C93FF);
 
-  /// Active favourite star.
   static const Color star = Color(0xFFFFC857);
 }
-
-// ---------------------------------------------------------------------------
-// Spacing, radii, motion (real phone points)
-// ---------------------------------------------------------------------------
 
 abstract final class Gaps {
   static const double xs = 4;
@@ -128,35 +111,21 @@ abstract final class Motion {
   static const Curve curve = Curves.easeOutCubic;
 }
 
-// ---------------------------------------------------------------------------
-// Responsive helpers
-// ---------------------------------------------------------------------------
-
 extension UiScale on BuildContext {
-  /// iPhone / Android phone (short side under 600 logical px).
   bool get isPhone => MediaQuery.sizeOf(this).shortestSide < 600;
 
-  /// ~1.0 on an iPhone; slightly larger on tablets.
   double get uiScale =>
       (MediaQuery.sizeOf(this).shortestSide / 390).clamp(0.9, 1.25).toDouble();
 
   double s(double value) => value * uiScale;
 
-  /// Horizontal page margin.
   double get hMargin => isPhone ? 16 : 24;
 
-  /// Notch / home-indicator insets.
   EdgeInsets get safe => MediaQuery.viewPaddingOf(this);
 }
 
-/// Columns of every video grid.
 int videoGridColumns(BuildContext context) => context.isPhone ? 2 : 3;
 
-// ---------------------------------------------------------------------------
-// Typography
-// ---------------------------------------------------------------------------
-
-/// The text styles, coloured for one [Palette].
 class TextSet {
   const TextSet(this.palette);
 
@@ -222,7 +191,6 @@ class TextSet {
       );
 }
 
-/// Text styles for the current mode (page backgrounds).
 abstract final class AppText {
   static TextSet get _set => TextSet(AppColors.palette);
 
@@ -236,12 +204,7 @@ abstract final class AppText {
   static TextStyle get overline => _set.overline;
 }
 
-/// Text styles for content on top of artwork / video (always light on dark).
 const TextSet darkText = TextSet(Palette.dark);
-
-// ---------------------------------------------------------------------------
-// Theme
-// ---------------------------------------------------------------------------
 
 ThemeData buildAppTheme(Brightness brightness) {
   final p = brightness == Brightness.dark ? Palette.dark : Palette.light;
@@ -279,7 +242,6 @@ ThemeData buildAppTheme(Brightness brightness) {
         borderRadius: BorderRadius.circular(Radii.button),
       ),
     ),
-    // Native iOS push + edge-swipe back gesture on every platform.
     pageTransitionsTheme: PageTransitionsTheme(
       builders: <TargetPlatform, PageTransitionsBuilder>{
         for (final platform in TargetPlatform.values)
@@ -289,7 +251,6 @@ ThemeData buildAppTheme(Brightness brightness) {
   );
 }
 
-/// Plain cross-fade route (used for the player: black fades into video).
 class FadePageRoute<T> extends PageRouteBuilder<T> {
   FadePageRoute({required WidgetBuilder builder})
       : super(
@@ -307,7 +268,6 @@ class FadePageRoute<T> extends PageRouteBuilder<T> {
         );
 }
 
-/// iOS-style bouncing scroll, no glow.
 class AppScrollBehavior extends MaterialScrollBehavior {
   const AppScrollBehavior();
 

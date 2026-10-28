@@ -1,3 +1,10 @@
+class StreamQuality {
+  const StreamQuality({required this.height, required this.url});
+
+  final int height;
+  final String url;
+}
+
 class Video {
   const Video({
     required this.id,
@@ -12,6 +19,7 @@ class Video {
     this.category = 'Featured',
     this.pageUrl,
     this.previewUrl = '',
+    this.qualities = const <StreamQuality>[],
   });
 
   final String id;
@@ -22,6 +30,8 @@ class Video {
   final String? thumbnailUrl;
 
   final String previewUrl;
+
+  final List<StreamQuality> qualities;
   final String duration;
   final String views;
 
@@ -43,6 +53,7 @@ class Video {
     String? category,
     String? pageUrl,
     String? previewUrl,
+    List<StreamQuality>? qualities,
   }) {
     return Video(
       id: id ?? this.id,
@@ -57,7 +68,16 @@ class Video {
       category: category ?? this.category,
       pageUrl: pageUrl ?? this.pageUrl,
       previewUrl: previewUrl ?? this.previewUrl,
+      qualities: qualities ?? this.qualities,
     );
+  }
+
+  String streamForQuality(int preferred) {
+    if (preferred <= 0 || qualities.length < 2) return streamUrl;
+    for (final option in qualities) {
+      if (option.height <= preferred) return option.url;
+    }
+    return qualities.last.url;
   }
 }
 

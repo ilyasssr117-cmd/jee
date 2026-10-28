@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
+import 'download_store.dart';
 import 'error_text.dart';
 import 'local_store.dart';
 import 'models.dart';
@@ -36,7 +38,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const int _pageSize = 12;
 
   static const int _maxEmptyPages = 3;
@@ -68,12 +70,57 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
     _loadPage(reset: true);
   }
 
+  Timer? _offlineTimer;
+  ({LibrarySegment segment, int token})? _libraryRequest;
+  int _requestToken = 0;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_probeConnection());
+  }
+
+  void _watchConnection() {
+    _offlineTimer?.cancel();
+    _offlineTimer = Timer(const Duration(seconds: 15), _probeConnection);
+  }
+
+  Future<void> _probeConnection() async {
+    if (!mounted || _loading || _videos.isNotEmpty) return;
+    if (_error?.offline != true) return;
+    final category = _category;
+    try {
+      await listingCache.fetch(
+        'home|$category|0',
+        () => videoRepository.getVideos(
+          page: 0,
+          pageSize: _pageSize,
+          category: category == 'All' ? null : category,
+        ),
+      );
+      if (!mounted || category != _category || _videos.isNotEmpty) return;
+      unawaited(_loadPage(reset: true));
+    } catch (_) {
+      if (mounted) _watchConnection();
+    }
+  }
+
+  void _showDownloads() {
+    _libraryRequest = (
+      segment: LibrarySegment.downloads,
+      token: ++_requestToken,
+    );
+    setState(() => _section = _Section.library);
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _offlineTimer?.cancel();
     _search.dispose();
     _scroll
       ..removeListener(_onScroll)
@@ -178,6 +225,7 @@ class _HomePageState extends State<HomePage> {
         _hasMore = false;
         _error = describeError(error);
       });
+      if (_error?.offline == true && _videos.isEmpty) _watchConnection();
     }
   }
 
@@ -347,6 +395,7 @@ class _HomePageState extends State<HomePage> {
         bottomInset: bottomInset,
         onOpen: _openDetails,
         onBrowse: () => setState(() => _section = _Section.home),
+        segmentRequest: _libraryRequest,
       );
     }
     if (settingsActive) {
@@ -532,6 +581,13 @@ class _HomePageState extends State<HomePage> {
             message: error.message,
             actionLabel: 'Retry',
             onAction: () => _loadPage(reset: true),
+            secondaryLabel: error.offline &&
+                    DownloadStore.instance.items.any(
+                      (item) => item.status == DownloadStatus.done,
+                    )
+                ? 'Open downloads'
+                : null,
+            onSecondary: _showDownloads,
           ),
         ),
       ];

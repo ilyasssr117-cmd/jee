@@ -28,7 +28,10 @@ class LibraryView extends StatefulWidget {
     required this.onOpen,
     required this.onBrowse,
     required this.bottomInset,
+    this.segmentRequest,
   });
+
+  final ({LibrarySegment segment, int token})? segmentRequest;
 
   final void Function(Video video, List<Video> queue) onOpen;
   final VoidCallback onBrowse;
@@ -40,7 +43,17 @@ class LibraryView extends StatefulWidget {
 }
 
 class _LibraryViewState extends State<LibraryView> {
-  LibrarySegment _segment = LibrarySegment.favorites;
+  late LibrarySegment _segment =
+      widget.segmentRequest?.segment ?? LibrarySegment.favorites;
+
+  @override
+  void didUpdateWidget(LibraryView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final request = widget.segmentRequest;
+    if (request != null && request.token != oldWidget.segmentRequest?.token) {
+      _segment = request.segment;
+    }
+  }
 
   static const Map<LibrarySegment, String> _labels = <LibrarySegment, String>{
     LibrarySegment.favorites: 'Favorites',

@@ -118,6 +118,32 @@ class _SettingsViewState extends State<SettingsView> {
                   ),
                 ),
                 _Row(
+                  icon: Icons.high_quality_rounded,
+                  color: const Color(0xFF1A73E8),
+                  title: 'Video quality',
+                  subtitle: 'Used when a video offers several qualities',
+                  trailing: SizedBox.shrink(),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    Gaps.md,
+                    0,
+                    Gaps.md,
+                    Gaps.md,
+                  ),
+                  child: _Segmented<int>(
+                    value: _qualityChoice(settings.preferredQuality),
+                    onChanged: settings.setPreferredQuality,
+                    options: const <(int, String)>[
+                      (0, 'Auto'),
+                      (1080, '1080p'),
+                      (720, '720p'),
+                      (480, '480p'),
+                      (360, '360p'),
+                    ],
+                  ),
+                ),
+                _Row(
                   icon: Icons.volume_up_rounded,
                   color: const Color(0xFFE8710A),
                   title: 'Preview sound',
@@ -239,6 +265,15 @@ class _Group extends StatelessWidget {
       ),
     );
   }
+}
+
+int _qualityChoice(int preferred) {
+  const choices = <int>[1080, 720, 480, 360];
+  if (preferred <= 0) return 0;
+  for (final choice in choices) {
+    if (preferred >= choice) return choice;
+  }
+  return 360;
 }
 
 class _Row extends StatelessWidget {

@@ -947,7 +947,8 @@ class Scraper {
     }
   }
 
-  ({String? best, bool needsDecoding}) _extractStreams(
+  ({String? best, List<StreamQuality> options, bool needsDecoding})
+      _extractStreams(
     String body,
     dom.Document document,
     Uri base,
@@ -1039,8 +1040,16 @@ class Scraper {
         return byRank != 0 ? byRank : x.order.compareTo(y.order);
       });
 
+    final heights = <int>{};
+    final options = <StreamQuality>[
+      for (final c in unique)
+        if (!c.preview && c.quality > 0 && heights.add(c.quality))
+          StreamQuality(height: c.quality, url: c.url),
+    ]..sort((x, y) => y.height.compareTo(x.height));
+
     return (
       best: unique.isEmpty ? null : unique.first.url,
+      options: options.length < 2 ? const <StreamQuality>[] : options,
       needsDecoding: needsDecoding,
     );
   }
@@ -1099,6 +1108,7 @@ class Scraper {
       description: description,
       thumbnailUrl: thumbnail,
       pageUrl: uri.toString(),
+      qualities: picked.options,
     );
   }
 

@@ -289,6 +289,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       description: resolved.description,
       thumbnailUrl: resolved.thumbnailUrl,
       pageUrl: resolved.pageUrl,
+      qualities: resolved.qualities,
     );
   }
 

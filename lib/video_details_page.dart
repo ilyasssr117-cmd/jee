@@ -254,6 +254,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       ),
                     _buildFavoriteButton(),
                     _buildDownloadButton(),
+                    if (_shareLink != null)
+                      AppButton(
+                        label: 'Copy link',
+                        icon: Icons.link_rounded,
+                        style: AppButtonStyle.secondary,
+                        onDark: true,
+                        onPressed: _copyLink,
+                      ),
                   ],
                 ),
                 if (_playError != null) ...[
@@ -287,6 +295,23 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       ),
       ),
     );
+  }
+
+  String? get _shareLink {
+    final uri = Uri.tryParse(widget.video.pageUrl?.trim() ?? '');
+    final valid = uri != null &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty;
+    return valid ? uri.toString() : null;
+  }
+
+  Future<void> _copyLink() async {
+    final link = _shareLink;
+    if (link == null) return;
+    await Clipboard.setData(ClipboardData(text: link));
+    if (!mounted) return;
+    Haptics.play(Haptic.light);
+    showToast(context, 'Link copied', aboveBar: false);
   }
 
   Widget _buildFavoriteButton() {

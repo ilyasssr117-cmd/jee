@@ -105,7 +105,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static const int _maxAutoRetries = 3;
   static const Duration _stallAfter = Duration(seconds: 8);
   final ValueNotifier<bool> _stalled = ValueNotifier<bool>(false);
-  late Video _video = widget.video;
+  late Video _video = _preferred(widget.video);
   late String? _localPath = widget.localPath;
   PlaybackSource? _initialSource;
   bool _usedKnownSource = false;
@@ -176,7 +176,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           _video.copyWith(streamUrl: ''),
           refresh: true,
         );
-        if (fresh.streamUrl.trim().isNotEmpty) _video = fresh;
+        if (fresh.streamUrl.trim().isNotEmpty) _video = _preferred(fresh);
       } catch (error) {
         debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
       }
@@ -338,7 +338,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _reloadInPlace({bool auto = false}) async {
+  Video _preferred(Video video) {
+    final url = video.streamForQuality(AppSettings.instance.preferredQuality);
+    return url == video.streamUrl ? video : video.copyWith(streamUrl: url);
+  }
+
+  void _setQuality(int height) {
+    AppSettings.instance.setPreferredQuality(height);
+    final next = _preferred(_video);
+    if (next.streamUrl == _video.streamUrl) return;
+    _video = next;
+    if (_localPath != null || _isLeaving) return;
+    unawaited(_reloadInPlace(keepSource: true));
+  }
+
+  Future<void> _reloadInPlace({bool auto = false, bool keepSource = false}) async {
     final old = _controller;
     if (old == null || !old.value.isInitialized || _isLeaving) return;
     if (_reloading.value) return;
@@ -357,7 +371,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _isLeaving ||
         generation != _initializationGeneration;
 
-    final lookAgain = !auto || _autoRetries >= 2;
+    final lookAgain = !keepSource && (!auto || _autoRetries >= 2);
     VideoPlayerController? fresh;
     try {
       if (lookAgain && _localPath == null) {
@@ -366,7 +380,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             _video.copyWith(streamUrl: ''),
             refresh: true,
           );
-          if (next.streamUrl.trim().isNotEmpty) _video = next;
+          if (next.streamUrl.trim().isNotEmpty) _video = _preferred(next);
         } catch (error) {
           debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
         }
@@ -1053,6 +1067,38 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (_video.qualities.length >= 2 && _localPath == null) ...[
+                Text('Quality', style: darkText.title),
+                const SizedBox(height: Gaps.md),
+                Wrap(
+                  spacing: Gaps.sm,
+                  runSpacing: Gaps.sm,
+                  children: [
+                    AppChip(
+                      label: 'Auto',
+                      selected: AppSettings.instance.preferredQuality == 0,
+                      onDark: true,
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _setQuality(0);
+                      },
+                    ),
+                    for (final option in _video.qualities)
+                      AppChip(
+                        label: '${option.height}p',
+                        selected:
+                            AppSettings.instance.preferredQuality != 0 &&
+                                option.url == _video.streamUrl,
+                        onDark: true,
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                          _setQuality(option.height);
+                        },
+                      ),
+                  ],
+                ),
+                const SizedBox(height: Gaps.lg),
+              ],
               Text('Playback speed', style: darkText.title),
               const SizedBox(height: Gaps.md),
               Wrap(

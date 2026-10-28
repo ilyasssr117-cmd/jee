@@ -37,7 +37,6 @@ jobs:
           import re
           import sys
 
-          # Enable Dart 3.12 language features used by inferred constructors.
           pubspec = Path("pubspec.yaml")
 
           if not pubspec.exists():
@@ -65,7 +64,6 @@ jobs:
           else:
               pubspec.write_text(updated, encoding="utf-8")
 
-          # Use inferred constructors instead of the unavailable public name.
           for path in Path("lib").rglob("*.dart"):
               original = path.read_text(encoding="utf-8")
               fixed = re.sub(
@@ -74,7 +72,6 @@ jobs:
                   original,
               )
 
-              # Migrate numeric cacheExtent in favorites_view.dart.
               if path.as_posix() == "lib/widgets/favorites_view.dart":
                   fixed = re.sub(
                       r'\bcacheExtent\s*:\s*([0-9]+(?:\.[0-9]+)?)',
@@ -90,6 +87,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Generate VXTUBE app icons
+        run: dart run flutter_launcher_icons
 
       - name: Install CocoaPods
         working-directory: ios
@@ -119,8 +119,6 @@ jobs:
                   r'\bscrollCacheExtent\s*:\s*\.\s*(pixels|viewport)\s*\(',
                   text,
               ):
-                  # The short constructor form is intentional. The SDK
-                  # constraint above enables Dart's dot-shorthand syntax.
                   pass
 
           if problems:

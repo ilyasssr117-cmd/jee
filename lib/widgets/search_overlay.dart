@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
-import '../album_page.dart';
 import '../app_theme.dart';
 import '../error_text.dart';
 import '../models.dart';
@@ -11,12 +10,13 @@ import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
 import '../video_repository.dart';
+import 'all_albums_view.dart';
 import 'app_button.dart';
 import 'model_row.dart';
 import 'state_views.dart';
 import 'video_grid.dart';
 
-enum SearchScope { videos, people }
+enum SearchScope { videos, people, albums }
 
 enum SearchSort {
   relevant(null, 'Relevant'),
@@ -101,6 +101,7 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 
   void _onChanged(String raw) {
+    if (_scope == SearchScope.albums) return;
     final value = SearchHistory.normalize(raw);
     _debounceTimer?.cancel();
 
@@ -160,7 +161,7 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 
   void _runSearch(String value) {
-    if (!mounted) return;
+    if (!mounted || _scope == SearchScope.albums) return;
     _query = value;
     _awaiting = false;
     if (_scope == SearchScope.people) {
@@ -172,6 +173,11 @@ class SearchOverlayState extends State<SearchOverlay> {
 
   void _setScope(SearchScope scope) {
     if (scope == _scope) return;
+    _debounceTimer?.cancel();
+    if (scope == SearchScope.albums) {
+      _generation++;
+      _fieldNode.unfocus();
+    }
     setState(() => _scope = scope);
     _searchAgain();
   }
@@ -183,6 +189,7 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 
   void _searchAgain() {
+    if (_scope == SearchScope.albums) return;
     final value = SearchHistory.normalize(_text.text);
     if (value.length >= _minLength) {
       _debounceTimer?.cancel();
@@ -376,6 +383,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                         controller: _text,
                         focusNode: _fieldNode,
                         autofocus: false,
+                        enabled: _scope != SearchScope.albums,
                         maxLines: 1,
                         textAlignVertical: TextAlignVertical.center,
                         textInputAction: TextInputAction.search,
@@ -389,9 +397,11 @@ class SearchOverlayState extends State<SearchOverlay> {
                         decoration: InputDecoration(
                           isDense: true,
                           border: InputBorder.none,
-                          hintText: _scope == SearchScope.people
-                              ? 'Search models & albums'
-                              : 'Search videos',
+                          hintText: switch (_scope) {
+                            SearchScope.people => 'Search models',
+                            SearchScope.albums => 'All albums',
+                            SearchScope.videos => 'Search videos',
+                          },
                           hintStyle: AppText.title.copyWith(
                             fontWeight: FontWeight.w400,
                             color: AppColors.textTertiary,
@@ -466,9 +476,15 @@ class SearchOverlayState extends State<SearchOverlay> {
           ),
           const SizedBox(width: Gaps.sm),
           AppChip(
-            label: 'Models & Albums',
+            label: 'Models',
             selected: _scope == SearchScope.people,
             onPressed: () => _setScope(SearchScope.people),
+          ),
+          const SizedBox(width: Gaps.sm),
+          AppChip(
+            label: 'Albums',
+            selected: _scope == SearchScope.albums,
+            onPressed: () => _setScope(SearchScope.albums),
           ),
           if (_scope == SearchScope.videos) ...[
             const SizedBox(width: Gaps.md),
@@ -522,7 +538,7 @@ class SearchOverlayState extends State<SearchOverlay> {
     if (people.isEmpty) {
       return const StatusView(
         icon: Icons.search_off_rounded,
-        title: 'No models or albums found',
+        title: 'No models found',
         message: 'Try the exact model name, for example \u201cPlaywithanny\u201d.',
       );
     }
@@ -553,51 +569,6 @@ class SearchOverlayState extends State<SearchOverlay> {
             ),
           ),
         ],
-        if (people.albums.isNotEmpty) ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(margin, Gaps.lg, margin, Gaps.sm),
-              child: Text(
-                'Albums \u00b7 ${people.albums.length}',
-                style: AppText.label.copyWith(color: AppColors.textSecondary),
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: margin),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: Gaps.md,
-                mainAxisSpacing: Gaps.lg,
-                childAspectRatio: 0.62,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final album = people.albums[index];
-                  return AlbumCard(
-                    key: ValueKey<String>(album.id),
-                    album: album,
-                    subtitle: album.modelName,
-                    onTap: () {
-                      SearchHistory.instance.add(_query);
-                      _fieldNode.unfocus();
-                      Navigator.of(context).push<void>(
-                        MaterialPageRoute<void>(
-                          builder: (_) => AlbumPage(
-                            album: album,
-                            modelName: album.modelName,
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                },
-                childCount: people.albums.length,
-              ),
-            ),
-          ),
-        ],
         SliverToBoxAdapter(
           child: SizedBox(height: Gaps.xl + widget.bottomInset),
         ),
@@ -606,6 +577,12 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 
   Widget _buildBody(double margin) {
+    if (_scope == SearchScope.albums) {
+      return AllAlbumsView(
+        key: const ValueKey<String>('all-albums'),
+        bottomInset: widget.bottomInset,
+      );
+    }
     if (!_hasText) return _buildRecents(margin);
     if (_scope == SearchScope.people) return _buildPeopleBody(margin);
 
@@ -739,7 +716,7 @@ class SearchOverlayState extends State<SearchOverlay> {
           return StatusView(
             icon: Icons.search_rounded,
             title: _scope == SearchScope.people
-                ? 'Search for models & albums'
+                ? 'Search for models'
                 : 'Search for videos',
             message: 'Results appear as you type.',
           );

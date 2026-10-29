@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'error_text.dart';
+import 'mini_player.dart';
 import 'models.dart';
 import 'player_page.dart';
 import 'playback_source.dart';
@@ -15,11 +16,31 @@ Future<String?> launchPlayer(
   Duration? startAt,
   List<Video>? queue,
   PlaybackSource? source,
+  MiniSession? adopted,
 }) async {
   final navigator = Navigator.of(context);
   try {
     await PreviewManager.instance.stopAndWait();
-    if (!context.mounted) return null;
+    if (adopted == null) await MiniPlayer.instance.close();
+    if (!context.mounted) {
+      if (adopted != null) {
+        await MiniPlayer.instance.disposeSession(adopted);
+      }
+      return null;
+    }
+    if (adopted != null) {
+      await navigator.push<void>(
+        FadePageRoute<void>(
+          builder: (_) => PlayerPage(
+            video: adopted.video,
+            queue: queue ?? adopted.queue,
+            localPath: adopted.isFile ? adopted.url : null,
+            adopted: adopted,
+          ),
+        ),
+      );
+      return null;
+    }
     final localPath = DownloadStore.instance.localPath(video.id);
     final playable = localPath != null || source != null
         ? video
@@ -43,6 +64,9 @@ Future<String?> launchPlayer(
     );
     return null;
   } catch (error) {
+    if (adopted != null) {
+      await MiniPlayer.instance.disposeSession(adopted);
+    }
     final friendly = describeError(error, subject: 'this video');
     return friendly.offline
         ? 'No connection. Check the network and try again.'

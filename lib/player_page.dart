@@ -9,6 +9,7 @@ import 'app_settings.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'history_store.dart';
+import 'mini_player.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 import 'platform_ui.dart';
@@ -29,9 +30,13 @@ class PlayerPage extends StatefulWidget {
     this.queue,
     this.localPath,
     this.initialSource,
+    this.adopted,
   });
 
   final Video video;
+
+  /// A video that was minimized and is being expanded again.
+  final MiniSession? adopted;
 
   final PlaybackSource? initialSource;
 
@@ -73,9 +78,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int _reloadToken = 0;
   Timer? _spinnerTimer;
   Duration _lastSeen = Duration.zero;
-  Timer? _sleepTimer;
-  int? _sleepMinutes;
   bool _pipBusy = false;
+  MiniSession? _adopted;
 
   String? _activeUrl;
   Map<String, String>? _activeHeaders;
@@ -134,6 +138,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
     _initialSource = widget.initialSource;
+    _adopted = widget.adopted;
+    final adopted = _adopted;
+    if (adopted != null) _speed = adopted.speed;
     _initializePlayer();
   }
 
@@ -168,6 +175,28 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _completed = false;
       _showControls = true;
     });
+
+    final adopted = _adopted;
+    if (adopted != null) {
+      _adopted = null;
+      final live = adopted.controller;
+      _activeUrl = adopted.url;
+      _activeHeaders = adopted.headers;
+      _activeIsFile = adopted.isFile;
+      _controller = live;
+      live.addListener(_onControllerChanged);
+      _usedKnownSource = false;
+      _retryBase = live.value.position;
+      _applyVideoOrientation(live);
+      setState(() {
+        _loading = false;
+        _reconnecting = false;
+        _manualReload = false;
+      });
+      _onControllerChanged();
+      _scheduleHide();
+      return;
+    }
 
     final lookAgain = refreshSource && !(_reconnecting && _autoRetries < 2);
     if (lookAgain && _localPath == null) {
@@ -489,19 +518,48 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
   }
 
-  void _setSleepTimer(int? minutes) {
-    _sleepTimer?.cancel();
-    setState(() => _sleepMinutes = minutes);
-    if (minutes == null) return;
-    _sleepTimer = Timer(Duration(minutes: minutes), () {
-      if (!mounted || _isLeaving) return;
-      final controller = _controller;
-      if (controller != null && controller.value.isInitialized) {
-        unawaited(_safeControllerAction(controller.pause));
-      }
-      setState(() => _sleepMinutes = null);
-      showToast(context, 'Sleep timer: paused', aboveBar: false);
-    });
+  /// Closes the full-screen player but keeps the video playing in the
+  /// floating mini player so the rest of the app can be used.
+  Future<void> _minimize() async {
+    final controller = _controller;
+    final url = _activeUrl;
+    if (controller == null ||
+        url == null ||
+        !controller.value.isInitialized ||
+        _isLeaving ||
+        _popping ||
+        _loading ||
+        _problem != null ||
+        _reloading.value) {
+      return;
+    }
+    _popping = true;
+    _isLeaving = true;
+    ++_initializationGeneration;
+    ++_reloadToken;
+    _hideTimer?.cancel();
+    _scrubTimer?.cancel();
+    _stallTimer?.cancel();
+    _spinnerTimer?.cancel();
+    _autoplayTimer?.cancel();
+    _saveProgress();
+    PlaybackProgress.instance.flush();
+    controller.removeListener(_onControllerChanged);
+    _controller = null;
+    MiniPlayer.instance.adopt(
+      MiniSession(
+        video: _video,
+        controller: controller,
+        url: url,
+        headers: _activeHeaders,
+        isFile: _activeIsFile,
+        speed: _speed,
+        queue: widget.queue,
+      ),
+    );
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) navigator.pop();
   }
 
   void _reload() {
@@ -589,7 +647,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scrubTimer?.cancel();
     _stallTimer?.cancel();
     _spinnerTimer?.cancel();
-    _sleepTimer?.cancel();
     _autoplayTimer?.cancel();
     ++_reloadToken;
     _saveProgress();
@@ -1114,25 +1171,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     ),
                 ],
               ),
-              const SizedBox(height: Gaps.lg),
-              Text('Sleep timer', style: darkText.title),
-              const SizedBox(height: Gaps.md),
-              Wrap(
-                spacing: Gaps.sm,
-                runSpacing: Gaps.sm,
-                children: [
-                  for (final minutes in const <int?>[null, 15, 30, 60])
-                    AppChip(
-                      label: minutes == null ? 'Off' : '$minutes min',
-                      selected: _sleepMinutes == minutes,
-                      onDark: true,
-                      onPressed: () {
-                        _setSleepTimer(minutes);
-                        Navigator.of(sheetContext).pop();
-                      },
-                    ),
-                ],
-              ),
             ],
           ),
         ),
@@ -1156,7 +1194,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _autoplayTimer?.cancel();
     _flashTimer?.cancel();
     _spinnerTimer?.cancel();
-    _sleepTimer?.cancel();
     ++_reloadToken;
     _saveProgress();
     PlaybackProgress.instance.flush();
@@ -1220,6 +1257,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTapUp: (details) => _onScreenTap(details, width),
+                    onVerticalDragEnd: (details) {
+                      if ((details.primaryVelocity ?? 0) > 700) {
+                        unawaited(_minimize());
+                      }
+                    },
                     onLongPressStart: (_) => _startBoost(),
                     onLongPressEnd: (_) => _endBoost(),
                     onLongPressCancel: _endBoost,
@@ -1702,6 +1744,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ),
           ),
         ),
+        RoundIconButton(
+          icon: Icons.keyboard_arrow_down_rounded,
+          label: 'Minimize',
+          tapSize: kMinTapSize,
+          onTap: () => unawaited(_minimize()),
+        ),
+        const SizedBox(width: 2),
         if (NativeBridge.instance.pipSupported) ...[
           const SizedBox(width: 2),
           RoundIconButton(

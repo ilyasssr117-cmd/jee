@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -12,6 +13,7 @@ import 'models.dart';
 import 'native_bridge.dart';
 import 'photo_saver.dart';
 import 'stream_headers.dart';
+import 'stream_resolver.dart';
 import 'touch.dart';
 import 'video_json.dart';
 import 'video_repository.dart';
@@ -49,14 +51,6 @@ class DownloadItem {
   bool get hasPartial => status != DownloadStatus.done && bytes.value > 0;
 }
 
-class _Cancelled implements Exception {
-  const _Cancelled();
-}
-
-class _Paused implements Exception {
-  const _Paused();
-}
-
 class _DownloadFailure implements Exception {
   const _DownloadFailure(this.message);
 
@@ -70,15 +64,15 @@ class DownloadStore extends ChangeNotifier {
 
   static const String _key = 'downloads_v1';
 
-  static const int _maxStalledAttempts = 5;
+  static const String _subDir = 'downloads';
 
   final List<DownloadItem> _items = <DownloadItem>[];
   late final UnmodifiableListView<DownloadItem> _view =
       UnmodifiableListView<DownloadItem>(_items);
 
-  final Map<String, http.Client> _clients = <String, http.Client>{};
+  final Map<String, DownloadTask> _tasks = <String, DownloadTask>{};
   final Set<String> _cancelled = <String>{};
-  final Set<String> _paused = <String>{};
+  final Set<String> _pausing = <String>{};
   final Map<String, String> _thumbs = <String, String>{};
   Directory? _dir;
   bool _running = false;
@@ -125,10 +119,7 @@ class DownloadStore extends ChangeNotifier {
             index is int && index >= 0 && index < DownloadStatus.values.length
                 ? DownloadStatus.values[index]
                 : DownloadStatus.failed;
-        if (status == DownloadStatus.queued ||
-            status == DownloadStatus.downloading) {
-          status = DownloadStatus.paused;
-        }
+        if (status == DownloadStatus.queued) status = DownloadStatus.paused;
         final fileName =
             decoded['f'] is String ? decoded['f'] as String : null;
         final entry = DownloadItem(
@@ -163,6 +154,207 @@ class DownloadStore extends ChangeNotifier {
     }
     _items.sort((a, b) => b.addedAt.compareTo(a.addedAt));
     _cleanOrphans();
+    await _initDownloader();
+  }
+
+  /// Sets up the system downloader. It keeps running while the app is in the
+  /// background (or closed) and shows a progress notification.
+  Future<void> _initDownloader() async {
+    try {
+      final downloader = FileDownloader();
+      await downloader.configure(
+        globalConfig: <(String, dynamic)>[
+          (Config.holdingQueue, (2, null, null)),
+        ],
+        androidConfig: <(String, dynamic)>[
+          (Config.runInForeground, Config.always),
+        ],
+      );
+      downloader.configureNotificationForGroup(
+        FileDownloader.defaultGroup,
+        running: const TaskNotification('Downloading {progress}', '{displayName}'),
+        complete: const TaskNotification('Download complete', '{displayName}'),
+        error: const TaskNotification('Download failed', '{displayName}'),
+        paused: const TaskNotification('Download paused', '{displayName}'),
+        progressBar: true,
+      );
+      downloader.registerCallbacks(
+        taskStatusCallback: _onStatus,
+        taskProgressCallback: _onProgress,
+      );
+      await downloader.trackTasks();
+
+      for (final entry in List<DownloadItem>.of(_items)) {
+        if (entry.status == DownloadStatus.done) continue;
+        final record = await downloader.database.recordForId(_taskId(entry));
+        if (record == null) {
+          if (entry.status == DownloadStatus.downloading) {
+            entry.status = DownloadStatus.paused;
+          }
+          continue;
+        }
+        final task = record.task;
+        if (task is DownloadTask) _tasks[entry.video.id] = task;
+        switch (record.status) {
+          case TaskStatus.enqueued:
+          case TaskStatus.running:
+          case TaskStatus.waitingToRetry:
+            entry.status = DownloadStatus.downloading;
+          case TaskStatus.paused:
+            entry.status = DownloadStatus.paused;
+          case TaskStatus.complete:
+            _markDone(entry);
+          default:
+            if (entry.status == DownloadStatus.downloading) {
+              entry.status = DownloadStatus.paused;
+            }
+        }
+      }
+      await downloader.resumeFromBackground();
+      await downloader.rescheduleKilledTasks();
+      _persist();
+      notifyListeners();
+    } catch (error) {
+      debugPrint('[DOWNLOADS] Background downloader unavailable: $error');
+    }
+  }
+
+  String _taskId(DownloadItem entry) {
+    final safe = entry.video.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return 'dl_${safe.length > 80 ? safe.substring(0, 80) : safe}';
+  }
+
+  DownloadItem? _itemForTask(Task task) {
+    final id = task.metaData;
+    return id.isEmpty ? null : item(id);
+  }
+
+  void _markDone(DownloadItem entry) {
+    final dir = _dir;
+    final name = entry.fileName;
+    if (dir == null || name == null) return;
+    final file = File('${dir.path}/$name');
+    if (!file.existsSync()) {
+      entry
+        ..status = DownloadStatus.failed
+        ..error = 'The downloaded file is missing. Tap resume.';
+      return;
+    }
+    final size = file.lengthSync();
+    entry
+      ..status = DownloadStatus.done
+      ..bytesTotal = size
+      ..error = null;
+    entry.bytes.value = size;
+  }
+
+  void _onStatus(TaskStatusUpdate update) {
+    final entry = _itemForTask(update.task);
+    if (entry == null) return;
+    final id = entry.video.id;
+    switch (update.status) {
+      case TaskStatus.enqueued:
+      case TaskStatus.running:
+      case TaskStatus.waitingToRetry:
+        if (entry.status != DownloadStatus.paused || !_pausing.contains(id)) {
+          entry.status = DownloadStatus.downloading;
+        }
+      case TaskStatus.complete:
+        _markDone(entry);
+        if (entry.status == DownloadStatus.done) Haptics.play(Haptic.medium);
+      case TaskStatus.paused:
+        entry.status = DownloadStatus.paused;
+        _pausing.remove(id);
+      case TaskStatus.canceled:
+        if (_cancelled.remove(id)) {
+          _items.remove(entry);
+          _thumbs.remove(id);
+          _tasks.remove(id);
+          unawaited(_deleteFiles(entry));
+        } else if (_pausing.remove(id)) {
+          entry.status = DownloadStatus.paused;
+          entry.bytes.value = 0;
+        } else {
+          entry.status = DownloadStatus.paused;
+        }
+      case TaskStatus.notFound:
+        entry
+          ..status = DownloadStatus.failed
+          ..error = 'The video file wasn\u2019t found on the server.';
+      case TaskStatus.failed:
+        final text = update.exception?.description ?? '';
+        entry
+          ..status = DownloadStatus.failed
+          ..error = text.contains('Socket') || text.contains('timed out')
+              ? 'Connection problem. Tap resume.'
+              : 'Download failed. Tap resume.';
+    }
+    _persist();
+    notifyListeners();
+    _syncActivity(force: true);
+  }
+
+  DateTime _lastActivity = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _activityOn = false;
+  String _lastActiveTitle = 'Downloads';
+
+  /// Mirrors the running downloads into the iPhone Live Activity.
+  void _syncActivity({bool force = false}) {
+    final active = _items
+        .where((e) =>
+            e.status == DownloadStatus.downloading ||
+            e.status == DownloadStatus.queued)
+        .toList();
+    if (active.isEmpty) {
+      if (_activityOn) {
+        _activityOn = false;
+        final anyDone = _items.any((e) => e.status == DownloadStatus.done);
+        unawaited(NativeBridge.instance.endLiveActivity(
+          title: _lastActiveTitle,
+          finished: anyDone,
+        ));
+      }
+      return;
+    }
+    final now = DateTime.now();
+    if (!force &&
+        now.difference(_lastActivity) < const Duration(seconds: 1)) {
+      return;
+    }
+    _lastActivity = now;
+    _activityOn = true;
+    var done = 0;
+    var total = 0;
+    for (final e in active) {
+      if (e.bytesTotal > 0) {
+        done += e.bytes.value;
+        total += e.bytesTotal;
+      }
+    }
+    final current = active.firstWhere(
+      (e) => e.status == DownloadStatus.downloading,
+      orElse: () => active.first,
+    );
+    _lastActiveTitle = current.video.title;
+    unawaited(NativeBridge.instance.updateLiveActivity(
+      title: current.video.title,
+      progress: total > 0 ? (done / total).clamp(0.0, 1.0).toDouble() : -1,
+      count: active.length,
+    ));
+  }
+
+  void _onProgress(TaskProgressUpdate update) {
+    final entry = _itemForTask(update.task);
+    if (entry == null) return;
+    if (update.progress < 0) return;
+    final expected = update.expectedFileSize;
+    if (expected > 0 && entry.bytesTotal != expected) {
+      entry.bytesTotal = expected;
+      notifyListeners();
+    }
+    final total = entry.bytesTotal;
+    if (total > 0) entry.bytes.value = (update.progress * total).round();
+    _syncActivity();
   }
 
   void _cleanOrphans() {
@@ -234,7 +426,29 @@ class DownloadStore extends ChangeNotifier {
             entry.status != DownloadStatus.failed)) {
       return;
     }
-    _paused.remove(id);
+    final task = _tasks[id];
+    if (entry.status == DownloadStatus.paused && task != null) {
+      unawaited(() async {
+        var resumed = false;
+        try {
+          resumed = await FileDownloader().resume(task);
+        } catch (_) {}
+        if (resumed) {
+          entry
+            ..status = DownloadStatus.downloading
+            ..error = null;
+        } else {
+          _tasks.remove(id);
+          entry
+            ..status = DownloadStatus.queued
+            ..error = null;
+          unawaited(_pump());
+        }
+        _persist();
+        notifyListeners();
+      }());
+      return;
+    }
     entry
       ..status = DownloadStatus.queued
       ..error = null;
@@ -242,27 +456,44 @@ class DownloadStore extends ChangeNotifier {
     unawaited(_pump());
   }
 
-  void pause(String id) {
+  Future<void> pause(String id) async {
     final entry = item(id);
     if (entry == null) return;
-    if (entry.status == DownloadStatus.downloading) {
-      _paused.add(id);
-      _clients[id]?.close();
-    } else if (entry.status == DownloadStatus.queued) {
+    if (entry.status == DownloadStatus.queued) {
       entry.status = DownloadStatus.paused;
       _persist();
       notifyListeners();
+      return;
+    }
+    if (entry.status != DownloadStatus.downloading) return;
+    final task = _tasks[id];
+    if (task == null) {
+      entry.status = DownloadStatus.paused;
+      _persist();
+      notifyListeners();
+      return;
+    }
+    _pausing.add(id);
+    var ok = false;
+    try {
+      ok = await FileDownloader().pause(task);
+    } catch (_) {}
+    if (!ok) {
+      // The server can't resume part-way: stop it and start over on resume.
+      await FileDownloader().cancelTaskWithId(task.taskId);
     }
   }
 
   Future<void> remove(String id) async {
     final entry = item(id);
     if (entry == null) return;
-    if (entry.status == DownloadStatus.downloading) {
+    final task = _tasks[id];
+    if (entry.status == DownloadStatus.downloading && task != null) {
       _cancelled.add(id);
-      _clients[id]?.close();
+      await FileDownloader().cancelTaskWithId(task.taskId);
       return;
     }
+    _tasks.remove(id);
     _items.remove(entry);
     _thumbs.remove(id);
     _persist();
@@ -289,23 +520,22 @@ class DownloadStore extends ChangeNotifier {
           }
         }
         if (next == null) break;
-        await _download(next);
+        await _prepareAndEnqueue(next);
       }
     } finally {
       _running = false;
     }
   }
 
-  Future<void> _download(DownloadItem entry) async {
+  /// Finds the real video link (needs the app in the foreground), then hands
+  /// the file transfer to the system downloader so it carries on in the
+  /// background.
+  Future<void> _prepareAndEnqueue(DownloadItem entry) async {
     final id = entry.video.id;
     entry.status = DownloadStatus.downloading;
     entry.error = null;
     notifyListeners();
 
-    http.Client? client;
-    IOSink? sink;
-    File? partRef;
-    var finished = false;
     try {
       final dir = _dir;
       if (dir == null) {
@@ -314,7 +544,6 @@ class DownloadStore extends ChangeNotifier {
 
       final resolved = await videoRepository
           .resolveForPlayback(entry.video.copyWith(streamUrl: ''));
-      _checkStop(id);
 
       final url = resolved.streamUrl.trim();
       final uri = Uri.tryParse(url);
@@ -329,220 +558,87 @@ class DownloadStore extends ChangeNotifier {
         );
       }
 
-      entry.fileName ??= _newFileName(id);
-      final fileName = entry.fileName!;
-      final part = File('${dir.path}/$fileName.part');
-      final target = File('${dir.path}/$fileName');
-      partRef = part;
-
-      unawaited(_saveThumbnail(entry, dir, resolved.pageUrl ?? entry.video.pageUrl));
-
       final pageUrl = resolved.pageUrl ?? entry.video.pageUrl;
       final pageUri = Uri.tryParse(pageUrl?.trim() ?? '');
       final validPage = pageUri != null &&
           (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
           pageUri.host.isNotEmpty;
-      final headers = streamHeaders(uri, pageUrl);
-      var cookie = '';
+      final headers = <String, String>{...streamHeaders(uri, pageUrl)};
       try {
-        cookie = await videoRepository.getPlaybackCookieHeader(
+        final cookie = await videoRepository.getPlaybackCookieHeader(
           streamUri: uri,
           pageUrl: validPage ? pageUri.toString() : null,
           userAgent: headers['User-Agent'] ?? '',
         );
+        if (cookie.isNotEmpty) headers['Cookie'] = cookie;
       } catch (error) {
         debugPrint('[DOWNLOADS] Cookie lookup failed (${error.runtimeType}).');
       }
-      _checkStop(id);
 
-      client = http.Client();
-      _clients[id] = client;
+      var finalUri = uri;
+      try {
+        finalUri = await resolveFinalStreamUri(uri, headers);
+      } catch (_) {}
 
-      var stalled = 0;
-      var total = 0;
-      while (true) {
-        _checkStop(id);
-        var offset = part.existsSync() ? part.lengthSync() : 0;
-        final startedAt = offset;
-        entry.bytes.value = offset;
+      entry.fileName ??= _newFileName(id);
+      final fileName = entry.fileName!;
+      final stale = File('${dir.path}/$fileName');
+      if (stale.existsSync()) stale.deleteSync();
 
-        debugPrint(
-          '[DOWNLOADS] GET host=${uri.host} from=$offset '
-          'cookie=${cookie.isNotEmpty ? 'yes' : 'NO'}',
-        );
-        final response = await _open(client, uri, <String, String>{
-          ...headers,
-          'Range': 'bytes=$offset-',
-          if (cookie.isNotEmpty) 'Cookie': cookie,
-        });
-        debugPrint(
-          '[DOWNLOADS] status=${response.statusCode} '
-          'type=${response.headers['content-type']} '
-          'length=${response.contentLength}',
-        );
+      unawaited(_saveThumbnail(entry, dir, pageUrl));
 
-        if (response.statusCode == 416) {
-          await response.stream.drain<void>().timeout(
-                const Duration(seconds: 3),
-                onTimeout: () {},
-              );
-          if (part.existsSync()) part.deleteSync();
-          stalled++;
-          if (stalled > _maxStalledAttempts) {
-            throw const _DownloadFailure('Please try the download again.');
-          }
-          continue;
-        }
-        if (response.statusCode != 200 && response.statusCode != 206) {
-          throw _DownloadFailure(
-            'The server refused the download (${response.statusCode}'
-            '${cookie.isEmpty ? ', no cookie' : ''}).',
-          );
-        }
-        final type = (response.headers['content-type'] ?? '').toLowerCase();
-        if (type.contains('mpegurl') || type.contains('text/html')) {
-          throw const _DownloadFailure('This video can\u2019t be downloaded.');
-        }
+      await _ensureNotificationPermission();
 
-        var append = offset > 0;
-        if (response.statusCode == 200 && offset > 0) {
-          offset = 0;
-          append = false;
-        }
-        total = _totalSize(response, offset);
-        if (total > 0 && entry.bytesTotal != total) {
-          entry.bytesTotal = total;
-          notifyListeners();
-        }
-
-        final output = part.openWrite(
-          mode: append ? FileMode.append : FileMode.write,
-        );
-        sink = output;
-        var written = offset;
-        var lastTick = DateTime.now();
-        try {
-          await for (final chunk in response.stream) {
-            _checkStop(id);
-            output.add(chunk);
-            written += chunk.length;
-            final now = DateTime.now();
-            if (now.difference(lastTick) > const Duration(milliseconds: 200)) {
-              lastTick = now;
-              entry.bytes.value = written;
-            }
-          }
-        } finally {
-          await output.flush();
-          await output.close();
-          sink = null;
-          entry.bytes.value = written;
-        }
-
-        if (total > 0 && written < total) {
-          stalled = written > startedAt ? 0 : stalled + 1;
-          if (stalled > _maxStalledAttempts) {
-            throw const _DownloadFailure('Connection lost. Tap resume.');
-          }
-          continue;
-        }
-        break;
+      final task = DownloadTask(
+        taskId: _taskId(entry),
+        url: finalUri.toString(),
+        headers: headers,
+        filename: fileName,
+        directory: _subDir,
+        baseDirectory: BaseDirectory.applicationDocuments,
+        updates: Updates.statusAndProgress,
+        retries: 3,
+        allowPause: true,
+        displayName: entry.video.title,
+        metaData: id,
+      );
+      _tasks[id] = task;
+      entry.bytes.value = 0;
+      final started = await FileDownloader().enqueue(task);
+      if (!started) {
+        _tasks.remove(id);
+        throw const _DownloadFailure('Couldn\u2019t start the download.');
       }
-
-      if (entry.bytes.value <= 0) {
-        throw const _DownloadFailure('The server sent an empty file.');
-      }
-      if (target.existsSync()) target.deleteSync();
-      await part.rename(target.path);
-      entry
-        ..status = DownloadStatus.done
-        ..bytesTotal = entry.bytes.value
-        ..error = null;
-      finished = true;
-      Haptics.play(Haptic.medium);
-    } on _Cancelled {
-      _items.remove(entry);
-      _thumbs.remove(id);
-      await _deleteFiles(entry);
-    } on _Paused {
-      entry.status = DownloadStatus.paused;
     } on _DownloadFailure catch (failure) {
       entry
         ..status = DownloadStatus.failed
         ..error = failure.message;
     } catch (error) {
-      debugPrint('[DOWNLOADS] $id failed: ${error.runtimeType}');
-      if (_cancelled.contains(id)) {
-        _items.remove(entry);
-        _thumbs.remove(id);
-        await _deleteFiles(entry);
-      } else if (_paused.contains(id)) {
-        entry.status = DownloadStatus.paused;
-      } else {
-        entry
-          ..status = DownloadStatus.failed
-          ..error = error is TimeoutException || error is SocketException
-              ? 'Connection problem. Tap resume.'
-              : 'Download failed. Tap resume.';
-      }
+      debugPrint('[DOWNLOADS] $id failed to start: ${error.runtimeType}');
+      entry
+        ..status = DownloadStatus.failed
+        ..error = error is TimeoutException || error is SocketException
+            ? 'Connection problem. Tap resume.'
+            : 'Download failed. Tap resume.';
     } finally {
-      try {
-        await sink?.close();
-      } catch (_) {}
-      client?.close();
-      _clients.remove(id);
-      _cancelled.remove(id);
-      _paused.remove(id);
-      if (!finished && partRef != null && entry.status == DownloadStatus.paused) {
-        try {
-          entry.bytes.value = partRef.existsSync() ? partRef.lengthSync() : 0;
-        } catch (_) {}
-      }
       _persist();
       notifyListeners();
+      _syncActivity(force: true);
     }
   }
 
-  void _checkStop(String id) {
-    if (_cancelled.contains(id)) throw const _Cancelled();
-    if (_paused.contains(id)) throw const _Paused();
-  }
+  bool _askedForNotifications = false;
 
-  Future<http.StreamedResponse> _open(
-    http.Client client,
-    Uri uri,
-    Map<String, String> headers,
-  ) async {
-    var current = uri;
-    for (var hop = 0; hop < 6; hop++) {
-      final request = http.Request('GET', current)
-        ..followRedirects = false
-        ..headers.addAll(headers);
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 30));
-      final location = response.headers['location'];
-      if (response.isRedirect && location != null && location.isNotEmpty) {
-        await response.stream.drain<void>();
-        current = current.resolve(location);
-        continue;
+  Future<void> _ensureNotificationPermission() async {
+    if (_askedForNotifications) return;
+    _askedForNotifications = true;
+    try {
+      final permissions = FileDownloader().permissions;
+      final status = await permissions.status(PermissionType.notifications);
+      if (status != PermissionStatus.granted) {
+        await permissions.request(PermissionType.notifications);
       }
-      return response;
-    }
-    throw const _DownloadFailure('Too many redirects.');
-  }
-
-  int _totalSize(http.StreamedResponse response, int offset) {
-    final range = response.headers['content-range'];
-    if (range != null) {
-      final slash = range.lastIndexOf('/');
-      if (slash >= 0) {
-        final total = int.tryParse(range.substring(slash + 1).trim());
-        if (total != null) return total;
-      }
-    }
-    final length = response.contentLength;
-    if (length == null || length <= 0) return 0;
-    return response.statusCode == 206 ? offset + length : length;
+    } catch (_) {}
   }
 
   String _newFileName(String id) {

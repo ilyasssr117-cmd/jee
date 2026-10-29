@@ -89,12 +89,19 @@ final TtlCache<PeopleSearchResult> peopleCache = TtlCache<PeopleSearchResult>(
   cacheable: (result) => !result.isEmpty,
 );
 
+final TtlCache<List<AlbumRef>> albumsCache = TtlCache<List<AlbumRef>>(
+  ttl: const Duration(minutes: 10),
+  maxEntries: 80,
+  cacheable: (albums) => albums.isNotEmpty,
+);
+
 final TtlCache<ModelProfile> profileCache =
     TtlCache<ModelProfile>(ttl: const Duration(hours: 6), maxEntries: 120);
 
 void clearRequestCaches() {
   profileCache.clear();
   peopleCache.clear();
+  albumsCache.clear();
   listingCache.clear();
   relatedCache.clear();
   modelsCache.clear();

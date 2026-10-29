@@ -73,6 +73,34 @@ class NativeBridge {
     }
   }
 
+  /// Shows or updates the download Live Activity (lock screen / Dynamic
+  /// Island). [progress] is 0..1, or negative when unknown.
+  Future<void> updateLiveActivity({
+    required String title,
+    required double progress,
+    required int count,
+  }) async {
+    try {
+      await _channel.invokeMethod<bool>('liveUpdate', <String, Object?>{
+        'title': title,
+        'progress': progress,
+        'count': count,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> endLiveActivity({
+    String? title,
+    bool finished = true,
+  }) async {
+    try {
+      await _channel.invokeMethod<bool>('liveEnd', <String, Object?>{
+        if (title != null) 'title': title,
+        'finished': finished,
+      });
+    } catch (_) {}
+  }
+
   Future<bool> shareFile(String path) async {
     try {
       return await _channel.invokeMethod<bool>('shareFile', <String, Object?>{

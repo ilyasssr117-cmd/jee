@@ -197,6 +197,29 @@ void main() {
     scraper.close();
   });
 
+  test('site-wide albums come from /albums/ and later pages from /albums/N/', () async {
+    final requested = <String>[];
+    final client = MockClient((request) async {
+      requested.add(request.url.path);
+      if (request.url.path == '/albums/3/') return http.Response('nope', 404);
+      return http.Response('''
+        <html><body><div class="thumbs__list">
+          <div class="item thumb thumb--albums">
+            <a href="/albums/${request.url.path.length}/set/" title="Set">
+              <img data-src="/c/1.jpg" alt="Set">
+            </a>
+          </div>
+        </div></body></html>''', 200);
+    });
+    final scraper = _scraper(client);
+
+    expect(await scraper.allAlbums(), hasLength(1));
+    expect(await scraper.allAlbums(page: 2), hasLength(1));
+    expect(await scraper.allAlbums(page: 3), isEmpty);
+    expect(requested, <String>['/albums/', '/albums/2/', '/albums/3/']);
+    scraper.close();
+  });
+
   test('a model without albums gives an empty list and later pages end', () async {
     final client = MockClient((request) async => request.url.path.endsWith('/albums/2/')
         ? http.Response('nope', 404)

@@ -12,6 +12,7 @@ import 'favorites_store.dart';
 import 'history_store.dart';
 import 'home_page.dart';
 import 'local_store.dart';
+import 'widgets/mini_player_overlay.dart';
 import 'native_bridge.dart';
 import 'platform_ui.dart';
 import 'favorite_models_store.dart';
@@ -229,6 +230,7 @@ class _FlowAppState extends State<FlowApp>
                   ),
                 ),
               ),
+              const MiniPlayerOverlay(),
               if (snapshot != null)
                 IgnorePointer(
                   child: FadeTransition(

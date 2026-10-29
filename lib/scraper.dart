@@ -343,6 +343,22 @@ class Scraper {
     return albums;
   }
 
+  /// Every album on the site, exactly as https://<site>/albums/ lists them
+  /// (page 1 is `albums/`, later pages are `albums/N/`).
+  Future<List<AlbumRef>> allAlbums({int page = 1}) async {
+    final uri = page <= 1
+        ? config.baseUri.resolve('albums/')
+        : config.baseUri.resolve('albums/$page/');
+    final String body;
+    try {
+      body = await _get(uri);
+    } on ScraperException catch (error) {
+      if (page > 1 && error.statusCode == 404) return const <AlbumRef>[];
+      rethrow;
+    }
+    return _albumsFrom(html.parse(body), uri);
+  }
+
   List<AlbumRef> _albumsFrom(dom.Document document, Uri uri, {String? modelName}) {
     var cards = document.querySelectorAll('.thumb--albums');
     if (cards.isEmpty) {
@@ -534,8 +550,6 @@ class Scraper {
     if (q.isEmpty) return const PeopleSearchResult(models: [], albums: []);
 
     final models = <String, ModelRef>{};
-    final albums = <String, AlbumRef>{};
-
     final slugs = <String>{
       ScraperConfig._slugify(q),
       q.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
@@ -581,9 +595,6 @@ class Scraper {
           imageUrl: _absoluteUrl(_imageSource(anchor.querySelector('img')), uri),
         );
       }
-      for (final album in _albumsFrom(document, uri)) {
-        albums.putIfAbsent(album.id, () => album);
-      }
     } on ScraperException catch (error) {
       debugPrint('[SCRAPER] People search page failed: ${error.message}');
     }
@@ -600,22 +611,9 @@ class Scraper {
     final sorted = models.values.toList()
       ..sort((a, b) => rank(a).compareTo(rank(b)));
 
-    await Future.wait<void>([
-      for (final model in sorted.take(3))
-        () async {
-          try {
-            for (final album in await modelAlbums(model)) {
-              albums.putIfAbsent(album.id, () => album);
-            }
-          } on ScraperException {
-            return;
-          }
-        }(),
-    ]);
-
     return PeopleSearchResult(
       models: sorted.take(20).toList(),
-      albums: albums.values.toList(),
+      albums: const <AlbumRef>[],
     );
   }
 

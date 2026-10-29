@@ -39,6 +39,8 @@ abstract class VideoCatalogRepository {
 
   Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1});
 
+  Future<List<AlbumRef>> getAllAlbums({int page = 1});
+
   Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0});
 
   Future<String> getPlaybackCookieHeader({
@@ -262,6 +264,12 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1}) async {
     _ensureConfigured();
     return scraper.modelAlbums(model, page: page);
+  }
+
+  @override
+  Future<List<AlbumRef>> getAllAlbums({int page = 1}) async {
+    _ensureConfigured();
+    return scraper.allAlbums(page: page);
   }
 
   @override

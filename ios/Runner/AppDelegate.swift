@@ -1,5 +1,8 @@
 import AVFoundation
 import AVKit
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 import Flutter
 import UIKit
 
@@ -41,6 +44,7 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
   private var rate: Float = 1.0
   private var restoring = false
   private var active = false
+  private var liveActivity: Any?
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -75,6 +79,12 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
     case "pipStop":
       pip?.stopPictureInPicture()
       result(nil)
+
+    case "liveUpdate":
+      liveUpdate(call.arguments as? [String: Any] ?? [:], result)
+
+    case "liveEnd":
+      liveEnd(call.arguments as? [String: Any] ?? [:], result)
 
     case "shareFile":
       shareFile(
@@ -572,6 +582,90 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
         animated: true
       )
     }
+  }
+
+  // MARK: - Download Live Activity
+
+  private func liveState(
+    _ args: [String: Any],
+    finished: Bool
+  ) -> Any? {
+    guard #available(iOS 16.1, *) else { return nil }
+    return DownloadAttributes.ContentState(
+      title: (args["title"] as? String) ?? "Downloads",
+      progress: (args["progress"] as? Double) ?? -1,
+      activeCount: (args["count"] as? Int) ?? 1,
+      finished: finished
+    )
+  }
+
+  private func liveUpdate(
+    _ args: [String: Any],
+    _ result: @escaping FlutterResult
+  ) {
+    guard #available(iOS 16.1, *) else {
+      result(false)
+      return
+    }
+    guard ActivityAuthorizationInfo().areActivitiesEnabled,
+          let state = liveState(args, finished: false)
+            as? DownloadAttributes.ContentState
+    else {
+      result(false)
+      return
+    }
+
+    if liveActivity == nil {
+      liveActivity = Activity<DownloadAttributes>.activities.first
+    }
+
+    if let activity = liveActivity as? Activity<DownloadAttributes> {
+      Task { await activity.update(using: state) }
+      result(true)
+      return
+    }
+
+    do {
+      let activity = try Activity<DownloadAttributes>.request(
+        attributes: DownloadAttributes(name: "Downloads"),
+        contentState: state,
+        pushType: nil
+      )
+      liveActivity = activity
+      result(true)
+    } catch {
+      result(false)
+    }
+  }
+
+  private func liveEnd(
+    _ args: [String: Any],
+    _ result: @escaping FlutterResult
+  ) {
+    guard #available(iOS 16.1, *) else {
+      result(false)
+      return
+    }
+    if liveActivity == nil {
+      liveActivity = Activity<DownloadAttributes>.activities.first
+    }
+    guard let activity = liveActivity as? Activity<DownloadAttributes> else {
+      result(false)
+      return
+    }
+    let finished = (args["finished"] as? Bool) ?? true
+    var state = activity.contentState
+    state.finished = finished
+    state.progress = finished ? 1 : state.progress
+    if let title = args["title"] as? String { state.title = title }
+    liveActivity = nil
+    Task {
+      await activity.end(
+        using: state,
+        dismissalPolicy: .after(Date().addingTimeInterval(8))
+      )
+    }
+    result(true)
   }
 
   // MARK: - Helpers

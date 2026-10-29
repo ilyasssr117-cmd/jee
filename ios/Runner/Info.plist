@@ -32,6 +32,9 @@
 	<string>Save the photos and videos you choose to your Photos library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Needed to save the photos and videos you choose to your Photos library.</string>
+	<!-- Live Activity for download progress -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<!-- Background audio / Picture in Picture -->
 	<key>UIBackgroundModes</key>
 	<array>

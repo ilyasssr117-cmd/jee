@@ -1,8 +1,6 @@
 import SwiftUI
 import WidgetKit
 
-private let appGroupId = "group.com.tv.watchTube"
-
 struct WidgetPayload: Codable {
   var resumeId: String?
   var resumeTitle: String?
@@ -16,6 +14,7 @@ struct WatchTubeEntry: TimelineEntry {
   let date: Date
   let payload: WidgetPayload?
   let image: UIImage?
+  var note: String? = nil
 }
 
 struct WatchTubeProvider: TimelineProvider {
@@ -40,16 +39,24 @@ struct WatchTubeProvider: TimelineProvider {
   }
 
   private func load() -> WatchTubeEntry {
-    guard let dir = FileManager.default.containerURL(
-      forSecurityApplicationGroupIdentifier: appGroupId)
-    else { return WatchTubeEntry(date: Date(), payload: nil, image: nil) }
+    // The widget lives in <App>.app/PlugIns/X.appex, so the app is two levels up.
+    let appURL = Bundle.main.bundleURL
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    guard let dir = SharedGroup.containerURL(appBundleURL: appURL) else {
+      return WatchTubeEntry(
+        date: Date(), payload: nil, image: nil,
+        note: "App Group unavailable")
+    }
 
     var payload: WidgetPayload?
     if let data = try? Data(contentsOf: dir.appendingPathComponent("widget.json")) {
       payload = try? JSONDecoder().decode(WidgetPayload.self, from: data)
     }
     let image = UIImage(contentsOfFile: dir.appendingPathComponent("resume.jpg").path)
-    return WatchTubeEntry(date: Date(), payload: payload, image: image)
+    return WatchTubeEntry(
+      date: Date(), payload: payload, image: image,
+      note: payload == nil ? "Open WatchTube once" : nil)
   }
 }
 
@@ -99,7 +106,7 @@ private struct ResumeCard: View {
               .tint(.white)
           }
         } else {
-          Text("Nothing to continue yet")
+          Text(entry.note ?? "Nothing to continue yet")
             .font(.footnote)
             .foregroundColor(.white.opacity(0.8))
         }

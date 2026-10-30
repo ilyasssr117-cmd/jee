@@ -22,6 +22,8 @@
 		D1A000012EC3CC0000A00013 /* DownloadAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A000012EC3CC0000A00004 /* DownloadAttributes.swift */; };
 		D1A000012EC3CC0000A00014 /* DownloadActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D1A000012EC3CC0000A00001 /* DownloadActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D1A000012EC3CC0000A00051 /* WatchTubeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A000012EC3CC0000A00050 /* WatchTubeWidget.swift */; };
+		D1A000012EC3CC0000A00061 /* SharedGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A000012EC3CC0000A00060 /* SharedGroup.swift */; };
+		D1A000012EC3CC0000A00062 /* SharedGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A000012EC3CC0000A00060 /* SharedGroup.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -91,6 +93,7 @@
 		D1A000012EC3CC0000A00050 /* WatchTubeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchTubeWidget.swift; sourceTree = "<group>"; };
 		D1A000012EC3CC0000A00052 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
 		D1A000012EC3CC0000A00053 /* DownloadActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DownloadActivity.entitlements; sourceTree = "<group>"; };
+		D1A000012EC3CC0000A00060 /* SharedGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedGroup.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -176,6 +179,7 @@
 				D1A000012EC3CC0000A00002 /* DownloadActivityBundle.swift */,
 				D1A000012EC3CC0000A00003 /* DownloadLiveActivity.swift */,
 				D1A000012EC3CC0000A00004 /* DownloadAttributes.swift */,
+				D1A000012EC3CC0000A00060 /* SharedGroup.swift */,
 				D1A000012EC3CC0000A00050 /* WatchTubeWidget.swift */,
 				D1A000012EC3CC0000A00053 /* DownloadActivity.entitlements */,
 				D1A000012EC3CC0000A00005 /* Info.plist */,
@@ -370,6 +374,7 @@
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 				D1A000012EC3CC0000A00013 /* DownloadAttributes.swift in Sources */,
+				D1A000012EC3CC0000A00062 /* SharedGroup.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -380,6 +385,7 @@
 				D1A000012EC3CC0000A00010 /* DownloadActivityBundle.swift in Sources */,
 				D1A000012EC3CC0000A00011 /* DownloadLiveActivity.swift in Sources */,
 				D1A000012EC3CC0000A00012 /* DownloadAttributes.swift in Sources */,
+				D1A000012EC3CC0000A00061 /* SharedGroup.swift in Sources */,
 				D1A000012EC3CC0000A00051 /* WatchTubeWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

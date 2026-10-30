@@ -90,11 +90,7 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
       result(url)
 
     case "widgetContainer":
-      result(
-        FileManager.default
-          .containerURL(forSecurityApplicationGroupIdentifier: "group.com.tv.watchTube")?
-          .path
-      )
+      result(SharedGroup.containerURL(appBundleURL: Bundle.main.bundleURL)?.path)
 
     case "widgetReload":
       if #available(iOS 14.0, *) { WidgetCenter.shared.reloadAllTimelines() }

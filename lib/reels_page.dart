@@ -1,18 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
+import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 
-const List<String> _kSites = ['tik.porn'];
 const String _kUserAgent =
     'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7_1 like Mac OS X) '
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7 '
     'Mobile/15E148 Safari/604.1';
 
-String _mediaSite = 'tik.porn';
+String _mediaSite = 'https://apiv2.tik.porn/getnextvideos';
 
 const int _kFirstBatch = 20; // الدفعة الأولى
 const int _kNextBatch = 20; // كل دفعة بعدها
@@ -73,21 +74,31 @@ List<ReelItem> parseReels(dynamic body) {
   return out;
 }
 
+/// على iOS/macOS نستخدم URLSession الأصلي (بصمة اتصال مثل Safari)
+/// لأن السيرفر يرفض بصمة dart:io بـ 403.
+http.Client _makeClient() {
+  try {
+    if (Platform.isIOS || Platform.isMacOS) {
+      return CupertinoClient.defaultSessionConfiguration();
+    }
+  } catch (_) {}
+  return http.Client();
+}
+
 class ReelsRepository {
   final Set<String> _seen = <String>{};
-  final http.Client _client = http.Client();
+  final http.Client _client = _makeClient();
 
-  String _site = _kSites.first;
+  static final Uri _api = Uri.https('apiv2.tik.porn', '/getnextvideos');
+  static const Map<String, String> _headers = {
+    'User-Agent': _kUserAgent,
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+  };
 
-  Future<List<ReelItem>> _fetchFrom(String site, int amount) async {
-    // مطابق لطلب بايثون: نفس الهيدرات الثلاثة، وبـ bytes حتى ما تضيف
-    // مكتبة http كلمة charset=utf-8 على Content-Type.
-    final req = http.Request('POST', Uri.parse('https://apiv2.$site/getnextvideos'))
-      ..headers.addAll(const {
-        'User-Agent': _kUserAgent,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      })
+  Future<List<ReelItem>> _post(int amount) async {
+    final req = http.Request('POST', _api)
+      ..headers.addAll(_headers)
       ..bodyBytes = utf8.encode(jsonEncode({
         'amount': amount,
         'filter': [],
@@ -95,14 +106,27 @@ class ReelsRepository {
         'forcerand': false,
         'first_chunk': false,
       }));
-    final streamed =
-        await _client.send(req).timeout(const Duration(seconds: 20));
-    final res = await http.Response.fromStream(streamed);
+    final res = await http.Response.fromStream(
+      await _client.send(req).timeout(const Duration(seconds: 20)),
+    );
+    return _decode(res);
+  }
+
+  Future<List<ReelItem>> _getOnce() async {
+    final res = await _client
+        .get(_api, headers: const {
+          'User-Agent': _kUserAgent,
+          'Accept': 'application/json',
+        })
+        .timeout(const Duration(seconds: 20));
+    return _decode(res);
+  }
+
+  List<ReelItem> _decode(http.Response res) {
     if (res.statusCode != 200) {
       final body = utf8.decode(res.bodyBytes, allowMalformed: true);
-      final snippet = body.length > 120 ? body.substring(0, 120) : body;
-      throw Exception(
-          'HTTP ${res.statusCode} [${res.headers['content-type']}] $snippet');
+      final snippet = body.length > 100 ? body.substring(0, 100) : body;
+      throw Exception('HTTP ${res.statusCode} $snippet');
     }
     final json = jsonDecode(utf8.decode(res.bodyBytes));
     if (json is Map && json['code'] != null && json['code'] != 200) {
@@ -112,34 +136,43 @@ class ReelsRepository {
   }
 
   Future<List<ReelItem>> _fetch(int amount) async {
-    Object? lastError;
-    final order = [_site, ..._kSites.where((e) => e != _site)];
-    for (final site in order) {
-      try {
-        final items = await _fetchFrom(site, amount);
-        _site = site;
-        _mediaSite = site;
-        return items;
-      } catch (e) {
-        lastError = e;
+    try {
+      return await _post(amount);
+    } catch (e) {
+      // احتياط: إذا فشل الـ POST نجرب GET (يرجع فيديو واحد لكل طلب)
+      final out = <ReelItem>[];
+      for (var i = 0; i < (amount > 5 ? 5 : amount); i++) {
+        try {
+          out.addAll(await _getOnce());
+        } catch (_) {
+          if (out.isEmpty && i == 0) rethrow;
+        }
       }
+      if (out.isEmpty) rethrow;
+      return out;
     }
-    throw lastError ?? Exception('Request failed');
   }
 
-  /// يرجع دفعة جديدة بدون أي ريل انعرض قبل. إذا طلع كله مكرر يعيد الطلب.
+  /// يرجع فيديوهات جديدة فقط (بدون تكرار) لحد ما يوصل للعدد المطلوب.
   Future<List<ReelItem>> nextBatch(int amount) async {
-    for (var attempt = 0; attempt < _kMaxRefetchTries; attempt++) {
-      final fetched = await _fetch(amount);
-      final fresh = <ReelItem>[];
+    final fresh = <ReelItem>[];
+    var emptyRounds = 0;
+    var rounds = 0;
+    while (fresh.length < amount &&
+        rounds < 12 &&
+        emptyRounds < _kMaxRefetchTries) {
+      rounds++;
+      final fetched = await _fetch(amount - fresh.length);
+      var added = 0;
       for (final item in fetched) {
         if (_seen.add(item.id) && _seen.add('url:${item.videoUrl}')) {
           fresh.add(item);
+          added++;
         }
       }
-      if (fresh.isNotEmpty) return fresh;
+      emptyRounds = added == 0 ? emptyRounds + 1 : 0;
     }
-    return const [];
+    return fresh;
   }
 
   void dispose() => _client.close();

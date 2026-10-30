@@ -32,6 +32,17 @@
 	<string>Save the photos and videos you choose to your Photos library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Needed to save the photos and videos you choose to your Photos library.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.tv.watchTube</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>watchtube</string>
+			</array>
+		</dict>
+	</array>
 	<!-- Live Activity for download progress -->
 	<key>NSSupportsLiveActivities</key>
 	<true/>

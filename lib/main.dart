@@ -12,6 +12,7 @@ import 'favorites_store.dart';
 import 'history_store.dart';
 import 'home_page.dart';
 import 'local_store.dart';
+import 'widget_sync.dart';
 import 'widgets/mini_player_overlay.dart';
 import 'native_bridge.dart';
 import 'platform_ui.dart';
@@ -90,6 +91,7 @@ Future<void> _bootstrap() async {
   }
 
   runApp(const FlowApp());
+  WidgetSync.instance.start();
 }
 
 class FlowApp extends StatefulWidget {

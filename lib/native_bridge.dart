@@ -31,6 +31,30 @@ class NativeBridge {
 
   bool get pipSupported => _pipSupported;
 
+  /// Called with a `watchtube://...` link (home-screen widget tap).
+  void Function(String url)? onOpenUrl;
+  String? _pendingUrl;
+
+  String? takePendingUrl() {
+    final url = _pendingUrl;
+    _pendingUrl = null;
+    return url;
+  }
+
+  Future<String?> widgetContainerPath() async {
+    try {
+      return await _channel.invokeMethod<String>('widgetContainer');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> reloadWidgets() async {
+    try {
+      await _channel.invokeMethod<bool>('widgetReload');
+    } catch (_) {}
+  }
+
   Future<void> init() async {
     _channel.setMethodCallHandler(_onCall);
     try {
@@ -38,6 +62,9 @@ class NativeBridge {
     } catch (_) {
       _pipSupported = false;
     }
+    try {
+      _pendingUrl = await _channel.invokeMethod<String>('takeInitialUrl');
+    } catch (_) {}
   }
 
   Future<bool> startPip({
@@ -126,6 +153,18 @@ class NativeBridge {
   }
 
   Future<dynamic> _onCall(MethodCall call) async {
+    if (call.method == 'openUrl') {
+      final url = call.arguments;
+      if (url is String) {
+        final handler = onOpenUrl;
+        if (handler != null) {
+          handler(url);
+        } else {
+          _pendingUrl = url;
+        }
+      }
+      return null;
+    }
     if (call.method != 'pipEnded') return null;
     final args = call.arguments;
     final map = args is Map ? args : const <Object?, Object?>{};

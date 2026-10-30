@@ -5,10 +5,11 @@ import ActivityKit
 #endif
 import Flutter
 import UIKit
+import WidgetKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-  private var bridge: NativeBridge?
+  var bridge: NativeBridge?
 
   override func application(
     _ application: UIApplication,
@@ -45,6 +46,8 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
   private var restoring = false
   private var active = false
   private var liveActivity: Any?
+  private var pendingUrl: String?
+  private var dartReady = false
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -79,6 +82,23 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
     case "pipStop":
       pip?.stopPictureInPicture()
       result(nil)
+
+    case "takeInitialUrl":
+      dartReady = true
+      let url = pendingUrl
+      pendingUrl = nil
+      result(url)
+
+    case "widgetContainer":
+      result(
+        FileManager.default
+          .containerURL(forSecurityApplicationGroupIdentifier: "group.com.tv.watchTube")?
+          .path
+      )
+
+    case "widgetReload":
+      if #available(iOS 14.0, *) { WidgetCenter.shared.reloadAllTimelines() }
+      result(true)
 
     case "liveUpdate":
       liveUpdate(call.arguments as? [String: Any] ?? [:], result)
@@ -581,6 +601,17 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate {
         sheet,
         animated: true
       )
+    }
+  }
+
+  // MARK: - Links from the home-screen widget
+
+  func deliver(url: URL) {
+    guard url.scheme == "watchtube" else { return }
+    if dartReady {
+      channel.invokeMethod("openUrl", arguments: url.absoluteString)
+    } else {
+      pendingUrl = url.absoluteString
     }
   }
 

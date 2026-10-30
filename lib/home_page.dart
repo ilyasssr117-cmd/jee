@@ -317,6 +317,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
+  void _onSwipe(DragEndDetails details) {
+    if (_searchOpen) return;
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 400) return;
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final forward = (velocity < 0) != rtl;
+    const order = <_Section>[_Section.home, _Section.library, _Section.settings];
+    final next = order.indexOf(_section) + (forward ? 1 : -1);
+    if (next < 0 || next >= order.length) return;
+    Haptics.play(Haptic.selection);
+    _onTabSelect(switch (order[next]) {
+      _Section.home => AppTab.home,
+      _Section.library => AppTab.library,
+      _Section.settings => AppTab.settings,
+    });
+  }
+
   void _onTabSelect(AppTab tab) {
     PreviewManager.instance.stopNow(fade: false);
     switch (tab) {
@@ -444,7 +461,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     return ValueListenableBuilder<bool>(
       valueListenable: _search,
-      child: content,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragEnd: _onSwipe,
+        child: content,
+      ),
       builder: (context, searchOpen, page) {
         final lightIcons = darkMode ||
             (_section == _Section.home && !searchOpen && _heroVisible);

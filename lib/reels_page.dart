@@ -80,8 +80,8 @@ class ReelsRepository {
   String _site = _kSites.first;
 
   Future<List<ReelItem>> _fetchFrom(String site, int amount) async {
-‎    // مطابق لطلب بايثون: نفس الهيدرات الثلاثة، وبـ bytes حتى ما تضيف
-‎    // مكتبة http كلمة charset=utf-8 على Content-Type.
+    // مطابق لطلب بايثون: نفس الهيدرات الثلاثة، وبـ bytes حتى ما تضيف
+    // مكتبة http كلمة charset=utf-8 على Content-Type.
     final req = http.Request('POST', Uri.parse('https://apiv2.$site/getnextvideos'))
       ..headers.addAll(const {
         'User-Agent': _kUserAgent,
@@ -127,7 +127,7 @@ class ReelsRepository {
     throw lastError ?? Exception('Request failed');
   }
 
-‎  /// يرجع دفعة جديدة بدون أي ريل انعرض قبل. إذا طلع كله مكرر يعيد الطلب.
+  /// يرجع دفعة جديدة بدون أي ريل انعرض قبل. إذا طلع كله مكرر يعيد الطلب.
   Future<List<ReelItem>> nextBatch(int amount) async {
     for (var attempt = 0; attempt < _kMaxRefetchTries; attempt++) {
       final fetched = await _fetch(amount);
@@ -223,7 +223,7 @@ class _ReelsPageState extends State<ReelsPage> {
       setState(() {});
     }).catchError((_) {
       if (!mounted) return;
-‎      // لو الـ mp4 فشل جرّب الـ HLS
+      // لو الـ mp4 فشل جرّب الـ HLS
       if (fallback != null && _controllers[index] == c) {
         c.dispose();
         _controllers[index] = _build(fallback, index);
@@ -240,7 +240,7 @@ class _ReelsPageState extends State<ReelsPage> {
     });
   }
 
-‎  /// يحافظ على الحالي + اللي قبله + اللي بعده فقط، والباقي يتحرر.
+  /// يحافظ على الحالي + اللي قبله + اللي بعده فقط، والباقي يتحرر.
   void _syncControllers(int index) {
     final keep = <int>{index - 1, index, index + 1}
         .where((i) => i >= 0 && i < _items.length)

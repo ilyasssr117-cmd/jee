@@ -74,6 +74,9 @@ class DownloadStore extends ChangeNotifier {
   final Set<String> _cancelled = <String>{};
   final Set<String> _pausing = <String>{};
   final Map<String, String> _thumbs = <String, String>{};
+
+  /// روابط تحميل مباشرة (الريلز) — ما نحتاج نمر على الـ scraper.
+  final Map<String, String> _directUrls = <String, String>{};
   Directory? _dir;
   bool _running = false;
 
@@ -404,6 +407,12 @@ class DownloadStore extends ChangeNotifier {
     return NativeBridge.instance.shareFile(path);
   }
 
+  /// يحمّل فيديو من رابط مباشر جاهز (مثل download_url حق الريلز).
+  void enqueueDirect(Video video, String url) {
+    _directUrls[video.id] = url;
+    enqueue(video);
+  }
+
   void enqueue(Video video) {
     final existing = item(video.id);
     if (existing != null) {
@@ -542,8 +551,11 @@ class DownloadStore extends ChangeNotifier {
         throw const _DownloadFailure('Storage isn\u2019t available.');
       }
 
-      final resolved = await videoRepository
-          .resolveForPlayback(entry.video.copyWith(streamUrl: ''));
+      final direct = _directUrls[id];
+      final resolved = direct != null
+          ? entry.video.copyWith(streamUrl: direct)
+          : await videoRepository
+              .resolveForPlayback(entry.video.copyWith(streamUrl: ''));
 
       final url = resolved.streamUrl.trim();
       final uri = Uri.tryParse(url);
@@ -565,6 +577,7 @@ class DownloadStore extends ChangeNotifier {
           pageUri.host.isNotEmpty;
       final headers = <String, String>{...streamHeaders(uri, pageUrl)};
       try {
+        if (direct != null) throw const _DownloadFailure('direct');
         final cookie = await videoRepository.getPlaybackCookieHeader(
           streamUri: uri,
           pageUrl: validPage ? pageUri.toString() : null,
@@ -572,7 +585,10 @@ class DownloadStore extends ChangeNotifier {
         );
         if (cookie.isNotEmpty) headers['Cookie'] = cookie;
       } catch (error) {
-        debugPrint('[DOWNLOADS] Cookie lookup failed (${error.runtimeType}).');
+        if (direct == null) {
+          debugPrint(
+              '[DOWNLOADS] Cookie lookup failed (${error.runtimeType}).');
+        }
       }
 
       var finalUri = uri;

@@ -34,7 +34,7 @@ const String _kUserAgent =
     'Mobile/15E148 Safari/604.1';
 
 // كان قبل `https://$_mediaSite/` وهو يطلع https://https://... وغلط
-const String _kMediaOrigin = 'https://tik.porn';
+const String _kMediaOrigin = 'https://apiv2.tik.porn/getnextvideos';
 const Map<String, String> _kMediaHeaders = {
   'User-Agent': _kUserAgent,
   'Referer': '$_kMediaOrigin/',

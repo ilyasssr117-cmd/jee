@@ -80,33 +80,29 @@ class ReelsRepository {
   String _site = _kSites.first;
 
   Future<List<ReelItem>> _fetchFrom(String site, int amount) async {
-    final res = await _client
-        .post(
-          Uri.parse('https://apiv2.$site/getnextvideos'),
-          headers: {
-            'User-Agent': _kUserAgent,
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Content-Type': 'application/json',
-            'Origin': 'https://$site',
-            'Referer': 'https://$site/',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-site',
-          },
-          body: jsonEncode({
-            'amount': amount,
-            'filter': [],
-            'sfw_mode': 0,
-            'forcerand': false,
-            'first_chunk': false,
-          }),
-        )
-        .timeout(const Duration(seconds: 20));
+‎    // مطابق لطلب بايثون: نفس الهيدرات الثلاثة، وبـ bytes حتى ما تضيف
+‎    // مكتبة http كلمة charset=utf-8 على Content-Type.
+    final req = http.Request('POST', Uri.parse('https://apiv2.$site/getnextvideos'))
+      ..headers.addAll(const {
+        'User-Agent': _kUserAgent,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      })
+      ..bodyBytes = utf8.encode(jsonEncode({
+        'amount': amount,
+        'filter': [],
+        'sfw_mode': 0,
+        'forcerand': false,
+        'first_chunk': false,
+      }));
+    final streamed =
+        await _client.send(req).timeout(const Duration(seconds: 20));
+    final res = await http.Response.fromStream(streamed);
     if (res.statusCode != 200) {
       final body = utf8.decode(res.bodyBytes, allowMalformed: true);
       final snippet = body.length > 120 ? body.substring(0, 120) : body;
-      throw Exception('HTTP ${res.statusCode} [$site] $snippet');
+      throw Exception(
+          'HTTP ${res.statusCode} [${res.headers['content-type']}] $snippet');
     }
     final json = jsonDecode(utf8.decode(res.bodyBytes));
     if (json is Map && json['code'] != null && json['code'] != 200) {
@@ -131,7 +127,7 @@ class ReelsRepository {
     throw lastError ?? Exception('Request failed');
   }
 
-  /// يرجع دفعة جديدة بدون أي ريل انعرض قبل. إذا طلع كله مكرر يعيد الطلب.
+‎  /// يرجع دفعة جديدة بدون أي ريل انعرض قبل. إذا طلع كله مكرر يعيد الطلب.
   Future<List<ReelItem>> nextBatch(int amount) async {
     for (var attempt = 0; attempt < _kMaxRefetchTries; attempt++) {
       final fetched = await _fetch(amount);
@@ -227,7 +223,7 @@ class _ReelsPageState extends State<ReelsPage> {
       setState(() {});
     }).catchError((_) {
       if (!mounted) return;
-      // لو الـ mp4 فشل جرّب الـ HLS
+‎      // لو الـ mp4 فشل جرّب الـ HLS
       if (fallback != null && _controllers[index] == c) {
         c.dispose();
         _controllers[index] = _build(fallback, index);
@@ -244,7 +240,7 @@ class _ReelsPageState extends State<ReelsPage> {
     });
   }
 
-  /// يحافظ على الحالي + اللي قبله + اللي بعده فقط، والباقي يتحرر.
+‎  /// يحافظ على الحالي + اللي قبله + اللي بعده فقط، والباقي يتحرر.
   void _syncControllers(int index) {
     final keep = <int>{index - 1, index, index + 1}
         .where((i) => i >= 0 && i < _items.length)

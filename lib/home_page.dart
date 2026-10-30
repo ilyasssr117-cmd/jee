@@ -12,6 +12,7 @@ import 'local_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
+import 'reels_page.dart';
 import 'request_cache.dart';
 import 'touch.dart';
 import 'preview_manager.dart';
@@ -486,6 +487,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
+                  if (_section == _Section.home && !searchOpen)
+                    Positioned(
+                      top: context.safe.top + 8,
+                      right: 12,
+                      child: Material(
+                        color: Colors.black54,
+                        shape: const CircleBorder(),
+                        child: IconButton(
+                          tooltip: 'Reels',
+                          icon: const Icon(Icons.slideshow_rounded,
+                              color: Colors.white),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const ReelsPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

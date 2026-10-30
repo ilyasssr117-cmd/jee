@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:ui' show ImageFilter;
 
 import 'package:cupertino_http/cupertino_http.dart';
-import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoActionSheet,
+        CupertinoActionSheetAction,
+        CupertinoActivityIndicator,
+        showCupertinoModalPopup;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -14,6 +18,8 @@ import 'package:video_player/video_player.dart';
 
 import 'app_theme.dart';
 import 'download_store.dart';
+import 'favorites_store.dart';
+import 'local_store.dart';
 import 'mini_player.dart';
 import 'models.dart';
 import 'photo_saver.dart';
@@ -28,7 +34,7 @@ const String _kUserAgent =
     'Mobile/15E148 Safari/604.1';
 
 // كان قبل `https://$_mediaSite/` وهو يطلع https://https://... وغلط
-const String _kMediaOrigin = 'https://apiv2.tik.porn/getnextvideos';
+const String _kMediaOrigin = 'https://tik.porn';
 const Map<String, String> _kMediaHeaders = {
   'User-Agent': _kUserAgent,
   'Referer': '$_kMediaOrigin/',
@@ -40,6 +46,7 @@ const int _kFirstBatch = 20;
 const int _kNextBatch = 20;
 const int _kPreloadAhead = 4;
 const int _kMaxRefetchTries = 4;
+const String _kClearKey = 'reels_clear_mode_v1';
 const Duration _kSeekStep = Duration(seconds: 10);
 
 class ReelItem {
@@ -252,6 +259,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _loading = false;
   bool _exhausted = false;
   bool _muted = false;
+  bool _clear = false; // Clear mode: يخفي كل الواجهة
   String? _error;
   int _current = 0;
 
@@ -259,6 +267,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _clear = LocalStore.readBool(_kClearKey, fallback: false);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     // نوقف أي معاينة أو مشغل صغير شغال عشان ما يتداخل الصوت
     unawaited(PreviewManager.instance.stopAndWait());
@@ -400,42 +409,99 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
   }
 
+  void _toggleClear() {
+    Haptics.play(Haptic.selection);
+    setState(() => _clear = !_clear);
+    LocalStore.writeBool(_kClearKey, _clear);
+  }
+
   void _toast(String message) => showToast(context, message, aboveBar: false);
 
   // ───────────── التحميل داخل التطبيق ─────────────
 
-  void _download(ReelItem item) {
-    final url = item.downloadUrl ?? item.videoUrl;
-    if (url.toLowerCase().contains('.m3u8')) {
-      _toast('This video is a stream and can\u2019t be downloaded.');
-      return;
-    }
-    final store = DownloadStore.instance;
-    final id = 'reel_${item.id}';
-    final existing = store.item(id);
-    if (existing != null && existing.status == DownloadStatus.done) {
-      _toast('Already in your downloads.');
-      return;
-    }
-    if (existing != null &&
-        (existing.status == DownloadStatus.queued ||
-            existing.status == DownloadStatus.downloading)) {
-      _toast('Already downloading\u2026');
-      return;
-    }
-    store.enqueueDirect(
-      Video(
-        id: id,
+  Video _videoOf(ReelItem item) => Video(
+        id: 'reel_${item.id}',
         title: item.title.isEmpty ? 'Reel by @${item.author}' : item.title,
         thumbnailUrl: item.thumbUrl,
         duration: _clock(Duration(seconds: item.durationSec)),
         views: _compact(item.views),
         likes: item.likes,
         category: 'Reels',
+      );
+
+  /// يرجع true إذا بدأ تحميل جديد.
+  bool _enqueue(ReelItem item, {bool silent = false}) {
+    final url = item.downloadUrl ?? item.videoUrl;
+    if (url.toLowerCase().contains('.m3u8')) {
+      if (!silent) _toast('This video is a stream and can\u2019t be downloaded.');
+      return false;
+    }
+    final store = DownloadStore.instance;
+    final existing = store.item('reel_${item.id}');
+    if (existing != null && existing.status == DownloadStatus.done) {
+      if (!silent) _toast('Already in your downloads.');
+      return false;
+    }
+    if (existing != null &&
+        (existing.status == DownloadStatus.queued ||
+            existing.status == DownloadStatus.downloading)) {
+      if (!silent) _toast('Already downloading\u2026');
+      return false;
+    }
+    store.enqueueDirect(_videoOf(item), url);
+    return true;
+  }
+
+  void _download(ReelItem item) {
+    if (_enqueue(item)) _toast('Downloading\u2026');
+  }
+
+  // ───────────── المفضلة ─────────────
+
+  void _toggleFavorite(ReelItem item) {
+    final favorites = FavoritesStore.instance;
+    final id = 'reel_${item.id}';
+    if (favorites.isFavorite(id)) {
+      favorites.remove(id);
+      _toast('Removed from favorites.');
+      return;
+    }
+    favorites.add(_videoOf(item));
+    Haptics.play(Haptic.medium);
+    // روابط الريلز مؤقتة، فنحمّل نسخة عشان تشتغل من المفضلة بعدين
+    _enqueue(item, silent: true);
+    _toast('Added to favorites.');
+  }
+
+  // ───────────── قائمة الحفظ ─────────────
+
+  Future<void> _showSaveMenu(ReelItem item) async {
+    Haptics.play(Haptic.light);
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (sheet) => CupertinoActionSheet(
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.of(sheet).pop();
+              _download(item);
+            },
+            child: const Text('Download to app'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.of(sheet).pop();
+              _saveToPhotos(item);
+            },
+            child: const Text('Save to Photos'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(sheet).pop(),
+          child: const Text('Cancel'),
+        ),
       ),
-      url,
     );
-    _toast('Downloading\u2026');
   }
 
   // ───────────── الحفظ في الصور ─────────────
@@ -523,8 +589,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   isLast: i == _items.length - 1 && _exhausted,
                   onNext: _next,
                   onMute: _toggleMute,
-                  onSave: () => _saveToPhotos(item),
-                  onDownload: () => _download(item),
+                  clear: _clear,
+                  onFavorite: () => _toggleFavorite(item),
+                  onSaveMenu: () => _showSaveMenu(item),
                   onRetry: () => _retry(i),
                 );
               },
@@ -540,15 +607,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                 style: AppText.body.copyWith(color: Colors.white70),
               ),
             ),
-          if (_loading && _items.isNotEmpty)
-            Positioned(
-              top: context.safe.top + 14,
-              left: 0,
-              right: 0,
-              child: const Center(
-                child: CupertinoActivityIndicator(color: Colors.white),
-              ),
-            ),
           if (_error != null && _items.isNotEmpty)
             Positioned(
               bottom: context.safe.bottom + 48,
@@ -559,12 +617,53 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           Positioned(
             top: context.safe.top + 4,
             left: 8,
-            child: RoundIconButton(
-              icon: Icons.arrow_back_ios_new_rounded,
-              iconSize: 18,
-              tapSize: kMinTapSize,
-              label: 'Back',
-              onTap: () => Navigator.of(context).maybePop(),
+            right: 8,
+            child: Row(
+              children: [
+                AnimatedOpacity(
+                  duration: Motion.normal,
+                  opacity: _clear ? 0.55 : 1,
+                  child: RoundIconButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    iconSize: 18,
+                    tapSize: kMinTapSize,
+                    label: 'Back',
+                    onTap: () => Navigator.of(context).maybePop(),
+                  ),
+                ),
+                Expanded(
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      duration: Motion.normal,
+                      opacity: _clear ? 0 : 1,
+                      child: Center(
+                        child: Text(
+                          'REELS',
+                          style: AppText.overline.copyWith(
+                            color: Colors.white,
+                            shadows: const [
+                              Shadow(blurRadius: 8, color: Color(0xCC000000)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                AnimatedOpacity(
+                  duration: Motion.normal,
+                  opacity: _clear ? 0.55 : 1,
+                  child: RoundIconButton(
+                    icon: _clear
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
+                    iconSize: 18,
+                    tapSize: kMinTapSize,
+                    label: _clear ? 'Show controls' : 'Clear mode',
+                    onTap: _toggleClear,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -583,8 +682,9 @@ class _ReelView extends StatefulWidget {
     required this.isLast,
     required this.onNext,
     required this.onMute,
-    required this.onSave,
-    required this.onDownload,
+    required this.clear,
+    required this.onFavorite,
+    required this.onSaveMenu,
     required this.onRetry,
   });
 
@@ -595,8 +695,9 @@ class _ReelView extends StatefulWidget {
   final bool isLast;
   final VoidCallback onNext;
   final VoidCallback onMute;
-  final VoidCallback onSave;
-  final VoidCallback onDownload;
+  final bool clear;
+  final VoidCallback onFavorite;
+  final VoidCallback onSaveMenu;
   final VoidCallback onRetry;
 
   @override
@@ -746,8 +847,7 @@ class _ReelViewState extends State<_ReelView> {
                 )
               else
                 const Center(child: CupertinoActivityIndicator(color: Colors.white)),
-              if (ready && c != null && c.value.isBuffering)
-                const Center(child: CupertinoActivityIndicator(color: Colors.white)),
+              if (ready && c != null) _StallSpinner(controller: c),
               // أيقونة الإيقاف
               if (ready && c != null)
                 IgnorePointer(
@@ -776,7 +876,9 @@ class _ReelViewState extends State<_ReelView> {
         ),
 
         // تدرج للقراءة
-        const IgnorePointer(
+        _UiFade(
+          hidden: widget.clear,
+          child: const IgnorePointer(
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -792,6 +894,7 @@ class _ReelViewState extends State<_ReelView> {
               ),
             ),
           ),
+          ),
         ),
 
         // العنوان + معلومات الريل
@@ -799,22 +902,28 @@ class _ReelViewState extends State<_ReelView> {
           left: 16,
           right: 84,
           bottom: bottomPad + 44,
-          child: IgnorePointer(child: _InfoBlock(item: item)),
+          child: _UiFade(
+            hidden: widget.clear,
+            child: IgnorePointer(child: _InfoBlock(item: item)),
+          ),
         ),
 
         // أزرار الجانب
         Positioned(
           right: 10,
           bottom: bottomPad + 40,
-          child: _ActionRail(
-            item: item,
-            muted: widget.muted,
-            saving: widget.saving,
-            isLast: widget.isLast,
-            onNext: widget.onNext,
-            onMute: widget.onMute,
-            onSave: widget.onSave,
-            onDownload: widget.onDownload,
+          child: _UiFade(
+            hidden: widget.clear,
+            child: _ActionRail(
+              item: item,
+              muted: widget.muted,
+              saving: widget.saving,
+              isLast: widget.isLast,
+              onNext: widget.onNext,
+              onMute: widget.onMute,
+              onFavorite: widget.onFavorite,
+              onSaveMenu: widget.onSaveMenu,
+            ),
           ),
         ),
 
@@ -889,7 +998,10 @@ class _ReelViewState extends State<_ReelView> {
             left: 0,
             right: 0,
             bottom: bottomPad + 6,
-            child: _ReelProgressBar(controller: c),
+            child: _UiFade(
+              hidden: widget.clear,
+              child: _ReelProgressBar(controller: c),
+            ),
           ),
       ],
     );
@@ -1022,8 +1134,8 @@ class _ActionRail extends StatelessWidget {
     required this.isLast,
     required this.onNext,
     required this.onMute,
-    required this.onSave,
-    required this.onDownload,
+    required this.onFavorite,
+    required this.onSaveMenu,
   });
 
   final ReelItem item;
@@ -1032,8 +1144,8 @@ class _ActionRail extends StatelessWidget {
   final bool isLast;
   final VoidCallback onNext;
   final VoidCallback onMute;
-  final VoidCallback onSave;
-  final VoidCallback onDownload;
+  final VoidCallback onFavorite;
+  final VoidCallback onSaveMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -1041,57 +1153,71 @@ class _ActionRail extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // حفظ في الصور
-        ValueListenableBuilder<Map<String, double>>(
-          valueListenable: saving,
-          builder: (_, map, __) {
-            final p = map[item.id];
+        // المفضلة
+        ListenableBuilder(
+          listenable: FavoritesStore.instance,
+          builder: (_, __) {
+            final fav = FavoritesStore.instance.isFavorite(downloadId);
             return _RailButton(
-              icon: Icons.bookmark_add_outlined,
-              label: p == null ? 'Save' : 'Saving',
-              progress: p,
-              onTap: onSave,
+              icon: fav ? Icons.star_rounded : Icons.star_outline_rounded,
+              iconColor: fav ? AppColors.star : Colors.white,
+              label: fav ? 'Favorited' : 'Favorite',
+              onTap: onFavorite,
             );
           },
         ),
         const SizedBox(height: Gaps.lg),
-        // تحميل داخل التطبيق
-        ListenableBuilder(
-          listenable: DownloadStore.instance,
-          builder: (_, __) {
-            final entry = DownloadStore.instance.item(downloadId);
-            if (entry == null) {
+        // تحميل / حفظ في الصور (قائمة)
+        ValueListenableBuilder<Map<String, double>>(
+          valueListenable: saving,
+          builder: (_, map, __) {
+            final saved = map[item.id];
+            if (saved != null) {
               return _RailButton(
                 icon: Icons.download_rounded,
-                label: 'Download',
-                onTap: onDownload,
+                label: 'Saving',
+                progress: saved,
+                onTap: onSaveMenu,
               );
             }
-            if (entry.status == DownloadStatus.done) {
-              return _RailButton(
-                icon: Icons.download_done_rounded,
-                label: 'Downloaded',
-                active: true,
-                onTap: onDownload,
-              );
-            }
-            if (entry.status == DownloadStatus.failed ||
-                entry.status == DownloadStatus.paused) {
-              return _RailButton(
-                icon: Icons.refresh_rounded,
-                label: 'Retry',
-                onTap: onDownload,
-              );
-            }
-            return ValueListenableBuilder<int>(
-              valueListenable: entry.bytes,
-              builder: (_, __, ___) {
-                final p = entry.progress;
-                return _RailButton(
-                  icon: Icons.download_rounded,
-                  label: p == null ? 'Queued' : '${(p * 100).round()}%',
-                  progress: p ?? -1,
-                  onTap: onDownload,
+            return ListenableBuilder(
+              listenable: DownloadStore.instance,
+              builder: (_, __) {
+                final entry = DownloadStore.instance.item(downloadId);
+                if (entry == null) {
+                  return _RailButton(
+                    icon: Icons.download_rounded,
+                    label: 'Save',
+                    onTap: onSaveMenu,
+                  );
+                }
+                if (entry.status == DownloadStatus.done) {
+                  return _RailButton(
+                    icon: Icons.download_done_rounded,
+                    label: 'Saved',
+                    active: true,
+                    onTap: onSaveMenu,
+                  );
+                }
+                if (entry.status == DownloadStatus.failed ||
+                    entry.status == DownloadStatus.paused) {
+                  return _RailButton(
+                    icon: Icons.refresh_rounded,
+                    label: 'Retry',
+                    onTap: onSaveMenu,
+                  );
+                }
+                return ValueListenableBuilder<int>(
+                  valueListenable: entry.bytes,
+                  builder: (_, __, ___) {
+                    final p = entry.progress;
+                    return _RailButton(
+                      icon: Icons.download_rounded,
+                      label: p == null ? 'Queued' : '${(p * 100).round()}%',
+                      progress: p ?? -1,
+                      onTap: onSaveMenu,
+                    );
+                  },
                 );
               },
             );
@@ -1115,6 +1241,90 @@ class _ActionRail extends StatelessWidget {
   }
 }
 
+/// يخفي/يظهر عناصر الواجهة بنعومة (Clear mode).
+class _UiFade extends StatelessWidget {
+  const _UiFade({required this.hidden, required this.child});
+
+  final bool hidden;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: hidden,
+      child: AnimatedOpacity(
+        duration: Motion.normal,
+        curve: Motion.curve,
+        opacity: hidden ? 0 : 1,
+        child: child,
+      ),
+    );
+  }
+}
+
+/// دوّارة التحميل: تطلع بس إذا الفيديو وقف فعلاً (تقطيع)، مو وهو شغال.
+class _StallSpinner extends StatefulWidget {
+  const _StallSpinner({required this.controller});
+
+  final VideoPlayerController controller;
+
+  @override
+  State<_StallSpinner> createState() => _StallSpinnerState();
+}
+
+class _StallSpinnerState extends State<_StallSpinner> {
+  Timer? _timer;
+  Duration _lastPos = Duration.zero;
+  DateTime _lastMove = DateTime.now();
+  bool _show = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onValue);
+    _timer = Timer.periodic(const Duration(milliseconds: 250), (_) => _tick());
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onValue);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onValue() {
+    final pos = widget.controller.value.position;
+    if (pos != _lastPos) {
+      _lastPos = pos;
+      _lastMove = DateTime.now();
+      if (_show && mounted) setState(() => _show = false);
+    }
+  }
+
+  void _tick() {
+    if (!mounted) return;
+    final v = widget.controller.value;
+    final stalled = v.isInitialized &&
+        v.isPlaying &&
+        v.isBuffering &&
+        DateTime.now().difference(_lastMove) > const Duration(milliseconds: 700);
+    if (stalled != _show) setState(() => _show = stalled);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        duration: Motion.normal,
+        opacity: _show ? 1 : 0,
+        child: const Center(
+          child: CupertinoActivityIndicator(radius: 14, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
 class _RailButton extends StatelessWidget {
   const _RailButton({
     required this.icon,
@@ -1122,9 +1332,11 @@ class _RailButton extends StatelessWidget {
     required this.onTap,
     this.progress,
     this.active = false,
+    this.iconColor = Colors.white,
   });
 
   final IconData icon;
+  final Color iconColor;
   final String label;
   final VoidCallback onTap;
 
@@ -1166,7 +1378,7 @@ class _RailButton extends StatelessWidget {
                         backgroundColor: const Color(0x33FFFFFF),
                       ),
                     ),
-                  Icon(icon, color: Colors.white, size: 22),
+                  Icon(icon, color: iconColor, size: 22),
                 ],
               ),
             ),

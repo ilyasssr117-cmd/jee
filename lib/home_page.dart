@@ -329,6 +329,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         }
       case AppTab.search:
         _openSearch();
+      case AppTab.reels:
+        if (_searchOpen) _closeSearch();
+        Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(builder: (_) => const ReelsPage()),
+        );
       case AppTab.library:
         if (_searchOpen) _closeSearch();
         if (_section != _Section.library) {
@@ -487,25 +492,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
-                  if (_section == _Section.home && !searchOpen)
-                    Positioned(
-                      top: context.safe.top + 8,
-                      right: 12,
-                      child: Material(
-                        color: Colors.black54,
-                        shape: const CircleBorder(),
-                        child: IconButton(
-                          tooltip: 'Reels',
-                          icon: const Icon(Icons.slideshow_rounded,
-                              color: Colors.white),
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const ReelsPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),

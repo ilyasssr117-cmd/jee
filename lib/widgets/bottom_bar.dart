@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../touch.dart';
 
-enum AppTab { home, search, library, settings }
+enum AppTab { home, search, reels, library, settings }
 
 const double kBottomBarHeight = 76;
 
@@ -50,6 +50,12 @@ class AppBottomBar extends StatelessWidget {
               label: 'Search',
               active: selected == AppTab.search,
               onTap: () => onSelect(AppTab.search),
+            ),
+            _TabItem(
+              icon: Icons.smart_display_rounded,
+              label: 'Reels',
+              active: selected == AppTab.reels,
+              onTap: () => onSelect(AppTab.reels),
             ),
             _TabItem(
               icon: Icons.video_library_rounded,
@@ -101,7 +107,7 @@ class _TabItem extends StatelessWidget {
       child: AnimatedContainer(
         duration: Motion.normal,
         curve: Motion.curve,
-        width: 58,
+        width: 54,
         height: 42,
         decoration: BoxDecoration(
           color: active ? AppColors.blueSoft : Colors.transparent,

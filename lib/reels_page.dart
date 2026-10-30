@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
-import 'package:flutter/foundation.dart';
+
 import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/cupertino.dart'
     show
@@ -10,6 +9,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoActionSheetAction,
         CupertinoActivityIndicator,
         showCupertinoModalPopup;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -33,8 +33,8 @@ const String _kUserAgent =
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7 '
     'Mobile/15E148 Safari/604.1';
 
-// كان قبل `https://$_mediaSite/` وهو يطلع https://https://... وغلط
-const String _kMediaOrigin = 'https://apiv2.tik.porn/getnextvideos';
+const String _kApiUrl = 'https://apiv2.tik.porn/getnextvideos';
+const String _kMediaOrigin = 'https://apiv2.tik.porn';
 const Map<String, String> _kMediaHeaders = {
   'User-Agent': _kUserAgent,
   'Referer': '$_kMediaOrigin/',
@@ -139,7 +139,7 @@ class ReelsRepository {
   final Set<String> _seen = <String>{};
   final http.Client _client = _makeClient();
 
-  static final Uri _api = Uri.https('apiv2.tik.porn', '/getnextvideos');
+  static final Uri _api = Uri.parse(_kApiUrl);
   static const Map<String, String> _headers = {
     'User-Agent': _kUserAgent,
     'Accept': 'application/json',
@@ -268,7 +268,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _clear = LocalStore.readBool(_kClearKey, fallback: false);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     // نوقف أي معاينة أو مشغل صغير شغال عشان ما يتداخل الصوت
     unawaited(PreviewManager.instance.stopAndWait());
     unawaited(MiniPlayer.instance.close());
@@ -278,7 +277,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     for (final c in _controllers.values) {
       c.dispose();
     }
@@ -317,6 +315,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       });
       if (first && _items.isNotEmpty) _syncControllers(0);
     } catch (e) {
+      if (kDebugMode) debugPrint('[REELS] load failed: $e');
       if (!mounted) return;
       setState(() {
         _error = e.toString();
@@ -556,7 +555,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       } else {
         _toast('Couldn\u2019t save the video.');
       }
-    } catch (_) {
+    } catch (error) {
+      if (kDebugMode) debugPrint('[REELS] save failed: ${error.runtimeType}');
       if (mounted) _toast('Couldn\u2019t save the video.');
     } finally {
       _setSaving(item.id, null);
@@ -568,7 +568,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
@@ -576,6 +578,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             PageView.builder(
               controller: _pager,
               scrollDirection: Axis.vertical,
+              physics: const PageScrollPhysics(),
               itemCount: _items.length,
               onPageChanged: _onPageChanged,
               itemBuilder: (context, i) {
@@ -631,25 +634,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                     onTap: () => Navigator.of(context).maybePop(),
                   ),
                 ),
-                Expanded(
-                  child: IgnorePointer(
-                    child: AnimatedOpacity(
-                      duration: Motion.normal,
-                      opacity: _clear ? 0 : 1,
-                      child: Center(
-                        child: Text(
-                          'REELS',
-                          style: AppText.overline.copyWith(
-                            color: Colors.white,
-                            shadows: const [
-                              Shadow(blurRadius: 8, color: Color(0xCC000000)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                const Spacer(),
                 AnimatedOpacity(
                   duration: Motion.normal,
                   opacity: _clear ? 0.55 : 1,
@@ -667,6 +652,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -798,20 +784,36 @@ class _ReelViewState extends State<_ReelView> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // خلفية: البوستر مغبّش يعبي الفراغ حول الفيديو
+        // خلفية: بوستر مصغّر يتمدد فيطلع مموّه بدون تكلفة blur
         if (item.thumbUrl != null)
           RepaintBoundary(
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+            child: Image.network(
+              item.thumbUrl!,
+              fit: BoxFit.cover,
+              cacheWidth: 40,
+              filterQuality: FilterQuality.medium,
+              gaplessPlayback: true,
+              headers: _kMediaHeaders,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
+        const ColoredBox(color: Color(0xB3000000)),
+        // البوستر الواضح لين يجهز الفيديو، وبعدها يختفي بنعومة
+        if (item.thumbUrl != null)
+          IgnorePointer(
+            child: AnimatedOpacity(
+              duration: Motion.fade,
+              curve: Motion.curve,
+              opacity: ready ? 0 : 1,
               child: Image.network(
                 item.thumbUrl!,
-                fit: BoxFit.cover,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
                 headers: _kMediaHeaders,
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
             ),
           ),
-        const ColoredBox(color: Color(0x99000000)),
 
         // الفيديو + الإيماءات
         GestureDetector(
@@ -826,7 +828,16 @@ class _ReelViewState extends State<_ReelView> {
             fit: StackFit.expand,
             children: [
               if (ready && c != null)
-                _video(context, c)
+                RepaintBoundary(
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: 1),
+                    duration: Motion.fade,
+                    curve: Motion.curve,
+                    builder: (_, value, child) =>
+                        Opacity(opacity: value, child: child),
+                    child: _video(context, c),
+                  ),
+                )
               else if (c != null && c.value.hasError)
                 Center(
                   child: Column(
@@ -846,7 +857,7 @@ class _ReelViewState extends State<_ReelView> {
                   ),
                 )
               else
-                const Center(child: CupertinoActivityIndicator(color: Colors.white)),
+                const Center(child: CupertinoActivityIndicator(radius: 12, color: Colors.white)),
               if (ready && c != null) _StallSpinner(controller: c),
               // أيقونة الإيقاف
               if (ready && c != null)
@@ -858,14 +869,15 @@ class _ReelViewState extends State<_ReelView> {
                         duration: Motion.normal,
                         opacity: v.isPlaying ? 0 : 1,
                         child: Container(
-                          width: 72,
-                          height: 72,
-                          decoration: const BoxDecoration(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Color(0x73000000),
+                            color: const Color(0x66000000),
+                            border: Border.all(color: const Color(0x26FFFFFF)),
                           ),
                           child: const Icon(Icons.play_arrow_rounded,
-                              color: Colors.white, size: 44),
+                              color: Colors.white, size: 36),
                         ),
                       ),
                     ),
@@ -900,7 +912,7 @@ class _ReelViewState extends State<_ReelView> {
         // العنوان + معلومات الريل
         Positioned(
           left: 16,
-          right: 84,
+          right: 78,
           bottom: bottomPad + 44,
           child: _UiFade(
             hidden: widget.clear,
@@ -1074,7 +1086,7 @@ class _InfoBlock extends StatelessWidget {
             spacing: 6,
             runSpacing: 6,
             children: [
-              for (final t in item.tags.take(3))
+              for (final t in item.tags.take(2))
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -1352,13 +1364,13 @@ class _RailButton extends StatelessWidget {
       onTap: onTap,
       pressedScale: 0.88,
       child: SizedBox(
-        width: 58,
+        width: 56,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 46,
-              height: 46,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: active ? AppColors.accentStrong : const Color(0x8C000000),
@@ -1369,8 +1381,8 @@ class _RailButton extends StatelessWidget {
                 children: [
                   if (busy)
                     SizedBox(
-                      width: 46,
-                      height: 46,
+                      width: 44,
+                      height: 44,
                       child: CircularProgressIndicator(
                         strokeWidth: 2.5,
                         value: progress! < 0 ? null : progress,
@@ -1382,7 +1394,7 @@ class _RailButton extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 5),
             Text(
               label,
               maxLines: 1,

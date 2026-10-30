@@ -117,9 +117,9 @@ class _SettingsViewState extends State<SettingsView> {
                     onChanged: settings.setAutoplayNext,
                   ),
                 ),
-                _Row(
+                const _Row(
                   icon: Icons.high_quality_rounded,
-                  color: const Color(0xFF1A73E8),
+                  color: Color(0xFF1A73E8),
                   title: 'Video quality',
                   subtitle: 'Used when a video offers several qualities',
                   trailing: SizedBox.shrink(),

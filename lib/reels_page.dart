@@ -11,6 +11,7 @@ import 'package:flutter/cupertino.dart'
         showCupertinoModalPopup;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -244,6 +245,18 @@ String _clock(Duration d) {
   return '$m:$s';
 }
 
+class _ReelsPhysics extends PageScrollPhysics {
+  const _ReelsPhysics({super.parent});
+
+  @override
+  _ReelsPhysics applyTo(ScrollPhysics? ancestor) =>
+      _ReelsPhysics(parent: buildParent(ancestor));
+
+  @override
+  SpringDescription get spring =>
+      const SpringDescription(mass: 0.4, stiffness: 240, damping: 24);
+}
+
 class ReelsPage extends StatefulWidget {
   const ReelsPage({super.key});
 
@@ -263,6 +276,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   bool _loading = false;
   bool _resumeOnForeground = false;
+  bool _syncPending = false;
   bool _exhausted = false;
   bool _muted = false;
   bool _clear = false;
@@ -408,8 +422,26 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   void _onPageChanged(int index) {
     _current = index;
-    _syncControllers(index);
+    _syncPending = true;
+    for (final entry in _controllers.entries) {
+      final c = entry.value;
+      if (!c.value.isInitialized) continue;
+      if (entry.key == index) {
+        c.play();
+      } else {
+        c.pause();
+        c.setPlaybackSpeed(1);
+      }
+    }
     if (index >= _items.length - _kPreloadAhead) _loadMore();
+  }
+
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n is ScrollEndNotification && n.depth == 0 && _syncPending) {
+      _syncPending = false;
+      _syncControllers(_current);
+    }
+    return false;
   }
 
   void _next() {
@@ -581,10 +613,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       body: Stack(
         children: [
           if (_items.isNotEmpty)
-            PageView.builder(
+            NotificationListener<ScrollNotification>(
+              onNotification: _onScrollNotification,
+              child: PageView.builder(
               controller: _pager,
               scrollDirection: Axis.vertical,
-              physics: const PageScrollPhysics(),
+              pageSnapping: false,
+              physics: const _ReelsPhysics(parent: BouncingScrollPhysics()),
               itemCount: _items.length,
               onPageChanged: _onPageChanged,
               itemBuilder: (context, i) {
@@ -604,6 +639,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   onRetry: () => _retry(i),
                 );
               },
+              ),
             )
           else if (_loading)
             const Center(child: CircularProgressIndicator())
@@ -698,7 +734,8 @@ class _ReelView extends StatefulWidget {
 
 class _ReelViewState extends State<_ReelView> {
   bool _fast = false;
-  Offset _tapAt = Offset.zero;
+  DateTime _lastTap = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _wasPlayingBeforeTap = false;
   int _seekTotal = 0;
   Timer? _seekTimer;
 
@@ -727,16 +764,30 @@ class _ReelViewState extends State<_ReelView> {
     setState(() => _fast = on);
   }
 
-  void _doubleTapSeek() {
+  void _onTapUp(TapUpDetails details) {
     final c = _c;
     if (!_ready || c == null) return;
+    final now = DateTime.now();
+    final isRepeat = now.difference(_lastTap) < const Duration(milliseconds: 260);
+    _lastTap = now;
     final width = context.size?.width ?? 1;
-    final x = _tapAt.dx / width;
-    if (x > 0.4 && x < 0.6) {
+    final x = details.localPosition.dx / width;
+    final onSide = x <= 0.4 || x >= 0.6;
+    if (!isRepeat) {
+      _wasPlayingBeforeTap = c.value.isPlaying;
       _togglePlay();
       return;
     }
-    final forward = x >= 0.6;
+    if (!onSide) return;
+    if (c.value.isPlaying != _wasPlayingBeforeTap) {
+      _wasPlayingBeforeTap ? c.play() : c.pause();
+    }
+    _seekBy(forward: x >= 0.6);
+  }
+
+  void _seekBy({required bool forward}) {
+    final c = _c;
+    if (!_ready || c == null) return;
     final dur = c.value.duration;
     var target = c.value.position + (forward ? _kSeekStep : -_kSeekStep);
     if (target < Duration.zero) target = Duration.zero;
@@ -821,9 +872,7 @@ class _ReelViewState extends State<_ReelView> {
 
         GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: _togglePlay,
-          onDoubleTapDown: (d) => _tapAt = d.localPosition,
-          onDoubleTap: _doubleTapSeek,
+          onTapUp: _onTapUp,
           onLongPressStart: (_) => _setFast(true),
           onLongPressEnd: (_) => _setFast(false),
           onLongPressCancel: () => _setFast(false),

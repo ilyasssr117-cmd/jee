@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show ImageFilter;
-
+import 'package:flutter/foundation.dart';
 import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/cupertino.dart'
     show

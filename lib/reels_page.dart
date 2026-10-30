@@ -6,11 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 
-const String _kEndpoint = 'https://apiv2.tik.porn/getnextvideos';
+const List<String> _kSites = ['tik.porn'];
 const String _kUserAgent =
     'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7_1 like Mac OS X) '
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7 '
     'Mobile/15E148 Safari/604.1';
+
+String _mediaSite = 'tik.porn';
 
 const int _kFirstBatch = 20; // الدفعة الأولى
 const int _kNextBatch = 20; // كل دفعة بعدها
@@ -75,14 +77,22 @@ class ReelsRepository {
   final Set<String> _seen = <String>{};
   final http.Client _client = http.Client();
 
-  Future<List<ReelItem>> _fetch(int amount) async {
+  String _site = _kSites.first;
+
+  Future<List<ReelItem>> _fetchFrom(String site, int amount) async {
     final res = await _client
         .post(
-          Uri.parse(_kEndpoint),
-          headers: const {
+          Uri.parse('https://apiv2.$site/getnextvideos'),
+          headers: {
             'User-Agent': _kUserAgent,
-            'Accept': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
             'Content-Type': 'application/json',
+            'Origin': 'https://$site',
+            'Referer': 'https://$site/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
           },
           body: jsonEncode({
             'amount': amount,
@@ -94,13 +104,31 @@ class ReelsRepository {
         )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
-      throw Exception('HTTP ${res.statusCode}');
+      final body = utf8.decode(res.bodyBytes, allowMalformed: true);
+      final snippet = body.length > 120 ? body.substring(0, 120) : body;
+      throw Exception('HTTP ${res.statusCode} [$site] $snippet');
     }
     final json = jsonDecode(utf8.decode(res.bodyBytes));
     if (json is Map && json['code'] != null && json['code'] != 200) {
       throw Exception('API ${json['code']}: ${json['message']}');
     }
     return parseReels(json);
+  }
+
+  Future<List<ReelItem>> _fetch(int amount) async {
+    Object? lastError;
+    final order = [_site, ..._kSites.where((e) => e != _site)];
+    for (final site in order) {
+      try {
+        final items = await _fetchFrom(site, amount);
+        _site = site;
+        _mediaSite = site;
+        return items;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? Exception('Request failed');
   }
 
   /// يرجع دفعة جديدة بدون أي ريل انعرض قبل. إذا طلع كله مكرر يعيد الطلب.
@@ -184,10 +212,10 @@ class _ReelsPageState extends State<ReelsPage> {
   VideoPlayerController _build(String url, int index, {String? fallback}) {
     final c = VideoPlayerController.networkUrl(
       Uri.parse(url),
-      httpHeaders: const {
+      httpHeaders: {
         'User-Agent': _kUserAgent,
-        'Referer': 'https://tik.porn/',
-        'Origin': 'https://tik.porn',
+        'Referer': 'https://$_mediaSite/',
+        'Origin': 'https://$_mediaSite',
         'Accept': '*/*',
       },
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
@@ -331,9 +359,9 @@ class _ReelView extends StatelessWidget {
             Image.network(
               item.thumbUrl!,
               fit: BoxFit.cover,
-              headers: const {
+              headers: {
                 'User-Agent': _kUserAgent,
-                'Referer': 'https://tik.porn/',
+                'Referer': 'https://$_mediaSite/',
               },
               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             ),

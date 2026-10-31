@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -126,7 +124,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
-    _headerLimit = _headerHeight(MediaQuery.sizeOf(context)) - context.safe.top - 30;
+    _headerLimit =
+        _headerHeight(MediaQuery.sizeOf(context)) - context.safe.top;
     final darkMode = AppColors.palette.brightness == Brightness.dark;
     return ValueListenableBuilder<bool>(
       valueListenable: _overHeader,
@@ -159,150 +158,168 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
-    final size = MediaQuery.sizeOf(context);
     final resume = PlaybackProgress.instance.resumePosition(video.id);
+    final routeAnimation = ModalRoute.of(context)?.animation ??
+        const AlwaysStoppedAnimation<double>(1);
+
+    final imageCurve = CurveTween(curve: Curves.easeOutCubic);
+    final imageOpacity = routeAnimation.drive(imageCurve);
+    final imageScale = routeAnimation.drive(
+      Tween<double>(begin: 1.035, end: 1).chain(imageCurve),
+    );
+    const infoCurve = CurveTween(
+      curve: Interval(0.18, 1, curve: Curves.easeOutCubic),
+    );
+    final infoOpacity = routeAnimation.drive(infoCurve);
+    final infoOffset = routeAnimation.drive(
+      Tween<Offset>(begin: const Offset(0, 0.035), end: Offset.zero)
+          .chain(infoCurve),
+    );
+
     final meta = VideoMetaLine(
       video: video,
-      style: darkText.caption.copyWith(color: OnDark.textSecondary),
+      style: AppText.caption.copyWith(color: AppColors.textSecondary),
       showDuration: true,
       showDate: true,
       fallbackToCategory: false,
     );
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(minHeight: _headerHeight(size)),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
-        child: Stack(
-        alignment: Alignment.bottomLeft,
-        children: [
-          Positioned.fill(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Hero(
-                  tag: 'video-artwork-${video.id}',
-                  transitionOnUserGestures: true,
-                  flightShuttleBuilder: videoArtworkHeroFlight,
-                  child: VideoArtwork(video: video, showLabel: false),
-                ),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x330B0D12), Color(0xE60B0D12)],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              margin,
-              context.safe.top + Gaps.sm + kMinTapSize + Gaps.md,
-              margin,
-              Gaps.md,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (video.category.isNotEmpty)
-                  Text(
-                    video.category.toUpperCase(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: darkText.overline,
-                  ),
-                const SizedBox(height: 6),
-                ExpandableText(
-                  video.title,
-                  collapsedLines: 3,
-                  style: darkText.display.copyWith(fontSize: 22),
-                  toggleStyle: darkText.label.copyWith(
-                    color: AppColors.accent,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (meta.hasContent) ...[
-                  const SizedBox(height: Gaps.sm),
-                  meta,
-                ],
-                if (video.description.isNotEmpty) ...[
-                  const SizedBox(height: Gaps.sm),
-                  Text(
-                    video.description,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: darkText.body.copyWith(fontSize: 13),
-                  ),
-                ],
-                const SizedBox(height: Gaps.md),
-                Wrap(
-                  spacing: Gaps.sm,
-                  runSpacing: Gaps.sm,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FadeTransition(
+          opacity: imageOpacity,
+          child: ScaleTransition(
+            scale: imageScale,
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(22),
+              ),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    AppButton(
-                      label: resume != null
-                          ? 'Resume ${_formatResume(resume)}'
-                          : 'Play',
-                      icon: Icons.play_arrow_rounded,
-                      loading: _preparing,
-                      onDark: true,
-                      onPressed: _play,
+                    ColoredBox(color: AppColors.surfaceHigh),
+                    VideoArtwork(
+                      video: video,
+                      showLabel: false,
+                      fit: BoxFit.contain,
                     ),
-                    if (resume != null)
-                      AppButton(
-                        label: 'Start over',
-                        icon: Icons.replay_rounded,
-                        style: AppButtonStyle.secondary,
-                        onDark: true,
-                        onPressed: () => _play(fromStart: true),
-                      ),
-                    _buildFavoriteButton(),
-                    _buildDownloadButton(),
-                    if (_shareLink != null)
-                      AppButton(
-                        label: 'Copy link',
-                        icon: Icons.link_rounded,
-                        style: AppButtonStyle.secondary,
-                        onDark: true,
-                        onPressed: _copyLink,
-                      ),
+                    Positioned(
+                      left: margin,
+                      top: context.safe.top + Gaps.sm,
+                      child: const PageBackButton(),
+                    ),
                   ],
                 ),
-                if (_playError != null) ...[
-                  const SizedBox(height: Gaps.sm),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.error_outline_rounded,
-                        size: 20,
-                        color: OnDark.error,
-                      ),
-                      const SizedBox(width: Gaps.sm),
-                      Flexible(
-                        child: Text(
-                          _playError!,
-                          style: darkText.body.copyWith(color: OnDark.error),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
-          Positioned(
-            left: margin,
-            top: context.safe.top + Gaps.sm,
-            child: const PageBackButton(),
+        ),
+        FadeTransition(
+          opacity: infoOpacity,
+          child: SlideTransition(
+            position: infoOffset,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                margin,
+                Gaps.lg,
+                margin,
+                Gaps.md,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (video.category.isNotEmpty)
+                    Text(
+                      video.category.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.overline,
+                    ),
+                  const SizedBox(height: 6),
+                  ExpandableText(
+                    video.title,
+                    collapsedLines: 3,
+                    style: AppText.display.copyWith(fontSize: 23),
+                    toggleStyle: AppText.label.copyWith(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (meta.hasContent) ...[
+                    const SizedBox(height: Gaps.sm),
+                    meta,
+                  ],
+                  if (video.description.isNotEmpty) ...[
+                    const SizedBox(height: Gaps.sm),
+                    Text(
+                      video.description,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.body.copyWith(fontSize: 13),
+                    ),
+                  ],
+                  const SizedBox(height: Gaps.md),
+                  Wrap(
+                    spacing: Gaps.sm,
+                    runSpacing: Gaps.sm,
+                    children: [
+                      AppButton(
+                        label: resume != null
+                            ? 'Resume ${_formatResume(resume)}'
+                            : 'Play',
+                        icon: Icons.play_arrow_rounded,
+                        loading: _preparing,
+                        onPressed: _play,
+                      ),
+                      if (resume != null)
+                        AppButton(
+                          label: 'Start over',
+                          icon: Icons.replay_rounded,
+                          style: AppButtonStyle.secondary,
+                          onPressed: () => _play(fromStart: true),
+                        ),
+                      _buildFavoriteButton(),
+                      _buildDownloadButton(),
+                      if (_shareLink != null)
+                        AppButton(
+                          label: 'Copy link',
+                          icon: Icons.link_rounded,
+                          style: AppButtonStyle.secondary,
+                          onPressed: _copyLink,
+                        ),
+                    ],
+                  ),
+                  if (_playError != null) ...[
+                    const SizedBox(height: Gaps.sm),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline_rounded,
+                          size: 20,
+                          color: AppColors.error,
+                        ),
+                        const SizedBox(width: Gaps.sm),
+                        Flexible(
+                          child: Text(
+                            _playError!,
+                            style: AppText.body.copyWith(
+                              color: AppColors.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
-        ],
-      ),
-      ),
+        ),
+      ],
     );
   }
 
@@ -333,7 +350,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           icon: active ? Icons.star_rounded : Icons.star_border_rounded,
           iconColor: active ? AppColors.star : null,
           style: AppButtonStyle.secondary,
-          onDark: true,
           onPressed: () {
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
@@ -356,8 +372,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             label: 'Download',
             icon: Icons.download_rounded,
             style: AppButtonStyle.secondary,
-            onDark: true,
-            onPressed: () {
+              onPressed: () {
               store.enqueue(widget.video);
               showToast(context, 'Download started', aboveBar: false);
             },
@@ -374,8 +389,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 icon: Icons.download_done_rounded,
                 iconColor: AppColors.accent,
                 style: AppButtonStyle.secondary,
-                onDark: true,
-                onPressed: () async {
+                      onPressed: () async {
                   final ok = await confirmDialog(
                     context,
                     title: 'Delete this download?',
@@ -389,8 +403,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 label: 'Save to Photos',
                 icon: Icons.photo_library_outlined,
                 style: AppButtonStyle.secondary,
-                onDark: true,
-                onPressed: () => saveVideoToPhotos(context, id, aboveBar: false),
+                      onPressed: () => saveVideoToPhotos(context, id, aboveBar: false),
               ),
             ],
           );
@@ -407,16 +420,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   label: fraction == null ? 'Downloading\u2026' : '${(fraction * 100).round()}%',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.secondary,
-                  onDark: true,
-                  onPressed: () => store.pause(id),
+                          onPressed: () => store.pause(id),
                 );
               case DownloadStatus.queued:
                 return AppButton(
                   label: 'Waiting\u2026',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.secondary,
-                  onDark: true,
-                  onPressed: () => store.pause(id),
+                          onPressed: () => store.pause(id),
                 );
               case DownloadStatus.paused:
               case DownloadStatus.failed:
@@ -425,8 +436,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   label: item.hasPartial ? 'Resume$percent' : 'Retry download',
                   icon: Icons.play_arrow_rounded,
                   style: AppButtonStyle.secondary,
-                  onDark: true,
-                  onPressed: () => store.resume(id),
+                          onPressed: () => store.resume(id),
                 );
             }
           },
@@ -435,7 +445,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  double _headerHeight(Size size) => math.min(size.height * 0.5, 460.0);
+  double _headerHeight(Size size) => size.width * 9 / 16;
 
   Widget _buildModels(double margin) {
     return FutureBuilder<List<ModelRef>>(

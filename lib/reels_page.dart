@@ -581,15 +581,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     if (_enqueue(item)) _toast('Downloading\u2026');
   }
 
-  void _like(ReelItem item) {
-    final id = 'reel_${item.id}';
-    if (!FavoritesStore.instance.isFavorite(id)) {
-      _toggleFavorite(item);
-    } else {
-      Haptics.play(Haptic.light);
-    }
-  }
-
   void _toggleFavorite(ReelItem item) {
     final favorites = FavoritesStore.instance;
     final id = 'reel_${item.id}';
@@ -729,7 +720,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   onMute: _toggleMute,
                   clear: _clear,
                   onFavorite: () => _toggleFavorite(item),
-                  onLike: () => _like(item),
                   onSaveMenu: () => _showSaveMenu(item),
                   onRetry: () => _retry(i),
                 );
@@ -953,7 +943,6 @@ class _ReelView extends StatefulWidget {
     required this.onMute,
     required this.clear,
     required this.onFavorite,
-    required this.onLike,
     required this.onSaveMenu,
     required this.onRetry,
   });
@@ -968,7 +957,6 @@ class _ReelView extends StatefulWidget {
   final VoidCallback onMute;
   final bool clear;
   final VoidCallback onFavorite;
-  final VoidCallback onLike;
   final VoidCallback onSaveMenu;
   final VoidCallback onRetry;
 
@@ -979,7 +967,6 @@ class _ReelView extends StatefulWidget {
 class _ReelViewState extends State<_ReelView> {
   bool _fast = false;
   bool _controlsVisible = true;
-  bool _likePulse = false;
   bool _longPressTriggered = false;
   bool _pointerMoved = false;
   bool _secondTapCandidate = false;
@@ -989,7 +976,9 @@ class _ReelViewState extends State<_ReelView> {
   Timer? _longPressTimer;
   Timer? _singleTapTimer;
   Timer? _controlsTimer;
-  Timer? _likeTimer;
+  Timer? _seekFeedbackTimer;
+  int _seekDirection = 0;
+  bool _seekFeedbackVisible = false;
 
   VideoPlayerController? get _c => widget.controller;
   bool get _ready => _c != null && _c!.value.isInitialized;
@@ -1015,7 +1004,7 @@ class _ReelViewState extends State<_ReelView> {
     _longPressTimer?.cancel();
     _singleTapTimer?.cancel();
     _controlsTimer?.cancel();
-    _likeTimer?.cancel();
+    _seekFeedbackTimer?.cancel();
     super.dispose();
   }
 
@@ -1052,13 +1041,43 @@ class _ReelViewState extends State<_ReelView> {
     }
   }
 
-  void _showLikePulse() {
+  Future<void> _seekByTenSeconds(int direction) async {
+    final c = _c;
+    if (!_ready || c == null || !widget.isActive) return;
+
+    final duration = c.value.duration;
+    if (duration <= Duration.zero) return;
+    final targetMs = (c.value.position.inMilliseconds + direction * 10000)
+        .clamp(0, duration.inMilliseconds)
+        .toInt();
+    try {
+      await c.seekTo(Duration(milliseconds: targetMs));
+    } catch (_) {
+      // Seeking can fail while the native player is being replaced/disposed.
+      return;
+    }
+
     if (!mounted) return;
-    setState(() => _likePulse = true);
-    _likeTimer?.cancel();
-    _likeTimer = Timer(const Duration(milliseconds: 620), () {
-      if (mounted) setState(() => _likePulse = false);
+    Haptics.play(Haptic.selection);
+    setState(() {
+      _seekDirection = direction;
+      _seekFeedbackVisible = true;
     });
+    _seekFeedbackTimer?.cancel();
+    _seekFeedbackTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted) setState(() => _seekFeedbackVisible = false);
+    });
+  }
+
+  void _handleDoubleTap(Offset position) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (position.dx <= width * 0.42) {
+      unawaited(_seekByTenSeconds(-1));
+    } else if (position.dx >= width * 0.58) {
+      unawaited(_seekByTenSeconds(1));
+    } else {
+      _togglePlay();
+    }
   }
 
   void _setFast(bool on) {
@@ -1070,8 +1089,8 @@ class _ReelViewState extends State<_ReelView> {
     if (mounted) setState(() => _fast = on);
   }
 
-  // Handle the gestures at pointer level so a double tap is recognised before
-  // a single-tap pause is dispatched. This avoids the old pause -> play flash.
+  // Resolve the double tap before dispatching a single-tap play/pause.
+  // Left and right double taps seek; a press-and-hold temporarily enables 2x.
   void _onPointerDown(PointerDownEvent event) {
     if (!_ready || !widget.isActive || _activePointer != null) return;
     _revealControls();
@@ -1153,8 +1172,7 @@ class _ReelViewState extends State<_ReelView> {
       _lastTapTime = null;
       _singleTapTimer?.cancel();
       _singleTapTimer = null;
-      widget.onLike();
-      _showLikePulse();
+      _handleDoubleTap(event.localPosition);
       return;
     }
 
@@ -1232,8 +1250,8 @@ class _ReelViewState extends State<_ReelView> {
         Semantics(
           button: true,
           label: 'Video player',
-          hint: 'Tap to pause or play. Double-tap to favorite. '
-              'Press and hold for 2x speed. Drag the progress bar to seek.',
+          hint: 'Tap to pause or play. Double-tap the left or right side '
+              'to rewind or skip 10 seconds. Press and hold for 2x speed.',
           onTap: _togglePlay,
           child: Listener(
             behavior: HitTestBehavior.opaque,
@@ -1371,20 +1389,51 @@ class _ReelViewState extends State<_ReelView> {
           ),
         ),
 
-        IgnorePointer(
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 120),
-            opacity: _likePulse ? 1 : 0,
-            child: AnimatedScale(
-              duration: const Duration(milliseconds: 260),
-              curve: Curves.easeOutBack,
-              scale: _likePulse ? 1 : 0.55,
-              child: const Center(
-                child: Icon(
-                  CupertinoIcons.heart_fill,
-                  color: Colors.white,
-                  size: 104,
-                  shadows: [Shadow(color: Color(0x66000000), blurRadius: 24)],
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 120),
+              opacity: _seekFeedbackVisible ? 1 : 0,
+              child: Align(
+                alignment: _seekDirection < 0
+                    ? const Alignment(-0.72, 0)
+                    : const Alignment(0.72, 0),
+                child: AnimatedScale(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  scale: _seekFeedbackVisible ? 1 : 0.88,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 13,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xA8202530),
+                      borderRadius: BorderRadius.circular(Radii.pill),
+                      border: Border.all(color: const Color(0x35FFFFFF)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _seekDirection < 0
+                              ? Icons.replay_10_rounded
+                              : Icons.forward_10_rounded,
+                          color: Colors.white,
+                          size: 23,
+                        ),
+                        const SizedBox(width: 5),
+                        const Text(
+                          '10s',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1562,17 +1611,6 @@ class _InfoBlock extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                CupertinoIcons.heart_fill,
-                size: 14,
-                color: Colors.white70,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                item.likes.isEmpty ? '0' : item.likes,
-                style: AppText.caption.copyWith(color: Colors.white70),
-              ),
-              const SizedBox(width: 13),
               const Icon(
                 CupertinoIcons.play_fill,
                 size: 12,

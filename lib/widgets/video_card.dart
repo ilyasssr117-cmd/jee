@@ -67,12 +67,7 @@ class VideoCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Hero(
-                    tag: 'video-artwork-${video.id}',
-                    transitionOnUserGestures: true,
-                    flightShuttleBuilder: videoArtworkHeroFlight,
-                    child: VideoArtwork(video: video),
-                  ),
+                  VideoArtwork(video: video),
                   PreviewSlot(video: video),
                   if (completed)
                     const Positioned(

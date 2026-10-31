@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 
+/// A title that is clamped to [collapsedLines] and ends in an ellipsis ("…").
+/// Tap the text to read all of it, tap it again to collapse it. There is no
+/// separate "more" / "less" word.
 class ExpandableText extends StatefulWidget {
   const ExpandableText(
     this.text, {
@@ -16,6 +19,8 @@ class ExpandableText extends StatefulWidget {
   final String text;
   final TextStyle style;
   final int collapsedLines;
+
+  /// Kept for source compatibility; the toggle word no longer exists.
   final TextStyle? toggleStyle;
 
   final double? maxExpandedHeight;
@@ -72,53 +77,25 @@ class _ExpandableTextState extends State<ExpandableText> {
               child: text,
             ),
           );
-        } else if (widget.ignoreTextPointer) {
-          text = IgnorePointer(child: text);
         }
 
         if (!canExpand) {
-          return text;
+          return widget.ignoreTextPointer ? IgnorePointer(child: text) : text;
         }
 
-        final toggle =
-            widget.toggleStyle ??
-            widget.style.copyWith(
-              fontSize: (widget.style.fontSize ?? 14) - 1,
-              fontWeight: FontWeight.w700,
-              color: AppColors.accent,
-            );
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedSize(
+        return Semantics(
+          button: true,
+          label: _expanded ? 'Collapse title' : 'Show full title',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: AnimatedSize(
               duration: Motion.quick,
               curve: Curves.easeOutCubic,
               alignment: AlignmentDirectional.topStart,
               child: text,
             ),
-            Semantics(
-              button: true,
-              label: _expanded ? 'Show less' : 'Show full title',
-              excludeSemantics: true,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _expanded = !_expanded),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 36),
-                  child: Padding(
-                    padding: const EdgeInsetsDirectional.only(end: 28),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      widthFactor: 1,
-                      child: Text(_expanded ? 'less' : 'more', style: toggle),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         );
       },
     );

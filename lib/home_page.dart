@@ -13,6 +13,7 @@ import 'offline_listing_cache.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
+import 'reel_favorites.dart';
 import 'reels_page.dart';
 import 'request_cache.dart';
 import 'touch.dart';
@@ -31,7 +32,7 @@ import 'widgets/settings_view.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 
-enum _Section { home, library, settings }
+enum _Section { home, reels, library, settings }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -44,6 +45,7 @@ class _HomePageState extends State<HomePage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   static const List<_Section> _sectionOrder = <_Section>[
     _Section.home,
+    _Section.reels,
     _Section.library,
     _Section.settings,
   ];
@@ -70,6 +72,7 @@ class _HomePageState extends State<HomePage>
   final ValueNotifier<bool> _search = ValueNotifier<bool>(false);
   bool get _searchOpen => _search.value;
   _Section _section = _Section.home;
+  Widget? _reelsPage;
   Widget? _libraryPage;
   Widget? _settingsPage;
   FriendlyError? _error;
@@ -385,15 +388,39 @@ class _HomePageState extends State<HomePage>
     if (_searchOpen) return;
     PreviewManager.instance.stopNow(fade: false);
     _search.value = true;
+    setState(() {});
   }
 
   void _closeSearch() {
     if (!_searchOpen) return;
     FocusManager.instance.primaryFocus?.unfocus();
     _search.value = false;
+    setState(() {});
+  }
+
+  /// A favorited/downloaded reel has no web page, so it skips the details
+  /// screen and plays straight from its saved source.
+  Future<void> _openSavedReel(Video video) async {
+    final source = ReelFavorites.instance.sourceFor(video.id);
+    if (source == null && DownloadStore.instance.localPath(video.id) == null) {
+      _toast('This reel can\u2019t be opened anymore.');
+      return;
+    }
+    final error = await launchPlayer(
+      context,
+      video.copyWith(streamUrl: source?.url ?? ''),
+      source: source,
+    );
+    if (!mounted) return;
+    setState(() {});
+    if (error != null) _toast(error);
   }
 
   Future<void> _openDetails(Video video, List<Video> queue) async {
+    if (video.id.startsWith('reel_')) {
+      await _openSavedReel(video);
+      return;
+    }
     await Navigator.of(context).push<void>(
       adaptivePageRoute<void>(
         context,
@@ -522,9 +549,9 @@ class _HomePageState extends State<HomePage>
         _openSearch();
       case AppTab.reels:
         if (_searchOpen) _closeSearch();
-        Navigator.of(context).push<void>(
-          adaptivePageRoute<void>(context, builder: (_) => const ReelsPage()),
-        );
+        if (_section != _Section.reels) {
+          _transitionToSection(_Section.reels);
+        }
       case AppTab.library:
         if (_searchOpen) _closeSearch();
         if (_section != _Section.library) {
@@ -590,10 +617,21 @@ class _HomePageState extends State<HomePage>
         30;
     final darkMode = AppColors.palette.brightness == Brightness.dark;
 
+    final reelsActive = _section == _Section.reels;
+    final reelsVisible = reelsActive || _dragTarget == _Section.reels;
     final libraryActive = _section == _Section.library;
     final settingsActive = _section == _Section.settings;
     final libraryVisible = libraryActive || _dragTarget == _Section.library;
     final settingsVisible = settingsActive || _dragTarget == _Section.settings;
+    if (reelsVisible || _reelsPage != null) {
+      _reelsPage = ReelsPage(
+        key: const ValueKey<String>('reels'),
+        // Playback runs only while the section is on screen and no search
+        // overlay or other full-screen route covers it.
+        active: reelsActive && !_searchOpen,
+        bottomInset: bottomInset,
+      );
+    }
     if (libraryVisible || _libraryPage != null) {
       _libraryPage = LibraryView(
         key: const ValueKey<String>('library'),
@@ -619,6 +657,7 @@ class _HomePageState extends State<HomePage>
         firstLoad,
         resume,
       ),
+      _Section.reels: _reelsPage ?? const SizedBox.shrink(),
       _Section.library: _libraryPage ?? const SizedBox.shrink(),
       _Section.settings: _settingsPage ?? const SizedBox.shrink(),
     };
@@ -679,6 +718,7 @@ class _HomePageState extends State<HomePage>
       builder: (context, searchOpen, page) {
         final lightIcons =
             darkMode ||
+            (_section == _Section.reels && !searchOpen) ||
             (_section == _Section.home && !searchOpen && _heroVisible);
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: lightIcons
@@ -717,6 +757,7 @@ class _HomePageState extends State<HomePage>
                     ? AppTab.search
                     : switch (_dragTarget ?? _section) {
                         _Section.home => AppTab.home,
+                        _Section.reels => AppTab.reels,
                         _Section.library => AppTab.library,
                         _Section.settings => AppTab.settings,
                       },
@@ -748,7 +789,7 @@ class _HomePageState extends State<HomePage>
         controller: _scroll,
         physics: nativeScrollPhysics(context, alwaysScrollable: true),
         scrollCacheExtent: ScrollCacheExtent.pixels(
-          MediaQuery.sizeOf(context).height,
+          MediaQuery.sizeOf(context).height * 0.7,
         ),
         slivers: [
           SliverToBoxAdapter(
@@ -892,14 +933,16 @@ class _HeroStretch extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: controller,
-      child: child,
+      // The hero (large image, gradients) is rasterized once and only its
+      // texture is scaled while pulling, so refresh stays at 60 fps.
+      child: RepaintBoundary(child: child),
       builder: (context, child) {
         final pulled = controller.hasClients
             ? math.max(0.0, -controller.position.pixels)
             : 0.0;
         // Always wrap, even at scale 1, so the hero keeps the same element
         // depth and is never remounted when the pull starts or ends.
-        final scale = 1 + math.min(pulled, 120.0) / 2000;
+        final scale = 1 + math.min(pulled, 120.0) / 2400;
         return Transform.scale(
           scale: scale,
           alignment: Alignment.bottomCenter,

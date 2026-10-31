@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -39,6 +41,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   final GlobalKey _headerKey = GlobalKey();
 
   final ValueNotifier<bool> _overHeader = ValueNotifier<bool>(true);
+
   double _headerLimit = 200;
   bool _preparing = false;
   String? _playError;
@@ -150,19 +153,36 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           ),
       child: Scaffold(
         backgroundColor: AppColors.background,
-        body: CustomScrollView(
-          controller: _scroll,
-          physics: nativeScrollPhysics(context, alwaysScrollable: true),
-          scrollCacheExtent: ScrollCacheExtent.pixels(
-            MediaQuery.sizeOf(context).height,
-          ),
-          slivers: [
-            SliverToBoxAdapter(child: _buildHeader(margin)),
-            SliverToBoxAdapter(child: _buildModels(margin)),
-            SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
-            _buildRelated(margin),
-            SliverToBoxAdapter(
-              child: SizedBox(height: Gaps.xl + context.safe.bottom),
+        body: Stack(
+          children: [
+            // Keep the artwork behind the scroll view at all times. It is
+            // normally covered by the hero, but fills the temporary iOS
+            // rubber-band / route-transition gap immediately instead of
+            // flashing the flat Scaffold background while the scroll listener
+            // catches up.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 520,
+              child: _PullBackdrop(video: widget.video),
+            ),
+            Positioned.fill(
+              child: CustomScrollView(
+                controller: _scroll,
+                physics: nativeScrollPhysics(context, alwaysScrollable: true),
+                scrollCacheExtent: ScrollCacheExtent.pixels(
+                  MediaQuery.sizeOf(context).height,
+                ),
+                slivers: [
+                  SliverToBoxAdapter(child: _buildHeader(margin)),
+                  SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
+                  _buildRelated(margin),
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: Gaps.xl + context.safe.bottom),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -195,7 +215,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         minHeight: _headerHeight(MediaQuery.sizeOf(context)),
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
         child: Stack(
           alignment: Alignment.bottomLeft,
           children: [
@@ -209,17 +229,41 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     showLabel: false,
                     fit: BoxFit.cover,
                   ),
+                  // Frosted glass behind the title and buttons: a blurred copy
+                  // of the artwork that fades in from the middle downward.
+                  RepaintBoundary(
+                    child: ShaderMask(
+                      blendMode: BlendMode.dstIn,
+                      shaderCallback: (rect) => const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: [0.26, 0.6],
+                        colors: [Color(0x00FFFFFF), Color(0xFFFFFFFF)],
+                      ).createShader(rect),
+                      child: ImageFiltered(
+                        imageFilter: ui.ImageFilter.blur(
+                          sigmaX: 18,
+                          sigmaY: 18,
+                        ),
+                        child: VideoArtwork(
+                          video: video,
+                          showLabel: false,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
                   const DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        stops: [0.0, 0.24, 0.56, 1.0],
+                        stops: [0.0, 0.22, 0.52, 1.0],
                         colors: [
                           Color(0x55000000),
-                          Color(0x18000000),
-                          Color(0xB8000000),
-                          Color(0xF20B0D12),
+                          Color(0x10000000),
+                          Color(0x66000000),
+                          Color(0xD60B0D12),
                         ],
                       ),
                     ),
@@ -258,10 +302,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       shadows: const [
                         Shadow(color: Color(0x66000000), blurRadius: 12),
                       ],
-                    ),
-                    toggleStyle: AppText.label.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   if (meta.hasContent) ...[
@@ -336,6 +376,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       ],
                     ),
                   ],
+                  _buildModels(onDark: true),
                 ],
               ),
             ),
@@ -486,9 +527,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  double _headerHeight(Size size) => size.width * 9 / 16;
+  double _headerHeight(Size size) => size.width * 9 / 16 + 84;
 
-  Widget _buildModels(double margin) {
+  Widget _buildModels({bool onDark = false}) {
     return FutureBuilder<List<ModelRef>>(
       future: _modelsFuture,
       builder: (context, snapshot) {
@@ -498,14 +539,33 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             models.isEmpty) {
           return const SizedBox.shrink();
         }
+        final titleStyle = AppText.label.copyWith(
+          color: onDark
+              ? Colors.white.withValues(alpha: 0.78)
+              : AppColors.textSecondary,
+        );
         return Padding(
-          padding: EdgeInsets.fromLTRB(margin, Gaps.lg, margin, 0),
+          padding: const EdgeInsets.only(top: Gaps.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Container(
+                width: double.infinity,
+                height: 1,
+                margin: const EdgeInsets.only(bottom: Gaps.md),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.02),
+                      Colors.white.withValues(alpha: 0.24),
+                      Colors.white.withValues(alpha: 0.02),
+                    ],
+                  ),
+                ),
+              ),
               Text(
                 models.length == 1 ? 'Model' : 'Models',
-                style: AppText.label.copyWith(color: AppColors.textSecondary),
+                style: titleStyle,
               ),
               const SizedBox(height: Gaps.sm),
               Wrap(
@@ -515,6 +575,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   for (final model in models)
                     _ModelChip(
                       name: model.name,
+                      onDark: onDark,
                       onPressed: () => _openModel(model),
                     ),
                 ],
@@ -598,10 +659,15 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 }
 
 class _ModelChip extends StatelessWidget {
-  const _ModelChip({required this.name, required this.onPressed});
+  const _ModelChip({
+    required this.name,
+    required this.onPressed,
+    this.onDark = false,
+  });
 
   final String name;
   final VoidCallback onPressed;
+  final bool onDark;
 
   @override
   Widget build(BuildContext context) {
@@ -614,9 +680,15 @@ class _ModelChip extends StatelessWidget {
         height: 36,
         padding: const EdgeInsets.only(left: 10, right: 14),
         decoration: BoxDecoration(
-          color: AppColors.surfaceHigh,
+          color: onDark
+              ? Colors.white.withValues(alpha: 0.14)
+              : AppColors.surfaceHigh,
           borderRadius: BorderRadius.circular(Radii.pill),
-          border: Border.all(color: AppColors.outline),
+          border: Border.all(
+            color: onDark
+                ? Colors.white.withValues(alpha: 0.24)
+                : AppColors.outline,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -632,7 +704,7 @@ class _ModelChip extends StatelessWidget {
                 style: AppText.label.copyWith(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+                  color: onDark ? Colors.white : AppColors.textPrimary,
                 ),
               ),
             ),
@@ -640,10 +712,34 @@ class _ModelChip extends StatelessWidget {
             Icon(
               Icons.chevron_right_rounded,
               size: 20,
-              color: AppColors.textTertiary,
+              color: onDark
+                  ? Colors.white.withValues(alpha: 0.76)
+                  : AppColors.textTertiary,
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PullBackdrop extends StatelessWidget {
+  const _PullBackdrop({required this.video});
+
+  final Video video;
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+            child: VideoArtwork(video: video, showLabel: false),
+          ),
+          const ColoredBox(color: Color(0x8C000000)),
+        ],
       ),
     );
   }

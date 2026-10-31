@@ -1,6 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -80,15 +78,6 @@ class HomeHero extends StatelessWidget {
                     ),
                   ),
                 ),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                      colors: [Color(0x32080A0F), Colors.transparent],
-                    ),
-                  ),
-                ),
                 const Positioned(left: 16, top: 16, child: _TopBar()),
                 Positioned(
                   left: 18,
@@ -123,67 +112,56 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(17),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
-          decoration: BoxDecoration(
-            color: const Color(0x6B101319),
-            borderRadius: BorderRadius.circular(17),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+    // A plain translucent pill: a BackdropFilter here forced the whole hero
+    // image to be re-blurred on every frame of a scroll or pull-to-refresh.
+    return Container(
+      padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
+      decoration: BoxDecoration(
+        color: const Color(0x99101319),
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppColors.accent, AppColors.accentStrong],
+              ),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.play_arrow_rounded,
+                size: 20,
+                color: Colors.white,
+              ),
+            ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.accent, AppColors.accentStrong],
-                  ),
-                  borderRadius: BorderRadius.circular(11),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.accent.withValues(alpha: 0.35),
-                      blurRadius: 14,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    size: 20,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 9),
-              Text(
-                'VXTUBE',
-                style: darkText.label.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.8,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(width: 5),
-              Container(
-                width: 5,
-                height: 5,
-                decoration: const BoxDecoration(
-                  color: AppColors.accent,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ],
+          const SizedBox(width: 9),
+          Text(
+            'VXTUBE',
+            style: darkText.label.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.8,
+              color: Colors.white,
+            ),
           ),
-        ),
+          const SizedBox(width: 5),
+          Container(
+            width: 5,
+            height: 5,
+            decoration: const BoxDecoration(
+              color: AppColors.accent,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -227,6 +205,7 @@ class _HeroDetails extends StatelessWidget {
               'FEATURED',
               style: darkText.overline.copyWith(
                 color: const Color(0xFFFF929A),
+                fontWeight: FontWeight.w600,
                 letterSpacing: 1.5,
               ),
             ),
@@ -239,8 +218,9 @@ class _HeroDetails extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: darkText.display.copyWith(
             fontSize: 25,
-            height: 1.08,
-            letterSpacing: -0.7,
+            height: 1.12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.4,
             color: Colors.white,
             shadows: const [
               Shadow(
@@ -256,7 +236,7 @@ class _HeroDetails extends StatelessWidget {
           video: video,
           style: darkText.caption.copyWith(
             color: const Color(0xFFD6D8DE),
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w500,
           ),
           showDuration: true,
           showCategory: true,

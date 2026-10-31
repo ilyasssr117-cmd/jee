@@ -51,6 +51,8 @@ class PreviewManager {
     // Do not start another decoder while the floating player is already active.
     // On older iPhones this avoids competing AVPlayer instances during browsing.
     if (MiniPlayer.instance.active) return;
+    // Saved reels have no page to resolve a preview from.
+    if (video.id.startsWith('reel_')) return;
     _observer ??= _LifecycleObserver(this);
     if (active.value == video.id) return;
     final generation = ++_generation;

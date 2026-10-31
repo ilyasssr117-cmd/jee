@@ -18,24 +18,31 @@ Widget _host(String text) => MaterialApp(
   ),
 );
 
+int? _maxLines(WidgetTester tester) =>
+    tester.widget<Text>(find.byType(Text)).maxLines;
+
 void main() {
-  testWidgets('short title shows no more/less toggle', (tester) async {
+  testWidgets('short title is plain text with no toggle words', (tester) async {
     await tester.pumpWidget(_host('Short'));
     expect(find.text('more'), findsNothing);
     expect(find.text('less'), findsNothing);
+    expect(_maxLines(tester), isNull);
   });
 
-  testWidgets('long title toggles between more and less', (tester) async {
+  testWidgets('long title has no "more" word and toggles on tap', (
+    tester,
+  ) async {
     await tester.pumpWidget(_host('A very long title ' * 12));
-    expect(find.text('more'), findsOneWidget);
-
-    await tester.tap(find.text('more'));
-    await tester.pumpAndSettle();
-    expect(find.text('less'), findsOneWidget);
     expect(find.text('more'), findsNothing);
+    expect(_maxLines(tester), 2);
 
-    await tester.tap(find.text('less'));
+    await tester.tap(find.byType(Text));
     await tester.pumpAndSettle();
-    expect(find.text('more'), findsOneWidget);
+    expect(find.text('less'), findsNothing);
+    expect(_maxLines(tester), isNull);
+
+    await tester.tap(find.byType(Text));
+    await tester.pumpAndSettle();
+    expect(_maxLines(tester), 2);
   });
 }

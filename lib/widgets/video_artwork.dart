@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../download_store.dart';
 import '../models.dart';
+import '../reel_favorites.dart';
 
 class VideoArtwork extends StatelessWidget {
   const VideoArtwork({
@@ -26,6 +27,10 @@ class VideoArtwork extends StatelessWidget {
   final BoxFit fit;
 
   static Map<String, String>? _headersFor(Video video) {
+    // Saved reels have no web page; their CDN wants the reel API referer.
+    if ((video.pageUrl ?? '').isEmpty && video.id.startsWith('reel_')) {
+      return kReelMediaHeaders;
+    }
     final page = Uri.tryParse(video.pageUrl ?? '');
     if (page == null ||
         (page.scheme != 'http' && page.scheme != 'https') ||

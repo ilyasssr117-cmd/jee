@@ -40,7 +40,7 @@ class AppButton extends StatelessWidget {
         ? Colors.white
         : AppColors.textPrimary;
     final Color background = primary
-        ? AppColors.accentStrong
+        ? AppColors.accent
         : (onDark ? const Color(0x2EFFFFFF) : AppColors.surfaceHigh);
     final Color border = primary
         ? Colors.transparent
@@ -50,21 +50,13 @@ class AppButton extends StatelessWidget {
       onTap: loading ? null : onPressed,
       child: AnimatedContainer(
         duration: Motion.quick,
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        height: 46,
+        padding: const EdgeInsets.symmetric(horizontal: 17),
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(Radii.button),
           border: Border.all(color: border),
-          boxShadow: primary
-              ? [
-                  BoxShadow(
-                    color: AppColors.accent.withValues(alpha: 0.24),
-                    blurRadius: 14,
-                    offset: const Offset(0, 5),
-                  ),
-                ]
-              : const [],
+          boxShadow: const [],
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,

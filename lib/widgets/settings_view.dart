@@ -110,7 +110,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.skip_next_rounded,
-                  color: AppColors.accentStrong,
+                  color: AppColors.textSecondary,
                   title: 'Autoplay next video',
                   subtitle: 'Continue with the next one when a video ends',
                   trailing: _Toggle(
@@ -120,7 +120,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.volume_up_rounded,
-                  color: const Color(0xFFE8710A),
+                  color: AppColors.textSecondary,
                   title: 'Preview sound',
                   subtitle: 'Play sound when you hold a video to preview it',
                   trailing: _Toggle(
@@ -130,7 +130,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.vibration_rounded,
-                  color: const Color(0xFF34A853),
+                  color: AppColors.textSecondary,
                   title: 'Haptic feedback',
                   subtitle: 'Vibrate on taps and long-press',
                   trailing: _Toggle(
@@ -148,7 +148,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.cleaning_services_rounded,
-                  color: const Color(0xFFF29900),
+                  color: AppColors.textSecondary,
                   title: 'Clear cache',
                   subtitle:
                       'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
@@ -171,13 +171,13 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.search_off_rounded,
-                  color: const Color(0xFF8E96A8),
+                  color: AppColors.textSecondary,
                   title: 'Clear search history',
                   onTap: _clearSearches,
                 ),
                 _Row(
                   icon: Icons.history_toggle_off_rounded,
-                  color: const Color(0xFFD93025),
+                  color: AppColors.error,
                   title: 'Clear watch history',
                   subtitle: 'History list and resume points',
                   destructive: true,
@@ -222,28 +222,18 @@ class _Group extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 6),
             child: Text(
-              title.toUpperCase(),
-              style: AppText.caption.copyWith(letterSpacing: 0.8),
+              title,
+              style: AppText.caption.copyWith(
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+              ),
             ),
           ),
           DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: AppColors.palette.brightness == Brightness.dark
-                    ? const [Color(0xE5222630), Color(0xD9161922)]
-                    : const [Color(0xF8FFFFFF), Color(0xEAF0F2F8)],
-              ),
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(Radii.card),
               border: Border.all(color: AppColors.outline),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 18,
-                  offset: const Offset(0, 7),
-                ),
-              ],
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(Radii.card),
@@ -292,13 +282,13 @@ class _Row extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(11),
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(Radii.small),
                 ),
-                child: Icon(icon, size: 20, color: Colors.white),
+                child: Icon(icon, size: 19, color: color),
               ),
               const SizedBox(width: Gaps.md),
               Expanded(

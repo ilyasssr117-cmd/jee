@@ -14,6 +14,7 @@ class VideoArtwork extends StatelessWidget {
     this.borderRadius = 0,
     this.showLabel = true,
     this.fit = BoxFit.cover,
+    this.transparentBackground = false,
   });
 
   final Video video;
@@ -25,6 +26,10 @@ class VideoArtwork extends StatelessWidget {
   /// Controls how the thumbnail is fitted inside its available bounds.
   /// Details use [BoxFit.contain] to avoid unexpectedly cropping the artwork.
   final BoxFit fit;
+
+  /// Leaves letterboxed areas transparent, useful when the artwork sits over
+  /// a blurred version of itself.
+  final bool transparentBackground;
 
   static Map<String, String>? _headersFor(Video video) {
     // Saved reels have no web page; their CDN wants the reel API referer.
@@ -52,7 +57,11 @@ class VideoArtwork extends StatelessWidget {
           return Stack(
             fit: StackFit.expand,
             children: [
-              ColoredBox(color: AppColors.surfaceHigh),
+              ColoredBox(
+                color: transparentBackground
+                    ? Colors.transparent
+                    : AppColors.surfaceHigh,
+              ),
               Image.file(
                 File(saved),
                 fit: fit,
@@ -90,7 +99,11 @@ class VideoArtwork extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            ColoredBox(color: AppColors.surfaceHigh),
+            ColoredBox(
+              color: transparentBackground
+                  ? Colors.transparent
+                  : AppColors.surfaceHigh,
+            ),
             Image.network(
               url,
               fit: fit,

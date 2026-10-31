@@ -66,6 +66,35 @@ void main() {
     scraper.close();
   });
 
+
+  test('fresh model lookup bypasses the cached video detail page', () async {
+    var requests = 0;
+    final client = MockClient((request) async {
+      requests++;
+      return http.Response('''
+        <html><body>
+          <div class="media-models">
+            <a href="/models/example-model/">Example Model</a>
+          </div>
+        </body></html>
+      ''', 200);
+    });
+    final scraper = _scraper(client);
+    const video = Video(
+      id: 'fresh-model-test',
+      title: 'Fresh model test',
+      pageUrl: 'https://x.example.test/video/fresh-model-test/',
+    );
+
+    await scraper.videoModels(video);
+    await scraper.videoModels(video);
+    expect(requests, 1, reason: 'the normal lookup should use the TTL cache');
+
+    await scraper.videoModels(video, fresh: true);
+    expect(requests, 2, reason: 'a fresh lookup must request the page again');
+    scraper.close();
+  });
+
   test('a video page without models gives an empty list', () async {
     final client = MockClient(
       (request) async =>

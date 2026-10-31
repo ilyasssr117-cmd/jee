@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -165,8 +166,8 @@ class _FavoriteButton extends StatelessWidget {
                       ScaleTransition(scale: animation, child: child),
                   child: Icon(
                     active
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
+                        ? CupertinoIcons.heart_fill
+                        : CupertinoIcons.heart,
                     key: ValueKey<bool>(active),
                     size: 20,
                     color: active ? AppColors.accent : Colors.white,
@@ -215,7 +216,7 @@ class DurationBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xCC000000),
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),

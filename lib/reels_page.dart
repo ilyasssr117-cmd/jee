@@ -1154,6 +1154,7 @@ class _ReelView extends StatefulWidget {
   final bool isActive;
   final bool muted;
   final ValueListenable<Map<String, double>> saving;
+  /// Space reserved for the iPhone home indicator beneath the action rail.
   final double bottomInset;
   final bool clear;
   final VoidCallback onMute;
@@ -1392,7 +1393,10 @@ class _ReelViewState extends State<_ReelView>
     return SizedBox.expand(
       child: ClipRect(
         child: FittedBox(
-          fit: BoxFit.cover,
+          // Preserve the source aspect ratio. The page underneath is black,
+          // so portrait/landscape letterboxing looks intentional rather than
+          // stretching or cropping the clip to fill the phone.
+          fit: BoxFit.contain,
           clipBehavior: Clip.hardEdge,
           child: SizedBox(
             width: size.width,
@@ -1415,19 +1419,9 @@ class _ReelViewState extends State<_ReelView>
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (item.thumbUrl != null)
-          RepaintBoundary(
-            child: Image.network(
-              item.thumbUrl!,
-              fit: BoxFit.cover,
-              cacheWidth: 540,
-              filterQuality: FilterQuality.low,
-              gaplessPlayback: true,
-              headers: _kMediaHeaders,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-            ),
-          ),
-        const ColoredBox(color: Color(0xB3000000)),
+        // The video is fitted with BoxFit.contain. Keep the uncovered area
+        // genuinely black (not a stretched thumbnail or translucent overlay).
+        const ColoredBox(color: Colors.black),
 
         Semantics(
           button: true,

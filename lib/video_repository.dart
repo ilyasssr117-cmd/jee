@@ -27,13 +27,17 @@ abstract class VideoCatalogRepository {
 
   Future<ModelProfile> getModelProfile(ModelRef model);
 
-  Future<List<Video>> getRelated(Video video, {int limit = 6});
+  Future<List<Video>> getRelated(
+    Video video, {
+    int limit = 6,
+    bool fresh = false,
+  });
 
   Future<Video> resolveForPlayback(Video video, {bool refresh = false});
 
   void clearPlaybackCaches();
 
-  Future<List<ModelRef>> getVideoModels(Video video);
+  Future<List<ModelRef>> getVideoModels(Video video, {bool fresh = false});
 
   Future<ModelPageResult> getModelPage(ModelRef model, {int page = 1});
 
@@ -234,9 +238,13 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   }
 
   @override
-  Future<List<Video>> getRelated(Video video, {int limit = 6}) async {
+  Future<List<Video>> getRelated(
+    Video video, {
+    int limit = 6,
+    bool fresh = false,
+  }) async {
     _ensureConfigured();
-    return scraper.related(video, limit: limit);
+    return scraper.related(video, limit: limit, fresh: fresh);
   }
 
   @override
@@ -252,9 +260,12 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   }
 
   @override
-  Future<List<ModelRef>> getVideoModels(Video video) async {
+  Future<List<ModelRef>> getVideoModels(
+    Video video, {
+    bool fresh = false,
+  }) async {
     _ensureConfigured();
-    return scraper.videoModels(video);
+    return scraper.videoModels(video, fresh: fresh);
   }
 
   @override

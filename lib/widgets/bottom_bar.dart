@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -8,7 +9,7 @@ import '../touch.dart';
 
 enum AppTab { home, search, reels, library, settings }
 
-const double kBottomBarHeight = 78;
+const double kBottomBarHeight = 74;
 
 class AppBottomBar extends StatefulWidget {
   const AppBottomBar({
@@ -28,11 +29,11 @@ class AppBottomBar extends StatefulWidget {
 
 class _AppBottomBarState extends State<AppBottomBar> {
   static const List<({AppTab tab, IconData icon, String label})> _tabs = [
-    (tab: AppTab.home, icon: Icons.home_rounded, label: 'Home'),
-    (tab: AppTab.search, icon: Icons.search_rounded, label: 'Search'),
-    (tab: AppTab.reels, icon: Icons.smart_display_rounded, label: 'Reels'),
-    (tab: AppTab.library, icon: Icons.video_library_rounded, label: 'Library'),
-    (tab: AppTab.settings, icon: Icons.tune_rounded, label: 'Settings'),
+    (tab: AppTab.home, icon: CupertinoIcons.house_fill, label: 'Home'),
+    (tab: AppTab.search, icon: CupertinoIcons.search, label: 'Search'),
+    (tab: AppTab.reels, icon: CupertinoIcons.play_rectangle_fill, label: 'Reels'),
+    (tab: AppTab.library, icon: CupertinoIcons.rectangle_stack_fill, label: 'Library'),
+    (tab: AppTab.settings, icon: CupertinoIcons.slider_horizontal_3, label: 'Settings'),
   ];
 
   final GlobalKey _barKey = GlobalKey();
@@ -123,38 +124,29 @@ class _AppBottomBarState extends State<AppBottomBar> {
         child: Padding(
           padding: EdgeInsets.only(bottom: bottom),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: BorderRadius.circular(27),
             child: BackdropFilter(
               filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
               child: Container(
                 width: width,
-                height: 70,
-                padding: const EdgeInsets.all(6),
+                height: 66,
+                padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: AppColors.palette.brightness == Brightness.dark
-                        ? const [Color(0xC9272D3A), Color(0xA9161A24)]
-                        : const [Color(0xEFFFFFFF), Color(0xBFE8ECF5)],
-                  ),
-                  borderRadius: BorderRadius.circular(30),
+                  color: AppColors.palette.brightness == Brightness.dark
+                      ? const Color(0xD91C2029)
+                      : const Color(0xEAFBFCFF),
+                  borderRadius: BorderRadius.circular(27),
                   border: Border.all(
                     color: AppColors.palette.brightness == Brightness.dark
-                        ? const Color(0x55FFFFFF)
-                        : const Color(0xB3FFFFFF),
+                        ? const Color(0x2EFFFFFF)
+                        : const Color(0x8CFFFFFF),
                     width: 1,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.26),
-                      blurRadius: 24,
-                      offset: const Offset(0, 9),
-                    ),
-                    BoxShadow(
-                      color: AppColors.accent.withValues(alpha: 0.08),
-                      blurRadius: 24,
-                      spreadRadius: -8,
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
@@ -169,7 +161,7 @@ class _AppBottomBarState extends State<AppBottomBar> {
                         : selectedLeft;
                     return SizedBox(
                       key: _barKey,
-                      height: 58,
+                      height: 56,
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -242,16 +234,15 @@ class _GlassIndicator extends StatelessWidget {
       borderRadius: BorderRadius.circular(22),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.accent.withValues(alpha: 0.26),
-              AppColors.accentStrong.withValues(alpha: 0.12),
-            ],
+          color: AppColors.palette.brightness == Brightness.dark
+              ? Colors.white.withValues(alpha: 0.075)
+              : AppColors.accentSoft.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(21),
+          border: Border.all(
+            color: AppColors.palette.brightness == Brightness.dark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.white.withValues(alpha: 0.82),
           ),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
         ),
       ),
     );
@@ -298,17 +289,17 @@ class _TabItem extends StatelessWidget {
               duration: Motion.quick,
               curve: Motion.curve,
               child: SizedBox(
-                width: 26,
+                width: 28,
                 height: 26,
-                child: Center(child: Icon(icon, size: 20, color: color)),
+                child: Center(child: Icon(icon, size: 21, color: color)),
               ),
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 4),
             AnimatedDefaultTextStyle(
               duration: Motion.quick,
               curve: Motion.curve,
               style: TextStyle(
-                fontSize: 9.5,
+                fontSize: 10,
                 height: 1.1,
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
                 letterSpacing: 0.1,

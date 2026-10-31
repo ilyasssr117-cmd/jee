@@ -350,8 +350,14 @@ class Scraper {
     return list(config.categoryUri(slug, page));
   }
 
-  Future<List<Video>> list(Uri uri, {bool related = false}) async {
-    final body = related ? await _getDetailPage(uri) : await _get(uri);
+  Future<List<Video>> list(
+    Uri uri, {
+    bool related = false,
+    bool fresh = false,
+  }) async {
+    final body = related
+        ? await _getDetailPage(uri, fresh: fresh)
+        : await _get(uri);
     final job = (
       config: config,
       body: body,
@@ -399,12 +405,15 @@ class Scraper {
     );
   }
 
-  Future<List<ModelRef>> videoModels(Video video) async {
+  Future<List<ModelRef>> videoModels(
+    Video video, {
+    bool fresh = false,
+  }) async {
     final pageUrl = video.pageUrl;
     if (pageUrl == null || pageUrl.trim().isEmpty) return const <ModelRef>[];
 
     final uri = config.baseUri.resolve(pageUrl);
-    final document = html.parse(await _getDetailPage(uri));
+    final document = html.parse(await _getDetailPage(uri, fresh: fresh));
 
     var anchors = document.querySelectorAll('.media-models a[href]');
     if (anchors.isEmpty) {
@@ -1377,7 +1386,11 @@ class Scraper {
     );
   }
 
-  Future<List<Video>> related(Video video, {int limit = 6}) async {
+  Future<List<Video>> related(
+    Video video, {
+    int limit = 6,
+    bool fresh = false,
+  }) async {
     final pageUrl = video.pageUrl;
     if (pageUrl == null ||
         pageUrl.isEmpty ||
@@ -1385,11 +1398,16 @@ class Scraper {
       return const <Video>[];
     }
     try {
-      return (await list(config.baseUri.resolve(pageUrl), related: true))
+      return (await list(
+        config.baseUri.resolve(pageUrl),
+        related: true,
+        fresh: fresh,
+      ))
           .where((item) => item.id != video.id)
           .take(limit < 0 ? 0 : limit)
           .toList();
     } catch (_) {
+      if (fresh) rethrow;
       return const <Video>[];
     }
   }

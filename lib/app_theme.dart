@@ -96,17 +96,17 @@ abstract final class Gaps {
 }
 
 abstract final class Radii {
-  static const double card = 18;
-  static const double button = 15;
+  static const double card = 22;
+  static const double button = 16;
   static const double field = 16;
   static const double pill = 999;
 
   /// Radius scale for new/adjusted surfaces: small controls, medium cards,
   /// large cards and the Featured hero.
   static const double small = 12;
-  static const double medium = 18;
-  static const double large = 24;
-  static const double hero = 30;
+  static const double medium = 22;
+  static const double large = 26;
+  static const double hero = 28;
 }
 
 abstract final class Motion {

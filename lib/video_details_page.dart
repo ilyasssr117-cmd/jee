@@ -1,3 +1,6 @@
+import 'dart:ui' as ui;
+
+import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +37,8 @@ class VideoDetailsPage extends StatefulWidget {
 }
 
 class _VideoDetailsPageState extends State<VideoDetailsPage> {
+  static const Duration _detailsLoadLimit = Duration(seconds: 18);
+  static const Duration _refreshIndicatorLimit = Duration(seconds: 8);
   late Future<List<Video>> _relatedFuture;
   late Future<List<ModelRef>> _modelsFuture;
   final ScrollController _scroll = ScrollController();
@@ -43,6 +48,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   double _headerLimit = 200;
   bool _preparing = false;
+  bool _refreshing = false;
   String? _playError;
 
   @override
@@ -63,15 +69,35 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     super.dispose();
   }
 
-  Future<List<Video>> _loadRelated() => relatedCache.fetch(
-    widget.video.id,
-    () => videoRepository.getRelated(widget.video),
-  );
+  Future<List<Video>> _loadRelated({
+    bool force = false,
+    bool fresh = false,
+  }) =>
+      relatedCache
+          .fetch(
+            widget.video.id,
+            () => videoRepository.getRelated(
+              widget.video,
+              fresh: fresh,
+            ),
+            force: force,
+          )
+          .timeout(_detailsLoadLimit);
 
-  Future<List<ModelRef>> _loadModels() => modelsCache.fetch(
-    widget.video.id,
-    () => videoRepository.getVideoModels(widget.video),
-  );
+  Future<List<ModelRef>> _loadModels({
+    bool force = false,
+    bool fresh = false,
+  }) =>
+      modelsCache
+          .fetch(
+            widget.video.id,
+            () => videoRepository.getVideoModels(
+              widget.video,
+              fresh: fresh,
+            ),
+            force: force,
+          )
+          .timeout(_detailsLoadLimit);
 
   void _openModel(ModelRef model) {
     Navigator.of(context).push<void>(
@@ -80,8 +106,74 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 
   void _reloadRelated() {
-    relatedCache.clear();
-    setState(() => _relatedFuture = _loadRelated());
+    if (!mounted) return;
+    setState(() => _relatedFuture = _loadRelated(force: true, fresh: true));
+  }
+
+  void _reloadModels() {
+    if (!mounted) return;
+    setState(() => _modelsFuture = _loadModels(force: true, fresh: true));
+  }
+
+  Future<void> _refreshDetails() async {
+    if (_refreshing) return;
+    Haptics.play(Haptic.light);
+    _refreshing = true;
+
+    // Start a genuinely fresh detail-page request. The model lookup joins that
+    // request, while the two sections continue rendering independently.
+    final related = _loadRelated(force: true, fresh: true);
+    final models = _loadModels(force: true);
+    if (mounted) {
+      setState(() {
+        _relatedFuture = related;
+        _modelsFuture = models;
+      });
+    }
+
+    var failed = false;
+    var tookTooLong = false;
+
+    Future<void> settle<T>(Future<T> task) async {
+      try {
+        await task;
+      } catch (_) {
+        failed = true;
+      }
+    }
+
+    try {
+      // The refresh indicator has its own shorter deadline. A slow connection
+      // can keep updating the FutureBuilder sections, but cannot trap the user
+      // under a spinner indefinitely.
+      await Future.wait<void>(<Future<void>>[
+        settle(related),
+        settle(models),
+      ]).timeout(
+        _refreshIndicatorLimit,
+        onTimeout: () {
+          tookTooLong = true;
+          return <void>[];
+        },
+      );
+    } finally {
+      _refreshing = false;
+    }
+
+    if (!mounted) return;
+    if (failed) {
+      showToast(
+        context,
+        'Couldn’t refresh. Check your connection and try again.',
+      );
+    } else if (tookTooLong) {
+      showToast(
+        context,
+        'Refresh is taking longer. Results will update when ready.',
+      );
+    } else {
+      Haptics.play(Haptic.selection);
+    }
   }
 
   Future<void> _play({bool fromStart = false}) async {
@@ -162,6 +254,11 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               MediaQuery.sizeOf(context).height,
             ),
             slivers: [
+              CupertinoSliverRefreshControl(
+                onRefresh: _refreshDetails,
+                refreshTriggerPullDistance: 84,
+                refreshIndicatorExtent: 52,
+              ),
               SliverToBoxAdapter(child: _buildHeader(margin)),
               SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
               _buildRelated(margin),
@@ -177,6 +274,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
+    final artworkHeight = MediaQuery.sizeOf(context).width * 9 / 16;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
 
     final meta = VideoMetaLine(
@@ -200,32 +298,71 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         minHeight: _headerHeight(MediaQuery.sizeOf(context)),
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
+        borderRadius: BorderRadius.circular(28),
         child: Stack(
           alignment: Alignment.bottomLeft,
           children: [
             Positioned.fill(
+              child: RepaintBoundary(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ColoredBox(color: AppColors.surfaceHigh),
+                    ImageFiltered(
+                      imageFilter: ui.ImageFilter.blur(
+                        sigmaX: 24,
+                        sigmaY: 24,
+                      ),
+                      child: VideoArtwork(
+                        video: video,
+                        showLabel: false,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const ColoredBox(color: Color(0x35000000)),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: [0.0, 0.22, 0.52, 1.0],
+                          colors: [
+                            Color(0x50000000),
+                            Color(0x10000000),
+                            Color(0x70000000),
+                            Color(0xE60B0D12),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: artworkHeight,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ColoredBox(color: AppColors.surfaceHigh),
                   VideoArtwork(
                     video: video,
                     showLabel: false,
-                    fit: BoxFit.cover,
+                    fit: BoxFit.contain,
+                    transparentBackground: true,
                   ),
                   const DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        stops: [0.0, 0.22, 0.52, 1.0],
                         colors: [
-                          Color(0x55000000),
-                          Color(0x10000000),
-                          Color(0x66000000),
-                          Color(0xD60B0D12),
+                          Color(0x24000000),
+                          Color(0x00000000),
                         ],
+                        stops: [0, 0.48],
                       ),
                     ),
                   ),
@@ -235,7 +372,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             Padding(
               padding: EdgeInsets.fromLTRB(
                 margin,
-                context.safe.top + Gaps.sm + 52,
+                artworkHeight + Gaps.md,
                 margin,
                 Gaps.lg,
               ),
@@ -495,11 +632,32 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       future: _modelsFuture,
       builder: (context, snapshot) {
         final models = snapshot.data ?? const <ModelRef>[];
-        if (snapshot.connectionState != ConnectionState.done ||
-            snapshot.hasError ||
-            models.isEmpty) {
-          return const SizedBox.shrink();
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.only(top: Gaps.lg),
+            child: SizedBox(height: 2),
+          );
         }
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.only(top: Gaps.lg),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text('Couldn’t load model information.', style: AppText.body),
+                ),
+                AppButton(
+                  label: 'Retry',
+                  icon: Icons.refresh_rounded,
+                  style: AppButtonStyle.secondary,
+                  onDark: onDark,
+                  onPressed: _reloadModels,
+                ),
+              ],
+            ),
+          );
+        }
+        if (models.isEmpty) return const SizedBox.shrink();
         final titleStyle = AppText.label.copyWith(
           color: onDark
               ? Colors.white.withValues(alpha: 0.78)

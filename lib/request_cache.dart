@@ -40,6 +40,7 @@ class TtlCache<V> {
     bool force = false,
   }) {
     _pruneExpired();
+    if (force) _entries.remove(key);
     if (!force) {
       final hit = _entries[key];
       if (hit != null && DateTime.now().isBefore(hit.expires)) {

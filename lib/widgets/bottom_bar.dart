@@ -234,18 +234,17 @@ class _GlassIndicator extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
       child: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppColors.accent.withValues(alpha: 0.26),
-                AppColors.accentStrong.withValues(alpha: 0.12),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.accent.withValues(alpha: 0.26),
+              AppColors.accentStrong.withValues(alpha: 0.12),
+            ],
           ),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
         ),
       ),
     );

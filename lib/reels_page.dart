@@ -12,9 +12,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoActivityIndicator,
         showCupertinoModalPopup;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -1284,7 +1282,6 @@ class _ReelViewState extends State<_ReelView> {
               ),
             ),
           ),
-        ),
 
         IgnorePointer(
           child: AnimatedOpacity(
@@ -1769,7 +1766,6 @@ class _RailButton extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
             ),
             const SizedBox(height: 5),
             Text(

@@ -366,7 +366,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               AppButton(
                 label: 'Downloaded',
                 icon: Icons.download_done_rounded,
-                iconColor: const Color(0xFFB8AEFF),
+                iconColor: AppColors.accent,
                 style: AppButtonStyle.secondary,
                 onDark: true,
                 onPressed: () async {

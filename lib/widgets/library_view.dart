@@ -378,7 +378,7 @@ class _TextAction extends StatelessWidget {
           style: const TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w500,
-            color: AppColors.blue,
+            color: AppColors.accent,
           ),
         ),
       ),

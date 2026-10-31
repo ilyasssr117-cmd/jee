@@ -510,7 +510,7 @@ class _LocalTile extends StatelessWidget {
                 ),
               ),
             ),
-            if (selected) const ColoredBox(color: Color(0x554C93FF)),
+            if (selected) const ColoredBox(color: Color(0x55F04452)),
             if (selecting)
               Positioned(
                 top: 6,
@@ -520,7 +520,7 @@ class _LocalTile extends StatelessWidget {
                   height: 24,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: selected ? AppColors.blue : const Color(0x66000000),
+                    color: selected ? AppColors.accent : const Color(0x66000000),
                     border: Border.all(color: Colors.white, width: 2),
                   ),
                   child: selected

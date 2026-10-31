@@ -109,7 +109,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.skip_next_rounded,
-                  color: const Color(0xFF6C5CE7),
+                  color: AppColors.accentStrong,
                   title: 'Autoplay next video',
                   subtitle: 'Continue with the next one when a video ends',
                   trailing: _Toggle(
@@ -119,7 +119,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 const _Row(
                   icon: Icons.high_quality_rounded,
-                  color: Color(0xFF1A73E8),
+                  color: AppColors.accent,
                   title: 'Video quality',
                   subtitle: 'Used when a video offers several qualities',
                   trailing: SizedBox.shrink(),
@@ -180,7 +180,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.download_for_offline_rounded,
-                  color: const Color(0xFF4C93FF),
+                  color: AppColors.accent,
                   title: 'Delete all downloads',
                   subtitle: downloads.doneCount == 0
                       ? 'Nothing saved'

@@ -9,7 +9,7 @@ abstract final class OnDark {
   static const Color textPrimary = Color(0xFFFFFFFF);
   static const Color textSecondary = Color(0xFFB7BDCB);
   static const Color textTertiary = Color(0xFF8E96A8);
-  static const Color blueSoft = Color(0xFF1B2B4D);
+  static const Color accentSoft = Color(0xFF3B171B);
   static const Color error = Color(0xFFFF8A80);
 }
 
@@ -23,7 +23,7 @@ class Palette {
     required this.textPrimary,
     required this.textSecondary,
     required this.textTertiary,
-    required this.blueSoft,
+    required this.accentSoft,
     required this.error,
   });
 
@@ -35,7 +35,7 @@ class Palette {
   final Color textPrimary;
   final Color textSecondary;
   final Color textTertiary;
-  final Color blueSoft;
+  final Color accentSoft;
   final Color error;
 
   static const Palette dark = Palette(
@@ -47,7 +47,7 @@ class Palette {
     textPrimary: OnDark.textPrimary,
     textSecondary: OnDark.textSecondary,
     textTertiary: OnDark.textTertiary,
-    blueSoft: OnDark.blueSoft,
+    accentSoft: OnDark.accentSoft,
     error: OnDark.error,
   );
 
@@ -60,7 +60,7 @@ class Palette {
     textPrimary: Color(0xFF12141B),
     textSecondary: Color(0xFF4B5265),
     textTertiary: Color(0xFF7B8396),
-    blueSoft: Color(0xFFDDE9FF),
+    accentSoft: Color(0xFFFCE4E6),
     error: Color(0xFFD93025),
   );
 }
@@ -75,14 +75,13 @@ abstract final class AppColors {
   static Color get textPrimary => palette.textPrimary;
   static Color get textSecondary => palette.textSecondary;
   static Color get textTertiary => palette.textTertiary;
-  static Color get blueSoft => palette.blueSoft;
+  static Color get accentSoft => palette.accentSoft;
   static Color get error => palette.error;
 
-  static const Color accent = Color(0xFF8B7CFF);
+  static const Color accent = Color(0xFFF04452);
 
-  static const Color accentStrong = Color(0xFF6C5CE7);
+  static const Color accentStrong = Color(0xFFDC2626);
 
-  static const Color blue = Color(0xFF4C93FF);
 
   static const Color star = Color(0xFFFFC857);
 }
@@ -228,6 +227,24 @@ ThemeData buildAppTheme(Brightness brightness) {
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.accent,
+      linearTrackColor: Color(0x263F3F46),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith<Color?>(
+        (states) => states.contains(WidgetState.selected)
+            ? AppColors.accentStrong
+            : null,
+      ),
+      trackColor: WidgetStateProperty.resolveWith<Color?>(
+        (states) => states.contains(WidgetState.selected)
+            ? AppColors.accent.withValues(alpha: 0.35)
+            : null,
+      ),
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: AppColors.accent,
+      thumbColor: AppColors.accentStrong,
+      overlayColor: AppColors.accent.withValues(alpha: 0.12),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,

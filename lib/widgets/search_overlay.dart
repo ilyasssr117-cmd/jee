@@ -363,7 +363,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                   borderRadius: BorderRadius.circular(Radii.field),
                   border: Border.all(
                     color: focused
-                        ? AppColors.blue.withValues(alpha: 0.8)
+                        ? AppColors.accent.withValues(alpha: 0.8)
                         : AppColors.outline,
                     width: 1.2,
                   ),
@@ -390,7 +390,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                         keyboardAppearance: Brightness.dark,
                         onChanged: _onChanged,
                         onSubmitted: (_) => _submit(),
-                        cursorColor: AppColors.blue,
+                        cursorColor: AppColors.accent,
                         style: AppText.title.copyWith(
                           fontWeight: FontWeight.w400,
                         ),
@@ -453,7 +453,7 @@ class SearchOverlayState extends State<SearchOverlay> {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,
-                color: AppColors.blue,
+                color: AppColors.accent,
               ),
             ),
           ),
@@ -753,7 +753,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.blue,
+                        color: AppColors.accent,
                       ),
                     ),
                   ),

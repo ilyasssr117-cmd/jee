@@ -167,7 +167,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     final imageScale = routeAnimation.drive(
       Tween<double>(begin: 1.035, end: 1).chain(imageCurve),
     );
-    const infoCurve = CurveTween(
+    final infoCurve = CurveTween(
       curve: Interval(0.18, 1, curve: Curves.easeOutCubic),
     );
     final infoOpacity = routeAnimation.drive(infoCurve);

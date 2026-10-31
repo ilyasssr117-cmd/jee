@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/cupertino.dart'
@@ -11,7 +12,9 @@ import 'package:flutter/cupertino.dart'
         CupertinoActivityIndicator,
         showCupertinoModalPopup;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -248,69 +251,6 @@ String _clock(Duration d) {
   return '$m:$s';
 }
 
-/// Instagram-style paging: a short flick (or dragging past ~1/4 of the page)
-/// moves exactly one reel, then settles with a fast, bounce-free spring.
-class _ReelsPhysics extends PageScrollPhysics {
-  const _ReelsPhysics({super.parent});
-
-  @override
-  _ReelsPhysics applyTo(ScrollPhysics? ancestor) =>
-      _ReelsPhysics(parent: buildParent(ancestor));
-
-  // Slightly over critical damping (2*sqrt(k*m) ~ 45): snappy, no wobble.
-  @override
-  SpringDescription get spring =>
-      const SpringDescription(mass: 1, stiffness: 520, damping: 48);
-
-  @override
-  double get minFlingVelocity => 40;
-
-  static const double _flick = 180;
-  static const double _commit = 0.22;
-
-  double _target(ScrollMetrics m, double velocity) {
-    final page = m.pixels / m.viewportDimension;
-    final base = page.floorToDouble();
-    final frac = page - base;
-    double target;
-    if (velocity > _flick) {
-      target = base + 1;
-    } else if (velocity < -_flick) {
-      target = base + (frac > 0 ? 0 : -1);
-    } else if (frac >= 1 - _commit) {
-      target = base + 1;
-    } else if (frac <= _commit) {
-      target = base;
-    } else {
-      target = page.roundToDouble();
-    }
-    return (target * m.viewportDimension)
-        .clamp(m.minScrollExtent, m.maxScrollExtent)
-        .toDouble();
-  }
-
-  @override
-  Simulation? createBallisticSimulation(
-    ScrollMetrics position,
-    double velocity,
-  ) {
-    if ((velocity <= 0 && position.pixels <= position.minScrollExtent) ||
-        (velocity >= 0 && position.pixels >= position.maxScrollExtent)) {
-      return super.createBallisticSimulation(position, velocity);
-    }
-    final tolerance = toleranceFor(position);
-    final target = _target(position, velocity);
-    if ((target - position.pixels).abs() < tolerance.distance) return null;
-    return ScrollSpringSimulation(
-      spring,
-      position.pixels,
-      target,
-      velocity,
-      tolerance: tolerance,
-    );
-  }
-}
-
 class ReelsPage extends StatefulWidget {
   const ReelsPage({super.key});
 
@@ -328,10 +268,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   final ValueNotifier<Map<String, double>> _saving =
       ValueNotifier<Map<String, double>>(const {});
 
-  Timer? _trimTimer;
-  ModalRoute<dynamic>? _route;
-  bool _routeClosing = false;
-  bool _closingPaused = false;
   bool _loading = false;
   bool _resumeOnForeground = false;
   bool _syncPending = false;
@@ -354,8 +290,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _trimTimer?.cancel();
-    _route?.animation?.removeListener(_onRouteTick);
     for (final c in _controllers.values) {
       c.dispose();
     }
@@ -365,28 +299,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     _media.close();
     _saving.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final route = ModalRoute.of(context);
-    if (identical(route, _route)) return;
-    _route?.animation?.removeListener(_onRouteTick);
-    _route = route;
-    route?.animation?.addListener(_onRouteTick);
-  }
-
-  void _onRouteTick() {
-    final route = _route;
-    final animation = route?.animation;
-    if (route == null || animation == null) return;
-    final closing = animation.value < 1 &&
-        (animation.status == AnimationStatus.reverse ||
-            (route.navigator?.userGestureInProgress ?? false));
-    if (closing == _routeClosing) return;
-    _routeClosing = closing;
-    _onRouteClosing(closing);
   }
 
   @override
@@ -480,6 +392,11 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     final keep = <int>{index - 1, index, index + 1}
         .where((i) => i >= 0 && i < _items.length)
         .toSet();
+    for (final i in _controllers.keys.toList()) {
+      if (!keep.contains(i)) {
+        _controllers.remove(i)?.dispose();
+      }
+    }
     for (final i in keep) {
       _controllerFor(i);
     }
@@ -487,38 +404,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       final c = entry.value;
       if (!c.value.isInitialized) continue;
       if (entry.key == index) {
-        if (!_closingPaused) c.play();
+        c.play();
       } else {
         c.pause();
         c.setPlaybackSpeed(1);
-        if (c.value.position != Duration.zero) c.seekTo(Duration.zero);
+        c.seekTo(Duration.zero);
       }
     }
-    // Disposing a native player is the expensive part. Do it a beat after the
-    // page has settled so it never lands inside a swipe animation.
-    _trimTimer?.cancel();
-    _trimTimer = Timer(const Duration(milliseconds: 350), () {
-      if (!mounted) return;
-      final near = <int>{_current - 1, _current, _current + 1};
-      for (final i in _controllers.keys.toList()) {
-        if (!near.contains(i)) _controllers.remove(i)?.dispose();
-      }
-    });
     if (mounted) setState(() {});
-  }
-
-  /// Called by the route while the page is closing (blur transition): freeze
-  /// the video so the blurred frame is a cached texture, not a live decode.
-  void _onRouteClosing(bool closing) {
-    final c = _controllers[_current];
-    if (c == null || !c.value.isInitialized) return;
-    if (closing) {
-      _closingPaused = c.value.isPlaying;
-      if (_closingPaused) c.pause();
-    } else if (_closingPaused) {
-      _closingPaused = false;
-      c.play();
-    }
   }
 
   void _onPageChanged(int index) {
@@ -569,7 +462,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         id: 'reel_${item.id}',
         title: item.title.isEmpty ? 'Reel by @${item.author}' : item.title,
         thumbnailUrl: item.thumbUrl,
-        streamUrl: item.videoUrl,
         duration: _clock(Duration(seconds: item.durationSec)),
         views: _compact(item.views),
         likes: item.likes,
@@ -721,9 +613,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               controller: _pager,
               scrollDirection: Axis.vertical,
               pageSnapping: true,
-              allowImplicitScrolling: true,
-              clipBehavior: Clip.none,
-              physics: const _ReelsPhysics(parent: BouncingScrollPhysics()),
+              physics: PageScrollPhysics(
+                parent: nativeScrollPhysics(context, alwaysScrollable: true),
+              ),
               itemCount: _items.length,
               onPageChanged: _onPageChanged,
               itemBuilder: (context, i) {
@@ -746,7 +638,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               ),
             )
           else if (_loading)
-            const Center(child: CupertinoActivityIndicator(radius: 14, color: Colors.white))
+            const Center(child: CircularProgressIndicator())
           else if (_error != null)
             _ErrorView(message: _error!, onRetry: () => _loadMore(first: true))
           else
@@ -826,17 +718,60 @@ class _ForYouPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      'Reels',
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: AppText.title.copyWith(
-        color: Colors.white,
-        fontSize: 17,
-        fontWeight: FontWeight.w700,
-        shadows: const [
-          Shadow(blurRadius: 6, color: Color(0x80000000), offset: Offset(0, 1)),
-        ],
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: compact ? 106 : 124),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 13 : 16,
+            vertical: 9,
+          ),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xA82B3341), Color(0x75202735)],
+            ),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x44000000),
+                blurRadius: 22,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color(0xFFE5E7EB),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'For You',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.label.copyWith(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -855,25 +790,48 @@ class _ReelsTopButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      semanticLabel: label,
-      onTap: onTap,
-      pressedScale: 0.88,
-      child: SizedBox(
-        width: 44,
-        height: 44,
-        child: Center(
-          child: Icon(
-            icon,
-            color: Colors.white,
-            size: 24,
-            shadows: const [
-              Shadow(
-                blurRadius: 6,
-                color: Color(0x80000000),
-                offset: Offset(0, 1),
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () {
+            Haptics.play(Haptic.selection);
+            onTap();
+          },
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: ClipOval(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xB52B3341), Color(0x78202735)],
+                    ),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.24),
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x44000000),
+                        blurRadius: 20,
+                        offset: Offset(0, 7),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Icon(icon, color: Colors.white, size: 19),
+                  ),
+                ),
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1210,13 +1168,40 @@ class _ReelViewState extends State<_ReelView> {
                         builder: (_, v, __) => AnimatedOpacity(
                           duration: Motion.normal,
                           opacity: v.isPlaying ? 0 : 1,
-                          child: const Icon(
-                            CupertinoIcons.play_fill,
-                            color: Color(0xE6FFFFFF),
-                            size: 48,
-                            shadows: [
-                              Shadow(blurRadius: 12, color: Color(0x66000000)),
-                            ],
+                          child: ClipOval(
+                            child: BackdropFilter(
+                              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                              child: Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: const LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      Color(0xA8323948),
+                                      Color(0x70202735),
+                                    ],
+                                  ),
+                                  border: Border.all(
+                                    color: const Color(0x55FFFFFF),
+                                  ),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x44000000),
+                                      blurRadius: 24,
+                                      offset: Offset(0, 8),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.play_arrow_rounded,
+                                  color: Colors.white,
+                                  size: 36,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1235,12 +1220,12 @@ class _ReelViewState extends State<_ReelView> {
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                stops: [0, 0.12, 0.7, 1],
+                stops: [0, 0.18, 0.55, 1],
                 colors: [
-                  Color(0x59000000),
+                  Color(0x99000000),
                   Color(0x00000000),
                   Color(0x00000000),
-                  Color(0x8C000000),
+                  Color(0xCC000000),
                 ],
               ),
             ),
@@ -1249,9 +1234,9 @@ class _ReelViewState extends State<_ReelView> {
         ),
 
         Positioned(
-          left: 14,
-          right: 62,
-          bottom: bottomPad + 34,
+          left: 16,
+          right: 78,
+          bottom: bottomPad + 44,
           child: _UiFade(
             hidden: widget.clear,
             child: _InfoBlock(item: item),
@@ -1259,8 +1244,8 @@ class _ReelViewState extends State<_ReelView> {
         ),
 
         Positioned(
-          right: 4,
-          bottom: bottomPad + 30,
+          right: 10,
+          bottom: bottomPad + 40,
           child: _UiFade(
             hidden: widget.clear,
             child: _ActionRail(
@@ -1285,23 +1270,38 @@ class _ReelViewState extends State<_ReelView> {
               child: AnimatedOpacity(
                 duration: Motion.quick,
                 opacity: _fast ? 1 : 0,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: const Color(0x99000000),
-                    borderRadius: BorderRadius.circular(Radii.pill),
-                    border: Border.all(color: const Color(0x26FFFFFF)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.fast_forward_rounded,
-                          color: Colors.white, size: 20),
-                      const SizedBox(width: 6),
-                      Text('2x',
-                          style: AppText.label.copyWith(color: Colors.white)),
-                    ],
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(Radii.pill),
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xB52B3341), Color(0x88202735)],
+                        ),
+                        borderRadius: BorderRadius.circular(Radii.pill),
+                        border: Border.all(color: const Color(0x44FFFFFF)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.fast_forward_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '2x',
+                            style: AppText.label.copyWith(color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -1551,14 +1551,14 @@ class _ActionRail extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: Gaps.sm),
         ValueListenableBuilder<Map<String, double>>(
           valueListenable: saving,
           builder: (_, map, __) {
             final saved = map[item.id];
             if (saved != null) {
               return _RailButton(
-                icon: CupertinoIcons.arrow_down_to_line,
+                icon: Icons.download_rounded,
                 label: 'Saving',
                 progress: saved,
                 onTap: onSaveMenu,
@@ -1570,14 +1570,14 @@ class _ActionRail extends StatelessWidget {
                 final entry = DownloadStore.instance.item(downloadId);
                 if (entry == null) {
                   return _RailButton(
-                    icon: CupertinoIcons.arrow_down_to_line,
+                    icon: Icons.download_rounded,
                     label: 'Save',
                     onTap: onSaveMenu,
                   );
                 }
                 if (entry.status == DownloadStatus.done) {
                   return _RailButton(
-                    icon: CupertinoIcons.checkmark_circle_fill,
+                    icon: Icons.download_done_rounded,
                     label: 'Saved',
                     active: true,
                     onTap: onSaveMenu,
@@ -1586,7 +1586,7 @@ class _ActionRail extends StatelessWidget {
                 if (entry.status == DownloadStatus.failed ||
                     entry.status == DownloadStatus.paused) {
                   return _RailButton(
-                    icon: CupertinoIcons.arrow_clockwise,
+                    icon: Icons.refresh_rounded,
                     label: 'Retry',
                     onTap: onSaveMenu,
                   );
@@ -1596,7 +1596,7 @@ class _ActionRail extends StatelessWidget {
                   builder: (_, __, ___) {
                     final p = entry.progress;
                     return _RailButton(
-                      icon: CupertinoIcons.arrow_down_to_line,
+                      icon: Icons.download_rounded,
                       label: p == null ? 'Queued' : '${(p * 100).round()}%',
                       progress: p ?? -1,
                       onTap: onSaveMenu,
@@ -1607,11 +1607,17 @@ class _ActionRail extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: Gaps.sm),
         _RailButton(
           icon: muted ? CupertinoIcons.speaker_slash : CupertinoIcons.speaker_2,
           label: muted ? 'Muted' : 'Sound',
           onTap: onMute,
+        ),
+        const SizedBox(height: Gaps.sm),
+        _RailButton(
+          icon: CupertinoIcons.chevron_down,
+          label: 'Next',
+          onTap: isLast ? () {} : onNext,
         ),
       ],
     );
@@ -1718,41 +1724,86 @@ class _RailButton extends StatelessWidget {
   final double? progress;
   final bool active;
 
-  static const List<Shadow> _shadow = [
-    Shadow(blurRadius: 6, color: Color(0x80000000), offset: Offset(0, 1)),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final busy = progress != null;
-    // Icon-only, no backing plate: covers as little of the video as possible.
-    // The 44pt box keeps the iOS minimum touch target.
     return Pressable(
       semanticLabel: label,
       onTap: onTap,
-      pressedScale: 0.86,
+      pressedScale: 0.88,
       child: SizedBox(
-        width: 44,
-        height: 44,
-        child: Stack(
-          alignment: Alignment.center,
+        width: 52,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (busy)
-              SizedBox(
-                width: 34,
-                height: 34,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  value: progress! < 0 ? null : progress,
-                  color: Colors.white,
-                  backgroundColor: const Color(0x40FFFFFF),
+            ClipOval(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: AnimatedContainer(
+                  duration: Motion.quick,
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: active
+                        ? const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xD15B3540), Color(0x9E291E2B)],
+                          )
+                        : const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Color(0xA9364050), Color(0x7E1B2431)],
+                          ),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: active ? 0.38 : 0.26),
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x55000000),
+                        blurRadius: 20,
+                        offset: Offset(0, 7),
+                      ),
+                      BoxShadow(
+                        color: Color(0x18FFFFFF),
+                        blurRadius: 7,
+                        offset: Offset(0, -1),
+                      ),
+                    ],
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (busy)
+                        SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            value: progress! < 0 ? null : progress,
+                            color: AppColors.accent,
+                            backgroundColor: const Color(0x33FFFFFF),
+                          ),
+                        ),
+                      Icon(icon, color: iconColor, size: 21),
+                    ],
+                  ),
                 ),
               ),
-            Icon(
-              icon,
-              color: iconColor,
-              size: busy ? 17 : 27,
-              shadows: _shadow,
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption.copyWith(
+                color: Colors.white.withValues(alpha: 0.94),
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+                shadows: const [Shadow(blurRadius: 8, color: Color(0xCC000000))],
+              ),
             ),
           ],
         ),

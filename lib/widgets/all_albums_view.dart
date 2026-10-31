@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -158,7 +157,7 @@ class _AllAlbumsViewState extends State<AllAlbumsView> {
                   album: album,
                   subtitle: album.modelName,
                   onTap: () => Navigator.of(context).push<void>(
-                    CupertinoPageRoute<void>(
+                    MaterialPageRoute<void>(
                       builder: (_) => AlbumPage(
                         album: album,
                         modelName: album.modelName,

@@ -89,10 +89,10 @@ class HomeHero extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Positioned(
+                Positioned(
                   left: 16,
                   top: 16,
-                  child: _TopBar(),
+                  child: const _TopBar(),
                 ),
                 Positioned(
                   left: 18,

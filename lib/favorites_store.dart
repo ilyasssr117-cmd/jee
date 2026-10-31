@@ -48,7 +48,7 @@ class FavoritesStore extends ChangeNotifier {
 
   void add(Video video) {
     if (!_ids.add(video.id)) return;
-    _items.insert(0, video.withoutStream());
+    _items.insert(0, video.copyWith(streamUrl: ''));
     while (_items.length > _maxItems) {
       _ids.remove(_items.removeLast().id);
     }
@@ -78,7 +78,6 @@ class FavoritesStore extends ChangeNotifier {
         'likes': video.likes,
         'date': video.date,
         'category': video.category,
-        if (video.isReel && video.streamUrl.isNotEmpty) 'stream': video.streamUrl,
       };
 
   static Video? _decode(Map<String, dynamic> map) {
@@ -103,7 +102,6 @@ class FavoritesStore extends ChangeNotifier {
       likes: text('likes'),
       date: text('date'),
       category: text('category').isEmpty ? 'Video' : text('category'),
-      streamUrl: id.startsWith('reel_') ? text('stream') : '',
     );
   }
 }

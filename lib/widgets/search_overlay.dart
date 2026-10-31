@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart'
-    show CupertinoIcons, CupertinoSlidingSegmentedControl;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -13,7 +11,6 @@ import '../search_history.dart';
 import '../touch.dart';
 import '../video_repository.dart';
 import 'all_albums_view.dart';
-import 'ios_sheets.dart';
 import 'app_button.dart';
 import 'model_row.dart';
 import 'state_views.dart';
@@ -351,31 +348,33 @@ class SearchOverlayState extends State<SearchOverlay> {
   }
 
   Widget _buildSearchBar() {
-    final dark = AppColors.palette.brightness == Brightness.dark;
     return Row(
       children: [
         Expanded(
           child: ListenableBuilder(
             listenable: _fieldNode,
             builder: (context, _) {
-              // UISearchBar: rounded tertiary-fill capsule, no outline, a
-              // leading magnifier and a trailing round clear button.
+              final focused = _fieldNode.hasFocus;
               return AnimatedContainer(
                 duration: Motion.normal,
-                height: 40,
+                height: 42,
                 decoration: BoxDecoration(
-                  color: dark
-                      ? const Color(0x3D767680)
-                      : const Color(0x1F767680),
-                  borderRadius: BorderRadius.circular(Radii.pill),
+                  color: AppColors.surfaceHigh,
+                  borderRadius: BorderRadius.circular(Radii.field),
+                  border: Border.all(
+                    color: focused
+                        ? AppColors.accent.withValues(alpha: 0.8)
+                        : AppColors.outline,
+                    width: 1.2,
+                  ),
                 ),
                 child: Row(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.only(left: 12, right: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Icon(
-                        CupertinoIcons.search,
-                        size: 18,
+                        Icons.search_rounded,
+                        size: 20,
                         color: AppColors.textTertiary,
                       ),
                     ),
@@ -388,24 +387,18 @@ class SearchOverlayState extends State<SearchOverlay> {
                         maxLines: 1,
                         textAlignVertical: TextAlignVertical.center,
                         textInputAction: TextInputAction.search,
-                        keyboardType: TextInputType.text,
-                        keyboardAppearance: AppColors.palette.brightness,
-                        autocorrect: false,
-                        enableSuggestions: true,
-                        textCapitalization: TextCapitalization.none,
-                        smartDashesType: SmartDashesType.disabled,
-                        smartQuotesType: SmartQuotesType.disabled,
+                        keyboardAppearance: Brightness.dark,
                         onChanged: _onChanged,
                         onSubmitted: (_) => _submit(),
                         cursorColor: AppColors.accent,
-                        cursorHeight: 20,
-                        style: TextStyle(
-                          fontSize: 17,
-                          letterSpacing: -0.41,
-                          color: AppColors.textPrimary,
+                        style: AppText.title.copyWith(
+                          fontWeight: FontWeight.w400,
                         ),
                         decoration: InputDecoration(
                           isDense: true,
+                          // The outer AnimatedContainer owns the single visible
+                          // focus outline. Explicitly disable every themed
+                          // TextField border to prevent a second red rectangle.
                           filled: false,
                           fillColor: Colors.transparent,
                           border: InputBorder.none,
@@ -416,12 +409,11 @@ class SearchOverlayState extends State<SearchOverlay> {
                           focusedErrorBorder: InputBorder.none,
                           hintText: switch (_scope) {
                             SearchScope.people => 'Search models',
-                            SearchScope.albums => 'Albums',
+                            SearchScope.albums => 'All albums',
                             SearchScope.videos => 'Search videos',
                           },
-                          hintStyle: TextStyle(
-                            fontSize: 17,
-                            letterSpacing: -0.41,
+                          hintStyle: AppText.title.copyWith(
+                            fontWeight: FontWeight.w400,
                             color: AppColors.textTertiary,
                           ),
                           contentPadding:
@@ -434,20 +426,19 @@ class SearchOverlayState extends State<SearchOverlay> {
                       builder: (context, _) => AnimatedSwitcher(
                         duration: Motion.quick,
                         child: _text.text.isEmpty
-                            ? const SizedBox(width: 12)
+                            ? const SizedBox(width: 10)
                             : Pressable(
                                 key: const ValueKey<String>('clear'),
                                 semanticLabel: 'Clear text',
                                 haptic: Haptic.selection,
-                                pressedScale: 0.85,
                                 onTap: _clearField,
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
+                                    horizontal: 10,
                                   ),
                                   child: Icon(
-                                    CupertinoIcons.xmark_circle_fill,
-                                    size: 18,
+                                    Icons.cancel_rounded,
+                                    size: 20,
                                     color: AppColors.textTertiary,
                                   ),
                                 ),
@@ -460,20 +451,18 @@ class SearchOverlayState extends State<SearchOverlay> {
             },
           ),
         ),
-        const SizedBox(width: Gaps.md),
+        const SizedBox(width: Gaps.sm),
         Pressable(
           semanticLabel: 'Close search',
           haptic: Haptic.selection,
-          pressedScale: 1,
-          pressedOpacity: 0.4,
           onTap: widget.onClose,
           child: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
             child: Text(
               'Cancel',
               style: TextStyle(
-                fontSize: 17,
-                letterSpacing: -0.41,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
                 color: AppColors.accent,
               ),
             ),
@@ -483,102 +472,47 @@ class SearchOverlayState extends State<SearchOverlay> {
     );
   }
 
-  Future<void> _pickSort() async {
-    final picked = await showActionSheet<SearchSort>(
-      context,
-      title: 'Sort Results',
-      actions: [
-        for (final sort in SearchSort.values)
-          SheetAction<SearchSort>(
-            label: sort == _sort ? '\u2713  ${sort.label}' : sort.label,
-            value: sort,
-            isDefault: sort == _sort,
-          ),
-      ],
-    );
-    if (picked != null) _setSort(picked);
-  }
-
-  /// Native scope bar (UISegmentedControl) plus a "Sort" menu button.
   Widget _buildFilters(double margin) {
-    final dark = AppColors.palette.brightness == Brightness.dark;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(margin, Gaps.xs, margin, Gaps.xs),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.symmetric(horizontal: margin, vertical: 6),
         children: [
-          CupertinoSlidingSegmentedControl<SearchScope>(
-            groupValue: _scope,
-            backgroundColor:
-                dark ? const Color(0x3D767680) : const Color(0x1F767680),
-            thumbColor: dark ? const Color(0xFF636366) : Colors.white,
-            padding: const EdgeInsets.all(2),
-            children: <SearchScope, Widget>{
-              for (final (scope, label) in const <(SearchScope, String)>[
-                (SearchScope.videos, 'Videos'),
-                (SearchScope.people, 'Models'),
-                (SearchScope.albums, 'Albums'),
-              ])
-                scope: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      letterSpacing: -0.08,
-                      fontWeight: scope == _scope
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-            },
-            onValueChanged: (next) {
-              if (next == null) return;
-              Haptics.play(Haptic.selection);
-              _setScope(next);
-            },
+          AppChip(
+            label: 'Videos',
+            selected: _scope == SearchScope.videos,
+            onPressed: () => _setScope(SearchScope.videos),
           ),
-          AnimatedSize(
-            duration: Motion.normal,
-            curve: Motion.curve,
-            alignment: Alignment.topCenter,
-            child: _scope == SearchScope.videos
-                ? Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    child: Pressable(
-                      semanticLabel: 'Sort results',
-                      pressedScale: 1,
-                      pressedOpacity: 0.4,
-                      haptic: Haptic.selection,
-                      onTap: _pickSort,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 2),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              CupertinoIcons.arrow_up_arrow_down,
-                              size: 13,
-                              color: AppColors.accent,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              _sort.label,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                letterSpacing: -0.24,
-                                color: AppColors.accent,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  )
-                : const SizedBox(width: double.infinity),
+          const SizedBox(width: Gaps.sm),
+          AppChip(
+            label: 'Models',
+            selected: _scope == SearchScope.people,
+            onPressed: () => _setScope(SearchScope.people),
           ),
+          const SizedBox(width: Gaps.sm),
+          AppChip(
+            label: 'Albums',
+            selected: _scope == SearchScope.albums,
+            onPressed: () => _setScope(SearchScope.albums),
+          ),
+          if (_scope == SearchScope.videos) ...[
+            const SizedBox(width: Gaps.md),
+            Container(
+              width: 1,
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              color: AppColors.outline,
+            ),
+            const SizedBox(width: Gaps.md),
+            for (final sort in SearchSort.values) ...[
+              AppChip(
+                label: sort.label,
+                selected: _sort == sort,
+                onPressed: () => _setSort(sort),
+              ),
+              const SizedBox(width: Gaps.sm),
+            ],
+          ],
         ],
       ),
     );
@@ -613,7 +547,7 @@ class SearchOverlayState extends State<SearchOverlay> {
     }
     if (people.isEmpty) {
       return const StatusView(
-        icon: CupertinoIcons.search,
+        icon: Icons.search_off_rounded,
         title: 'No models found',
         message: 'Try the exact model name, for example \u201cPlaywithanny\u201d.',
       );
@@ -725,7 +659,7 @@ class SearchOverlayState extends State<SearchOverlay> {
         const SliverFillRemaining(
           hasScrollBody: false,
           child: StatusView(
-            icon: CupertinoIcons.search,
+            icon: Icons.search_off_rounded,
             title: 'No results found',
             message: 'Check the spelling or try a different keyword.',
           ),
@@ -763,7 +697,7 @@ class SearchOverlayState extends State<SearchOverlay> {
               child: Center(
                 child: AppButton(
                   label: 'Couldn\u2019t load more \u2013 Retry',
-                  icon: CupertinoIcons.refresh,
+                  icon: Icons.refresh_rounded,
                   style: AppButtonStyle.secondary,
                   onPressed: _loadPage,
                 ),
@@ -790,7 +724,7 @@ class SearchOverlayState extends State<SearchOverlay> {
         final items = SearchHistory.instance.items;
         if (items.isEmpty) {
           return StatusView(
-            icon: CupertinoIcons.search,
+            icon: Icons.search_rounded,
             title: _scope == SearchScope.people
                 ? 'Search for models'
                 : 'Search for videos',
@@ -810,11 +744,10 @@ class SearchOverlayState extends State<SearchOverlay> {
               children: [
                 Expanded(
                   child: Text(
-                    'Recent Searches',
+                    'Recent',
                     style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 16,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 0.38,
                       color: AppColors.textPrimary,
                     ),
                   ),
@@ -822,16 +755,14 @@ class SearchOverlayState extends State<SearchOverlay> {
                 Pressable(
                   semanticLabel: 'Clear recent searches',
                   haptic: Haptic.selection,
-                  pressedScale: 1,
-                  pressedOpacity: 0.4,
                   onTap: SearchHistory.instance.clear,
                   child: const Padding(
                     padding: EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       'Clear',
                       style: TextStyle(
-                        fontSize: 17,
-                        letterSpacing: -0.41,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
                         color: AppColors.accent,
                       ),
                     ),
@@ -867,76 +798,54 @@ class _RecentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Swipe left to delete, exactly like a UITableView row with a trailing
-    // destructive swipe action; hairline separator inset past the icon.
-    return Dismissible(
-      key: ValueKey<String>('recent-$term'),
-      direction: DismissDirection.endToStart,
-      dismissThresholds: const <DismissDirection, double>{
-        DismissDirection.endToStart: 0.35,
-      },
-      onUpdate: (details) {
-        if (details.reached && !details.previousReached) {
-          Haptics.play(Haptic.medium);
-        }
-      },
-      onDismissed: (_) => onDelete(),
-      background: const SizedBox.shrink(),
-      secondaryBackground: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: AppColors.error,
-        child: const Icon(CupertinoIcons.delete, size: 22, color: Colors.white),
-      ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(color: AppColors.background),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Pressable(
-              semanticLabel: term,
-              haptic: Haptic.selection,
-              pressedScale: 1,
-              pressedOpacity: 0.5,
-              onTap: onSelect,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Row(
-                  children: [
-                    Icon(
-                      CupertinoIcons.clock,
-                      size: 20,
-                      color: AppColors.textTertiary,
-                    ),
-                    const SizedBox(width: Gaps.md),
-                    Expanded(
-                      child: Text(
-                        term,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 17,
-                          letterSpacing: -0.41,
-                          color: AppColors.textPrimary,
-                        ),
+    return Row(
+      children: [
+        Expanded(
+          child: Pressable(
+            semanticLabel: term,
+            haptic: Haptic.selection,
+            pressedScale: 0.98,
+            onTap: onSelect,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.history_rounded,
+                    size: 20,
+                    color: AppColors.textTertiary,
+                  ),
+                  const SizedBox(width: Gaps.md),
+                  Expanded(
+                    child: Text(
+                      term,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.title.copyWith(
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
-                    Icon(
-                      CupertinoIcons.arrow_up_left,
-                      size: 16,
-                      color: AppColors.textTertiary,
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.only(left: 32),
-              child: Container(height: 0.5, color: AppColors.outline),
-            ),
-          ],
+          ),
         ),
-      ),
+        Pressable(
+          semanticLabel: 'Remove $term',
+          haptic: Haptic.light,
+          pressedScale: 0.85,
+          onTap: onDelete,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(
+              Icons.close_rounded,
+              size: 20,
+              color: AppColors.textTertiary,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

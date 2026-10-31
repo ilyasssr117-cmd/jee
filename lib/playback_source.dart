@@ -16,6 +16,7 @@ Future<PlaybackSource> resolvePlaybackSource(
   String? pageUrl, {
   bool refresh = false,
   bool tolerant = false,
+  bool preserveUrl = false,
 }) async {
   var headers = streamHeaders(streamUri, pageUrl);
   final page = Uri.tryParse(pageUrl?.trim() ?? '');
@@ -35,8 +36,12 @@ Future<PlaybackSource> resolvePlaybackSource(
   } catch (_) {
     if (!tolerant) rethrow;
   }
-  final finalUri =
-      await resolveFinalStreamUri(streamUri, headers, refresh: refresh);
+  // The full-screen player can hand the exact extracted URL to the native
+  // media engine. AVPlayer/ExoPlayer follow HTTP redirects themselves; keeping
+  // the original URI avoids rewriting signed or source-specific stream links.
+  final finalUri = preserveUrl
+      ? streamUri
+      : await resolveFinalStreamUri(streamUri, headers, refresh: refresh);
   return PlaybackSource(finalUri.toString(), headers);
 }
 

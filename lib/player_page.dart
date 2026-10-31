@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart'
-    show CupertinoActivityIndicator, CupertinoIcons;
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -10,7 +9,6 @@ import 'app_settings.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'history_store.dart';
-import 'media_headers.dart';
 import 'mini_player.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -19,7 +17,6 @@ import 'playback_progress.dart';
 import 'playback_source.dart';
 import 'touch.dart';
 import 'video_repository.dart';
-import 'widgets/ios_sheets.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
@@ -77,7 +74,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Timer? _scrubTimer;
   final ValueNotifier<bool> _reloading = ValueNotifier<bool>(false);
   int _reloadToken = 0;
-  bool _reloadOk = false;
   Timer? _spinnerTimer;
   Duration _lastSeen = Duration.zero;
   bool _pipBusy = false;
@@ -111,7 +107,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static const int _maxAutoRetries = 3;
   static const Duration _stallAfter = Duration(seconds: 8);
   final ValueNotifier<bool> _stalled = ValueNotifier<bool>(false);
-  late Video _video = _preferred(widget.video);
+  late Video _video = widget.video;
   late String? _localPath = widget.localPath;
   PlaybackSource? _initialSource;
   bool _usedKnownSource = false;
@@ -139,8 +135,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
-    _initialSource =
-        _video.streamUrl == widget.video.streamUrl ? widget.initialSource : null;
+    _initialSource = widget.initialSource;
     _adopted = widget.adopted;
     final adopted = _adopted;
     if (adopted != null) _speed = adopted.speed;
@@ -202,13 +197,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
 
     final lookAgain = refreshSource && !(_reconnecting && _autoRetries < 2);
-    if (lookAgain && _localPath == null && !_video.isReel) {
+    if (lookAgain && _localPath == null) {
       try {
         final fresh = await videoRepository.resolveForPlayback(
           _video.copyWith(streamUrl: ''),
           refresh: true,
         );
-        if (fresh.streamUrl.trim().isNotEmpty) _video = _preferred(fresh);
+        if (fresh.streamUrl.trim().isNotEmpty) _video = fresh;
       } catch (error) {
         debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
       }
@@ -351,18 +346,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       throw const FormatException('Invalid video stream URL.');
     }
 
-    if (_video.isReel) {
-      _activeUrl = rawUrl;
-      _activeHeaders = kReelMediaHeaders;
-      return VideoPlayerController.networkUrl(
-        streamUri,
-        httpHeaders: kReelMediaHeaders,
-      );
-    }
     final source = await resolvePlaybackSource(
       streamUri,
       _video.pageUrl,
       refresh: refresh,
+      preserveUrl: true,
     );
     if (!mounted || generation != _initializationGeneration || _isLeaving) {
       return null;
@@ -376,28 +364,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       finalUri,
       httpHeaders: source.headers,
     );
-  }
-
-  Video _preferred(Video video) {
-    final url = video.streamForQuality(AppSettings.instance.preferredQuality);
-    return url == video.streamUrl ? video : video.copyWith(streamUrl: url);
-  }
-
-  void _setQuality(int height) {
-    AppSettings.instance.setPreferredQuality(height);
-    final previous = _video;
-    final next = _preferred(_video);
-    if (next.streamUrl == _video.streamUrl) return;
-    _video = next;
-    if (_localPath != null || _isLeaving) return;
-    _reloadOk = false;
-    unawaited(() async {
-      await _reloadInPlace(keepSource: true);
-      // Couldn't switch: keep state (and the wheel) in sync with what plays.
-      if (!_reloadOk && mounted && _video.streamUrl == next.streamUrl) {
-        _video = previous;
-      }
-    }());
   }
 
   Future<void> _reloadInPlace({bool auto = false, bool keepSource = false}) async {
@@ -422,13 +388,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final lookAgain = !keepSource && (!auto || _autoRetries >= 2);
     VideoPlayerController? fresh;
     try {
-      if (lookAgain && _localPath == null && !_video.isReel) {
+      if (lookAgain && _localPath == null) {
         try {
           final next = await videoRepository.resolveForPlayback(
             _video.copyWith(streamUrl: ''),
             refresh: true,
           );
-          if (next.streamUrl.trim().isNotEmpty) _video = _preferred(next);
+          if (next.streamUrl.trim().isNotEmpty) _video = next;
         } catch (error) {
           debugPrint('[PLAYER] Source refresh failed, reusing URL: $error');
         }
@@ -467,7 +433,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_disposeController(old));
       _onControllerChanged();
       fresh = null;
-      _reloadOk = true;
     } catch (error) {
       debugPrint('[PLAYER] Reload in place failed: ${error.runtimeType}');
       if (fresh != null) await _disposeController(fresh);
@@ -1125,57 +1090,48 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static String _speedLabel(double speed) =>
       '${speed == speed.roundToDouble() ? speed.toInt() : speed}x';
 
-  /// Native iOS wheels (UIPickerView) for quality + playback speed.
   Future<void> _pickSpeed() async {
     _hideTimer?.cancel();
-    final hasQuality = _video.qualities.length >= 2 && _localPath == null;
-    var qualityIndex = 0;
-    if (hasQuality && AppSettings.instance.preferredQuality != 0) {
-      var i = _video.qualities.indexWhere(
-        (option) => option.url == _video.streamUrl,
-      );
-      // Refreshed links get new tokens, so fall back to the preferred height.
-      if (i < 0) {
-        i = _video.qualityIndexFor(AppSettings.instance.preferredQuality);
-      }
-      qualityIndex = i < 0 ? 0 : i + 1;
-    }
-    final speedIndex =
-        _speeds.indexOf(_speed).clamp(0, _speeds.length - 1).toInt();
-
-    final result = await showWheelPicker(
-      context,
-      title: hasQuality ? 'Quality & Speed' : 'Playback Speed',
-      dark: true,
-      columns: [
-        if (hasQuality)
-          WheelColumn(
-            title: 'Quality',
-            labels: <String>[
-              'Auto',
-              for (final option in _video.qualities) '${option.height}p',
+    final picked = await showModalBottomSheet<double>(
+      context: context,
+      backgroundColor: OnDark.surface,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 520),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Playback speed', style: darkText.title),
+              const SizedBox(height: Gaps.md),
+              Wrap(
+                spacing: Gaps.sm,
+                runSpacing: Gaps.sm,
+                children: [
+                  for (final speed in _speeds)
+                    AppChip(
+                      label: _speedLabel(speed),
+                      selected: speed == _speed,
+                      onDark: true,
+                      onPressed: () => Navigator.of(sheetContext).pop(speed),
+                    ),
+                ],
+              ),
             ],
-            initialIndex: qualityIndex,
           ),
-        WheelColumn(
-          title: 'Speed',
-          labels: <String>[for (final speed in _speeds) _speedLabel(speed)],
-          initialIndex: speedIndex,
         ),
-      ],
+      ),
     );
     if (!mounted) return;
-    if (result != null) {
-      final speed = _speeds[result.last];
-      if (hasQuality && result.first != qualityIndex) {
-        final choice = result.first;
-        _setQuality(choice == 0 ? 0 : _video.qualities[choice - 1].height);
-      }
-      final controller = _controller;
-      if (controller != null && !_isLeaving && speed != _speed) {
-        setState(() => _speed = speed);
-        await _safeControllerAction(() => controller.setPlaybackSpeed(speed));
-      }
+    final controller = _controller;
+    if (picked != null && controller != null && !_isLeaving) {
+      setState(() => _speed = picked);
+      await _safeControllerAction(() => controller.setPlaybackSpeed(picked));
     }
     _scheduleHide();
   }
@@ -1322,7 +1278,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 left: context.hMargin + context.safe.left,
                 top: context.safe.top + 10,
                 child: RoundIconButton(
-                  icon: CupertinoIcons.chevron_back,
+                  icon: Icons.arrow_back_ios_new_rounded,
                   iconSize: 20,
                   tapSize: kMinTapSize,
                   label: 'Back',
@@ -1679,7 +1635,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return Row(
       children: [
         RoundIconButton(
-          icon: CupertinoIcons.chevron_back,
+          icon: Icons.arrow_back_ios_new_rounded,
           iconSize: 20,
           label: 'Back',
           tapSize: kMinTapSize,

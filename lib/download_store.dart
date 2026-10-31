@@ -8,7 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
-import 'app_settings.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -418,7 +417,7 @@ class DownloadStore extends ChangeNotifier {
       }
       return;
     }
-    _items.insert(0, DownloadItem(video: video.withoutStream()));
+    _items.insert(0, DownloadItem(video: video.copyWith(streamUrl: '')));
     _persist();
     notifyListeners();
     unawaited(_pump());
@@ -543,17 +542,13 @@ class DownloadStore extends ChangeNotifier {
         throw const _DownloadFailure('Storage isn\u2019t available.');
       }
 
-      final stored = entry.video.isReel ? entry.video.streamUrl.trim() : '';
-      final direct = _directUrls[id] ?? (stored.isEmpty ? null : stored);
+      final direct = _directUrls[id];
       final resolved = direct != null
           ? entry.video.copyWith(streamUrl: direct)
           : await videoRepository
               .resolveForPlayback(entry.video.copyWith(streamUrl: ''));
 
-      final picked = direct != null
-          ? resolved.streamUrl
-          : resolved.streamForQuality(AppSettings.instance.preferredQuality);
-      final url = picked.trim();
+      final url = resolved.streamUrl.trim();
       final uri = Uri.tryParse(url);
       if (uri == null ||
           (uri.scheme != 'http' && uri.scheme != 'https') ||

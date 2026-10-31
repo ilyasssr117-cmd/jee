@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/cupertino.dart'
-    show CupertinoActivityIndicator, CupertinoIcons;
+import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -49,16 +48,23 @@ class AppButton extends StatelessWidget {
     return Pressable(
       semanticLabel: label,
       onTap: loading ? null : onPressed,
-      pressedScale: 0.97,
-      pressedOpacity: 0.7,
       child: AnimatedContainer(
         duration: Motion.quick,
-        height: 48,
+        height: 44,
         padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(Radii.pill),
-          border: Border.all(color: border, width: 0.5),
+          borderRadius: BorderRadius.circular(Radii.button),
+          border: Border.all(color: border),
+          boxShadow: primary
+              ? [
+                  BoxShadow(
+                    color: AppColors.accent.withValues(alpha: 0.24),
+                    blurRadius: 14,
+                    offset: const Offset(0, 5),
+                  ),
+                ]
+              : const [],
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
@@ -207,8 +213,8 @@ class PageBackButton extends StatelessWidget {
     return Transform.translate(
       offset: const Offset(-3, -3),
       child: RoundIconButton(
-        icon: CupertinoIcons.chevron_back,
-        iconSize: 22,
+        icon: Icons.arrow_back_ios_new_rounded,
+        iconSize: 20,
         tapSize: kMinTapSize,
         label: 'Back',
         onTap: onPressed ?? () => Navigator.of(context).maybePop(),

@@ -205,10 +205,21 @@ class _FlowAppState extends State<FlowApp>
       builder: (context, child) {
         final media = MediaQuery.of(context);
         final snapshot = _snapshot;
+        final isDark = _brightness == Brightness.dark;
         return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: _brightness == Brightness.dark
-              ? SystemUiOverlayStyle.light
-              : SystemUiOverlayStyle.dark,
+          value: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
+            // iOS uses the opposite brightness convention for status content.
+            statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+            systemNavigationBarColor: Colors.transparent,
+            systemNavigationBarDividerColor: Colors.transparent,
+            systemNavigationBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
+            systemStatusBarContrastEnforced: false,
+            systemNavigationBarContrastEnforced: false,
+          ),
           child: Stack(
             fit: StackFit.expand,
             children: [

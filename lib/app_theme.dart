@@ -1,28 +1,16 @@
-import 'dart:ui' as ui show ImageFilter;
-
-import 'package:flutter/cupertino.dart'
-    show
-        CupertinoColors,
-        CupertinoPageRoute,
-        CupertinoPageTransitionsBuilder,
-        CupertinoScrollBehavior,
-        CupertinoTextThemeData,
-        CupertinoThemeData;
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 abstract final class OnDark {
-  // iOS dark system colors (systemBackground / secondarySystemGroupedBackground
-  // / tertiarySystemFill / separator / label tiers / systemRed).
-  static const Color background = Color(0xFF000000);
-  static const Color surface = Color(0xFF1C1C1E);
-  static const Color surfaceHigh = Color(0xFF2C2C2E);
-  static const Color outline = Color(0x54545458);
+  static const Color background = Color(0xFF0D0E12);
+  static const Color surface = Color(0xFF17181E);
+  static const Color surfaceHigh = Color(0xFF23242D);
+  static const Color outline = Color(0x1FFFFFFF);
   static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFF9E9EA3);
-  static const Color textTertiary = Color(0xFF76767B);
+  static const Color textSecondary = Color(0xFFB7BDCB);
+  static const Color textTertiary = Color(0xFF8E96A8);
   static const Color accentSoft = Color(0xFF3B171B);
-  static const Color error = Color(0xFFFF453A);
+  static const Color error = Color(0xFFFF8A80);
 }
 
 class Palette {
@@ -65,15 +53,15 @@ class Palette {
 
   static const Palette light = Palette(
     brightness: Brightness.light,
-    background: Color(0xFFF2F2F7),
+    background: Color(0xFFF4F5FA),
     surface: Color(0xFFFFFFFF),
-    surfaceHigh: Color(0xFFE5E5EA),
-    outline: Color(0x4A3C3C43),
-    textPrimary: Color(0xFF000000),
-    textSecondary: Color(0xFF6C6C70),
-    textTertiary: Color(0xFF8E8E93),
+    surfaceHigh: Color(0xFFE8EBF2),
+    outline: Color(0x1F000000),
+    textPrimary: Color(0xFF12141B),
+    textSecondary: Color(0xFF4B5265),
+    textTertiary: Color(0xFF7B8396),
     accentSoft: Color(0xFFFCE4E6),
-    error: Color(0xFFFF3B30),
+    error: Color(0xFFD93025),
   );
 }
 
@@ -108,10 +96,9 @@ abstract final class Gaps {
 }
 
 abstract final class Radii {
-  static const double card = 14;
-  static const double button = 14;
-  static const double field = 12;
-  static const double group = 12; // inset-grouped list corner
+  static const double card = 18;
+  static const double button = 15;
+  static const double field = 16;
   static const double pill = 999;
 }
 
@@ -121,7 +108,6 @@ abstract final class Motion {
   static const Duration fade = Duration(milliseconds: 320);
   static const Duration scroll = Duration(milliseconds: 260);
   static const Curve curve = Curves.easeOutCubic;
-  static const Curve spring = Curves.easeOutBack;
 }
 
 extension UiScale on BuildContext {
@@ -152,28 +138,18 @@ class TextSet {
         color: palette.textPrimary,
       );
 
-  /// iOS Large Title (34pt bold).
-  TextStyle get largeTitle => TextStyle(
-        fontSize: 34,
-        height: 1.15,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.37,
-        color: palette.textPrimary,
-      );
-
   TextStyle get headline => TextStyle(
-        fontSize: 22,
+        fontSize: 21,
         height: 1.18,
         fontWeight: FontWeight.w700,
-        letterSpacing: 0.35,
+        letterSpacing: -0.2,
         color: palette.textPrimary,
       );
 
   TextStyle get title => TextStyle(
-        fontSize: 17,
+        fontSize: 16,
         height: 1.25,
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.41,
         color: palette.textPrimary,
       );
 
@@ -185,26 +161,23 @@ class TextSet {
       );
 
   TextStyle get body => TextStyle(
-        fontSize: 15,
-        height: 1.35,
+        fontSize: 14,
+        height: 1.4,
         fontWeight: FontWeight.w400,
-        letterSpacing: -0.24,
         color: palette.textSecondary,
       );
 
   TextStyle get label => TextStyle(
-        fontSize: 15,
+        fontSize: 14,
         height: 1.2,
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.24,
         color: palette.textPrimary,
       );
 
   TextStyle get caption => TextStyle(
-        fontSize: 13,
+        fontSize: 12,
         height: 1.3,
-        fontWeight: FontWeight.w400,
-        letterSpacing: -0.08,
+        fontWeight: FontWeight.w500,
         color: palette.textTertiary,
       );
 
@@ -221,7 +194,6 @@ abstract final class AppText {
   static TextSet get _set => TextSet(AppColors.palette);
 
   static TextStyle get display => _set.display;
-  static TextStyle get largeTitle => _set.largeTitle;
   static TextStyle get headline => _set.headline;
   static TextStyle get title => _set.title;
   static TextStyle get cardTitle => _set.cardTitle;
@@ -245,40 +217,8 @@ ThemeData buildAppTheme(Brightness brightness) {
       surface: p.surface,
     ),
     splashFactory: NoSplash.splashFactory,
-    highlightColor: Colors.transparent,
     visualDensity: VisualDensity.standard,
     iconTheme: const IconThemeData(size: 20, opticalSize: 20),
-    // Every Cupertino widget (pickers, action sheets, alerts, search field,
-    // switches, refresh control) follows the same palette automatically.
-    cupertinoOverrideTheme: CupertinoThemeData(
-      brightness: brightness,
-      primaryColor: AppColors.accent,
-      primaryContrastingColor: CupertinoColors.white,
-      scaffoldBackgroundColor: p.background,
-      barBackgroundColor: p.surface.withValues(alpha: 0.78),
-      applyThemeToAll: true,
-      textTheme: CupertinoTextThemeData(
-        primaryColor: AppColors.accent,
-        textStyle: TextStyle(
-          inherit: false,
-          fontSize: 17,
-          letterSpacing: -0.41,
-          color: p.textPrimary,
-        ),
-        pickerTextStyle: TextStyle(
-          inherit: false,
-          fontSize: 21,
-          letterSpacing: -0.4,
-          color: p.textPrimary,
-        ),
-        actionTextStyle: const TextStyle(
-          inherit: false,
-          fontSize: 17,
-          letterSpacing: -0.41,
-          color: AppColors.accent,
-        ),
-      ),
-    ),
   );
 
   return base.copyWith(
@@ -291,12 +231,12 @@ ThemeData buildAppTheme(Brightness brightness) {
       foregroundColor: p.textPrimary,
       elevation: 0,
       scrolledUnderElevation: 0,
-      centerTitle: true,
+      centerTitle: false,
       titleTextStyle: TextStyle(
         color: p.textPrimary,
-        fontSize: 17,
-        fontWeight: FontWeight.w600,
-        letterSpacing: -0.41,
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.3,
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -321,15 +261,15 @@ ThemeData buildAppTheme(Brightness brightness) {
       labelStyle: TextStyle(color: p.textSecondary),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
-        borderSide: BorderSide.none,
+        borderSide: BorderSide(color: p.outline),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
-        borderSide: BorderSide.none,
+        borderSide: BorderSide(color: p.outline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
-        borderSide: BorderSide.none,
+        borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
@@ -344,8 +284,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       backgroundColor: p.surface,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
-      dragHandleSize: const Size(36, 5),
-      dragHandleColor: p.textTertiary.withValues(alpha: 0.55),
+      dragHandleColor: p.textTertiary.withValues(alpha: 0.5),
       modalBackgroundColor: p.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -375,18 +314,31 @@ ThemeData buildAppTheme(Brightness brightness) {
       linearTrackColor: Color(0x263F3F46),
     ),
     switchTheme: SwitchThemeData(
-      thumbColor: const WidgetStatePropertyAll<Color>(Colors.white),
-      trackColor: WidgetStateProperty.resolveWith<Color?>(
+      thumbColor: WidgetStateProperty.resolveWith<Color?>(
         (states) => states.contains(WidgetState.selected)
-            ? CupertinoColors.systemGreen
+            ? AppColors.accentStrong
             : null,
       ),
-      trackOutlineColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+      trackColor: WidgetStateProperty.resolveWith<Color?>(
+        (states) => states.contains(WidgetState.selected)
+            ? AppColors.accent.withValues(alpha: 0.35)
+            : null,
+      ),
     ),
     sliderTheme: SliderThemeData(
       activeTrackColor: AppColors.accent,
       thumbColor: AppColors.accentStrong,
       overlayColor: AppColors.accent.withValues(alpha: 0.12),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.fuchsia: ZoomPageTransitionsBuilder(),
+      },
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
@@ -398,14 +350,8 @@ ThemeData buildAppTheme(Brightness brightness) {
         color: Colors.white,
       ),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.pill),
+        borderRadius: BorderRadius.circular(Radii.button),
       ),
-    ),
-    pageTransitionsTheme: PageTransitionsTheme(
-      builders: <TargetPlatform, PageTransitionsBuilder>{
-        for (final platform in TargetPlatform.values)
-          platform: const CupertinoPageTransitionsBuilder(),
-      },
     ),
   );
 }
@@ -427,61 +373,28 @@ class FadePageRoute<T> extends PageRouteBuilder<T> {
         );
 }
 
-/// iOS push/pop route that blurs the page progressively while it closes
-/// (button pop or interactive swipe-back). The blur is only applied while the
-/// page is leaving, in coarse steps, so it stays cheap on the GPU.
-class BlurCupertinoPageRoute<T> extends CupertinoPageRoute<T> {
-  BlurCupertinoPageRoute({
-    required super.builder,
-    this.maxSigma = 14,
-  });
-
-  final double maxSigma;
-
-  @override
-  Widget buildTransitions(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    final blurred = AnimatedBuilder(
-      animation: animation,
-      child: RepaintBoundary(child: child),
-      builder: (context, cached) {
-        final leaving = animation.status == AnimationStatus.reverse ||
-            (navigator?.userGestureInProgress ?? false);
-        final value = animation.value;
-        if (!leaving || value >= 1) return cached!;
-        // Quantised to 1.5px steps: smooth to the eye, no per-frame filter churn.
-        final raw = (1 - value) * maxSigma;
-        final sigma = (raw / 1.5).round() * 1.5;
-        if (sigma < 1.5) return cached!;
-        return ImageFiltered(
-          imageFilter: ui.ImageFilter.blur(
-            sigmaX: sigma,
-            sigmaY: sigma,
-            tileMode: TileMode.clamp,
-          ),
-          child: cached,
-        );
-      },
-    );
-    return super.buildTransitions(context, animation, secondaryAnimation, blurred);
+/// Scroll physics tuned to the platform's native feel.
+ScrollPhysics nativeScrollPhysics(
+  BuildContext context, {
+  bool alwaysScrollable = false,
+}) {
+  final platform = Theme.of(context).platform;
+  final isCupertino = platform == TargetPlatform.iOS ||
+      platform == TargetPlatform.macOS;
+  if (!alwaysScrollable) {
+    return isCupertino
+        ? const BouncingScrollPhysics()
+        : const ClampingScrollPhysics();
   }
+  return isCupertino
+      ? const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())
+      : const AlwaysScrollableScrollPhysics(
+          parent: ClampingScrollPhysics(),
+        );
 }
 
-class AppScrollBehavior extends CupertinoScrollBehavior {
+class AppScrollBehavior extends MaterialScrollBehavior {
   const AppScrollBehavior();
-
-  @override
-  Set<PointerDeviceKind> get dragDevices => const <PointerDeviceKind>{
-        PointerDeviceKind.touch,
-        PointerDeviceKind.stylus,
-        PointerDeviceKind.invertedStylus,
-        PointerDeviceKind.trackpad,
-        PointerDeviceKind.mouse,
-      };
 
   @override
   Widget buildOverscrollIndicator(
@@ -490,8 +403,4 @@ class AppScrollBehavior extends CupertinoScrollBehavior {
     ScrollableDetails details,
   ) =>
       child;
-
-  @override
-  ScrollPhysics getScrollPhysics(BuildContext context) =>
-      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
 }

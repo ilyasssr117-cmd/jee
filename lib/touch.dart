@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -34,9 +33,7 @@ class Pressable extends StatefulWidget {
     this.onLongPress,
     this.haptic = Haptic.light,
     this.longPressHaptic = Haptic.medium,
-    this.pressedScale = 0.95,
-    this.pressedOpacity = 1,
-    this.longPressDuration = const Duration(milliseconds: 350),
+    this.pressedScale = 0.97,
     this.semanticLabel,
     this.behavior = HitTestBehavior.opaque,
   });
@@ -47,10 +44,6 @@ class Pressable extends StatefulWidget {
   final Haptic haptic;
   final Haptic longPressHaptic;
   final double pressedScale;
-
-  /// iOS-style highlight: text buttons and list rows dim instead of shrinking.
-  final double pressedOpacity;
-  final Duration longPressDuration;
   final String? semanticLabel;
   final HitTestBehavior behavior;
 
@@ -72,50 +65,32 @@ class _PressableState extends State<Pressable> {
       scale: _down ? widget.pressedScale : 1,
       duration: _down ? const Duration(milliseconds: 90) : Motion.normal,
       curve: Motion.curve,
-      child: widget.pressedOpacity >= 1
-          ? widget.child
-          : AnimatedOpacity(
-              opacity: _down ? widget.pressedOpacity : 1,
-              duration: _down ? const Duration(milliseconds: 60) : Motion.normal,
-              child: widget.child,
-            ),
+      child: widget.child,
     );
 
     if (widget.onTap == null && widget.onLongPress == null) return child;
 
-    child = RawGestureDetector(
+    child = GestureDetector(
       behavior: widget.behavior,
-      gestures: <Type, GestureRecognizerFactory>{
-        TapGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
-          () => TapGestureRecognizer(),
-          (TapGestureRecognizer tap) {
-            tap.onTapDown = (_) => _set(true);
-            tap.onTapCancel = () => _set(false);
-            tap.onTapUp = (_) => _set(false);
-            tap.onTap = widget.onTap == null
-                ? null
-                : () {
-                    Haptics.play(widget.haptic);
-                    widget.onTap!();
-                  };
-          },
-        ),
-        if (widget.onLongPress != null)
-          LongPressGestureRecognizer:
-              GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-            () => LongPressGestureRecognizer(
-              duration: widget.longPressDuration,
-            ),
-            (LongPressGestureRecognizer press) {
-              press.onLongPressStart = (_) {
-                _set(false);
-                Haptics.play(widget.longPressHaptic);
-                widget.onLongPress!();
-              };
+      excludeFromSemantics: true,
+      onTapDown: widget.onTap == null ? null : (_) => _set(true),
+      onTapUp: widget.onTap == null ? null : (_) => _set(false),
+      onTapCancel: () => _set(false),
+      onLongPressDown: widget.onLongPress == null ? null : (_) => _set(true),
+      onLongPressCancel: () => _set(false),
+      onTap: widget.onTap == null
+          ? null
+          : () {
+              Haptics.play(widget.haptic);
+              widget.onTap!();
             },
-          ),
-      },
+      onLongPressStart: widget.onLongPress == null
+          ? null
+          : (_) {
+              _set(false);
+              Haptics.play(widget.longPressHaptic);
+              widget.onLongPress!();
+            },
       child: child,
     );
 

@@ -67,7 +67,7 @@ class _ExpandableTextState extends State<ExpandableText> {
           text = ConstrainedBox(
             constraints: BoxConstraints(maxHeight: widget.maxExpandedHeight!),
             child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
+              physics: nativeScrollPhysics(context),
               child: text,
             ),
           );

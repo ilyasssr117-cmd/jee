@@ -36,7 +36,7 @@ class RecentVideosStore extends ChangeNotifier {
   }
 
   void record(Video video) {
-    final safeVideo = video.withoutStream().copyWith(previewUrl: '');
+    final safeVideo = video.copyWith(streamUrl: '', previewUrl: '');
     _ids.remove(safeVideo.id);
     _items.removeWhere((item) => item.id == safeVideo.id);
     _ids.add(safeVideo.id);
@@ -71,7 +71,6 @@ class RecentVideosStore extends ChangeNotifier {
         'likes': video.likes,
         'date': video.date,
         'category': video.category,
-        if (video.isReel && video.streamUrl.isNotEmpty) 'stream': video.streamUrl,
       };
 
   static Video? _decode(Map<String, dynamic> map) {
@@ -96,7 +95,6 @@ class RecentVideosStore extends ChangeNotifier {
       likes: text('likes'),
       date: text('date'),
       category: text('category').isEmpty ? 'Video' : text('category'),
-      streamUrl: id.startsWith('reel_') ? text('stream') : '',
     );
   }
 }

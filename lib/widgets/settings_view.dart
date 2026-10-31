@@ -1,9 +1,4 @@
-import 'package:flutter/cupertino.dart'
-    show
-        CupertinoColors,
-        CupertinoIcons,
-        CupertinoSlidingSegmentedControl,
-        CupertinoSwitch;
+import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
 import 'package:flutter/material.dart';
 
 import '../app_settings.dart';
@@ -16,8 +11,6 @@ import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
 import 'dialogs.dart';
-import 'ios_sheets.dart';
-import 'large_title.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key, required this.bottomInset});
@@ -29,8 +22,6 @@ class SettingsView extends StatefulWidget {
 }
 
 class _SettingsViewState extends State<SettingsView> {
-  static const List<int> _qualities = <int>[0, 1080, 720, 480, 360];
-
   void _clearImageCache() {
     PaintingBinding.instance.imageCache
       ..clear()
@@ -51,7 +42,7 @@ class _SettingsViewState extends State<SettingsView> {
       context,
       title: 'Clear watch history?',
       message: 'This removes your History list and every resume point.',
-      confirmLabel: 'Clear Watch History',
+      confirmLabel: 'Clear',
     );
     if (!ok || !mounted) return;
     HistoryStore.instance.clear();
@@ -65,30 +56,12 @@ class _SettingsViewState extends State<SettingsView> {
       context,
       title: 'Delete all downloads?',
       message: '${store.doneCount} video(s) will be removed from your phone.',
-      confirmLabel: 'Delete All Downloads',
+      confirmLabel: 'Delete all',
     );
     if (!ok || !mounted) return;
     await store.removeAll();
     if (!mounted) return;
     showToast(context, 'Downloads deleted');
-  }
-
-  /// Native wheel picker (UIPickerView) for the preferred video quality.
-  Future<void> _pickQuality() async {
-    final settings = AppSettings.instance;
-    final current = _qualityChoice(settings.preferredQuality);
-    final result = await showWheelPicker(
-      context,
-      title: 'Video Quality',
-      columns: [
-        WheelColumn(
-          labels: [for (final q in _qualities) _qualityLabel(q)],
-          initialIndex: _qualities.indexOf(current).clamp(0, 4).toInt(),
-        ),
-      ],
-    );
-    if (result == null || !mounted) return;
-    settings.setPreferredQuality(_qualities[result.first]);
   }
 
   @override
@@ -104,136 +77,111 @@ class _SettingsViewState extends State<SettingsView> {
         final downloads = DownloadStore.instance;
         final cacheBytes = PaintingBinding.instance.imageCache.currentSizeBytes;
 
-        return CustomScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          slivers: [
-            const LargeTitleSliver(title: 'Settings'),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                margin,
-                Gaps.sm,
-                margin,
-                Gaps.xl + widget.bottomInset,
-              ),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  _Group(
-                    title: 'Appearance',
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(Gaps.md),
-                        child: _Segmented<AppThemeMode>(
-                          value: settings.themeMode,
-                          onChanged: settings.setThemeMode,
-                          options: const <(AppThemeMode, String)>[
-                            (AppThemeMode.system, 'Automatic'),
-                            (AppThemeMode.dark, 'Dark'),
-                            (AppThemeMode.light, 'Light'),
-                          ],
-                        ),
-                      ),
+        return ListView(
+          padding: EdgeInsets.fromLTRB(
+            margin,
+            context.safe.top + Gaps.lg,
+            margin,
+            Gaps.xl + widget.bottomInset,
+          ),
+          children: [
+            Text('Settings', style: AppText.headline),
+            const SizedBox(height: Gaps.lg),
+            _Group(
+              title: 'Appearance',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(Gaps.md),
+                  child: _Segmented<AppThemeMode>(
+                    value: settings.themeMode,
+                    onChanged: settings.setThemeMode,
+                    options: const <(AppThemeMode, String)>[
+                      (AppThemeMode.system, 'System'),
+                      (AppThemeMode.dark, 'Dark'),
+                      (AppThemeMode.light, 'Light'),
                     ],
                   ),
-                  _Group(
-                    title: 'Playback',
-                    children: [
-                      _Row(
-                        icon: CupertinoIcons.forward_end_fill,
-                        color: CupertinoColors.systemIndigo,
-                        title: 'Autoplay Next',
-                        subtitle: 'Continue with the next video when one ends',
-                        trailing: _Toggle(
-                          value: settings.autoplayNext,
-                          onChanged: settings.setAutoplayNext,
-                        ),
-                      ),
-                      _Row(
-                        icon: CupertinoIcons.slider_horizontal_3,
-                        color: AppColors.accent,
-                        title: 'Video Quality',
-                        value: _qualityLabel(
-                          _qualityChoice(settings.preferredQuality),
-                        ),
-                        chevron: true,
-                        onTap: _pickQuality,
-                      ),
-                      _Row(
-                        icon: CupertinoIcons.speaker_2_fill,
-                        color: CupertinoColors.systemOrange,
-                        title: 'Preview Sound',
-                        subtitle: 'Play audio when you hold a video to preview',
-                        trailing: _Toggle(
-                          value: settings.previewSound,
-                          onChanged: settings.setPreviewSound,
-                        ),
-                      ),
-                    ],
+                ),
+              ],
+            ),
+            _Group(
+              title: 'Playback & feedback',
+              children: [
+                _Row(
+                  icon: Icons.skip_next_rounded,
+                  color: AppColors.accentStrong,
+                  title: 'Autoplay next video',
+                  subtitle: 'Continue with the next one when a video ends',
+                  trailing: _Toggle(
+                    value: settings.autoplayNext,
+                    onChanged: settings.setAutoplayNext,
                   ),
-                  _Group(
-                    title: 'Feedback',
-                    children: [
-                      _Row(
-                        icon: CupertinoIcons.waveform,
-                        color: CupertinoColors.systemGreen,
-                        title: 'Haptics',
-                        subtitle: 'Feel taps, scrolling ticks and long-presses',
-                        trailing: _Toggle(
-                          value: settings.haptics,
-                          onChanged: (value) {
-                            settings.setHaptics(value);
-                            if (value) Haptics.play(Haptic.medium);
-                          },
-                        ),
-                      ),
-                    ],
+                ),
+                _Row(
+                  icon: Icons.volume_up_rounded,
+                  color: const Color(0xFFE8710A),
+                  title: 'Preview sound',
+                  subtitle: 'Play sound when you hold a video to preview it',
+                  trailing: _Toggle(
+                    value: settings.previewSound,
+                    onChanged: settings.setPreviewSound,
                   ),
-                  _Group(
-                    title: 'Storage',
-                    footer: downloads.doneCount == 0
-                        ? 'No videos are saved on this device.'
-                        : null,
-                    children: [
-                      _Row(
-                        icon: CupertinoIcons.sparkles,
-                        color: CupertinoColors.systemYellow,
-                        title: 'Clear Cache',
-                        value: formatBytes(cacheBytes),
-                        onTap: _clearImageCache,
-                      ),
-                      _Row(
-                        icon: CupertinoIcons.arrow_down_circle_fill,
-                        color: CupertinoColors.systemRed,
-                        title: 'Delete All Downloads',
-                        value: downloads.doneCount == 0
-                            ? null
-                            : '${downloads.doneCount} · ${formatBytes(downloads.totalBytes)}',
-                        destructive: true,
-                        onTap: downloads.items.isEmpty ? null : _deleteDownloads,
-                      ),
-                    ],
+                ),
+                _Row(
+                  icon: Icons.vibration_rounded,
+                  color: const Color(0xFF34A853),
+                  title: 'Haptic feedback',
+                  subtitle: 'Vibrate on taps and long-press',
+                  trailing: _Toggle(
+                    value: settings.haptics,
+                    onChanged: (value) {
+                      settings.setHaptics(value);
+                      if (value) Haptics.play(Haptic.medium);
+                    },
                   ),
-                  _Group(
-                    title: 'Privacy',
-                    footer:
-                        'Removes your History list and every saved resume point.',
-                    children: [
-                      _Row(
-                        icon: CupertinoIcons.search,
-                        color: CupertinoColors.systemGrey,
-                        title: 'Clear Search History',
-                        onTap: _clearSearches,
-                      ),
-                      _Row(
-                        icon: CupertinoIcons.clock_fill,
-                        color: CupertinoColors.systemRed,
-                        title: 'Clear Watch History',
-                        destructive: true,
-                        onTap: _clearWatched,
-                      ),
-                    ],
-                  ),
-                ]),
-              ),
+                ),
+              ],
+            ),
+            _Group(
+              title: 'Storage',
+              children: [
+                _Row(
+                  icon: Icons.cleaning_services_rounded,
+                  color: const Color(0xFFF29900),
+                  title: 'Clear cache',
+                  subtitle: 'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
+                  onTap: _clearImageCache,
+                ),
+                _Row(
+                  icon: Icons.download_for_offline_rounded,
+                  color: AppColors.accent,
+                  title: 'Delete all downloads',
+                  subtitle: downloads.doneCount == 0
+                      ? 'Nothing saved'
+                      : '${downloads.doneCount} video(s) \u00b7 ${formatBytes(downloads.totalBytes)}',
+                  destructive: true,
+                  onTap: downloads.items.isEmpty ? null : _deleteDownloads,
+                ),
+              ],
+            ),
+            _Group(
+              title: 'Privacy',
+              children: [
+                _Row(
+                  icon: Icons.search_off_rounded,
+                  color: const Color(0xFF8E96A8),
+                  title: 'Clear search history',
+                  onTap: _clearSearches,
+                ),
+                _Row(
+                  icon: Icons.history_toggle_off_rounded,
+                  color: const Color(0xFFD93025),
+                  title: 'Clear watch history',
+                  subtitle: 'History list and resume points',
+                  destructive: true,
+                  onTap: _clearWatched,
+                ),
+              ],
             ),
           ],
         );
@@ -242,25 +190,11 @@ class _SettingsViewState extends State<SettingsView> {
   }
 }
 
-String _qualityLabel(int q) => q == 0 ? 'Auto' : '${q}p';
-
-int _qualityChoice(int preferred) {
-  const choices = <int>[1080, 720, 480, 360];
-  if (preferred <= 0) return 0;
-  for (final choice in choices) {
-    if (preferred >= choice) return choice;
-  }
-  return 360;
-}
-
-/// Inset-grouped section: small caps header, rounded white/gray card, hairline
-/// separators that start after the icon, optional footer note.
 class _Group extends StatelessWidget {
-  const _Group({required this.title, required this.children, this.footer});
+  const _Group({required this.title, required this.children});
 
   final String title;
   final List<Widget> children;
-  final String? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -268,60 +202,52 @@ class _Group extends StatelessWidget {
     for (var i = 0; i < children.length; i++) {
       if (i > 0) {
         rows.add(
-          Padding(
-            padding: const EdgeInsets.only(left: 60),
-            child: Container(height: 0.5, color: AppColors.outline),
+          Divider(
+            height: 1,
+            thickness: 1,
+            indent: 56,
+            color: AppColors.outline,
           ),
         );
       }
       rows.add(children[i]);
     }
     return Padding(
-      padding: const EdgeInsets.only(bottom: Gaps.xl),
+      padding: const EdgeInsets.only(bottom: Gaps.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: 16, bottom: 7),
+            padding: const EdgeInsets.only(left: 4, bottom: 6),
             child: Text(
               title.toUpperCase(),
-              style: AppText.caption.copyWith(color: AppColors.textSecondary),
+              style: AppText.caption.copyWith(letterSpacing: 0.8),
             ),
           ),
           DecoratedBox(
-            decoration: ShapeDecoration(
+            decoration: BoxDecoration(
               color: AppColors.surface,
-              shape: RoundedSuperellipseBorder(
-                borderRadius: BorderRadius.circular(Radii.group),
-              ),
+              borderRadius: BorderRadius.circular(Radii.card),
+              border: Border.all(color: AppColors.outline),
             ),
-            child: ClipRSuperellipse(
-              borderRadius: BorderRadius.circular(Radii.group),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.card),
               child: Column(children: rows),
             ),
           ),
-          if (footer != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(footer!, style: AppText.caption),
-            ),
         ],
       ),
     );
   }
 }
 
-/// iOS table cell: tint-colored squircle icon, 17pt title, optional detail,
-/// trailing value / chevron / control, and a gray highlight while pressed.
-class _Row extends StatefulWidget {
+class _Row extends StatelessWidget {
   const _Row({
     required this.icon,
     required this.color,
     required this.title,
     this.subtitle,
-    this.value,
     this.trailing,
-    this.chevron = false,
     this.onTap,
     this.destructive = false,
   });
@@ -330,118 +256,59 @@ class _Row extends StatefulWidget {
   final Color color;
   final String title;
   final String? subtitle;
-  final String? value;
   final Widget? trailing;
-  final bool chevron;
   final VoidCallback? onTap;
   final bool destructive;
 
   @override
-  State<_Row> createState() => _RowState();
-}
-
-class _RowState extends State<_Row> {
-  bool _down = false;
-
-  void _set(bool value) {
-    if (_down == value || !mounted) return;
-    setState(() => _down = value);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final tappable = widget.onTap != null;
-    final disabled = !tappable && widget.trailing == null;
-    final highlight = AppColors.palette.brightness == Brightness.dark
-        ? const Color(0xFF3A3A3C)
-        : const Color(0xFFD1D1D6);
-
-    final content = Container(
-      color: _down ? highlight : Colors.transparent,
-      constraints: const BoxConstraints(minHeight: 48),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-      child: Row(
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: ShapeDecoration(
-              color: widget.color,
-              shape: RoundedSuperellipseBorder(
-                borderRadius: BorderRadius.circular(7),
-              ),
-            ),
-            child: Icon(widget.icon, size: 18, color: Colors.white),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.title,
-                  style: TextStyle(
-                    fontSize: 17,
-                    height: 1.25,
-                    letterSpacing: -0.41,
-                    color: widget.destructive
-                        ? AppColors.error
-                        : AppColors.textPrimary,
-                  ),
-                ),
-                if (widget.subtitle != null) ...[
-                  const SizedBox(height: 1),
-                  Text(widget.subtitle!, style: AppText.caption),
-                ],
-              ],
-            ),
-          ),
-          if (widget.value != null) ...[
-            const SizedBox(width: 8),
-            Text(
-              widget.value!,
-              style: TextStyle(
-                fontSize: 17,
-                letterSpacing: -0.41,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ],
-          if (widget.trailing != null) ...[
-            const SizedBox(width: 8),
-            widget.trailing!,
-          ],
-          if (widget.chevron) ...[
-            const SizedBox(width: 6),
-            Icon(
-              CupertinoIcons.chevron_forward,
-              size: 15,
-              color: AppColors.textTertiary,
-            ),
-          ],
-        ],
-      ),
-    );
-
+    final disabled = onTap == null && trailing == null;
     return Opacity(
-      opacity: disabled || (!tappable && widget.trailing == null) ? 0.45 : 1,
-      child: tappable
-          ? GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapDown: (_) => _set(true),
-              onTapCancel: () => _set(false),
-              onTapUp: (_) => _set(false),
-              onTap: () {
-                Haptics.play(Haptic.selection);
-                widget.onTap!();
-              },
-              child: Semantics(
-                button: true,
-                label: widget.title,
-                child: content,
+      opacity: disabled ? 0.45 : 1,
+      child: Pressable(
+        semanticLabel: title,
+        pressedScale: 1,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Gaps.md, vertical: 11),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, size: 20, color: Colors.white),
               ),
-            )
-          : content,
+              const SizedBox(width: Gaps.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: AppText.title.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: destructive
+                            ? AppColors.error
+                            : AppColors.textPrimary,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(subtitle!, style: AppText.caption),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -454,9 +321,9 @@ class _Toggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoSwitch(
+    return Switch.adaptive(
       value: value,
-      activeTrackColor: CupertinoColors.systemGreen,
+      activeTrackColor: AppColors.accentStrong,
       onChanged: (next) {
         Haptics.play(Haptic.selection);
         onChanged(next);
@@ -478,36 +345,75 @@ class _Segmented<T extends Object> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = AppColors.palette.brightness == Brightness.dark;
-    return SizedBox(
-      width: double.infinity,
-      child: CupertinoSlidingSegmentedControl<T>(
-        groupValue: value,
-        backgroundColor: dark
-            ? const Color(0x3D767680)
-            : const Color(0x1F767680),
-        thumbColor: dark ? const Color(0xFF636366) : Colors.white,
-        padding: const EdgeInsets.all(2),
-        children: <T, Widget>{
-          for (final (option, label) in options)
-            option: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: option == value ? FontWeight.w600 : FontWeight.w500,
-                  letterSpacing: -0.08,
-                  color: AppColors.textPrimary,
+    final platform = Theme.of(context).platform;
+    final isCupertino = platform == TargetPlatform.iOS ||
+        platform == TargetPlatform.macOS;
+
+    void select(T next) {
+      if (next == value) return;
+      Haptics.play(Haptic.selection);
+      onChanged(next);
+    }
+
+    if (isCupertino) {
+      return SizedBox(
+        width: double.infinity,
+        child: CupertinoSlidingSegmentedControl<T>(
+          groupValue: value,
+          backgroundColor: AppColors.surfaceHigh,
+          thumbColor: AppColors.accentStrong,
+          padding: const EdgeInsets.all(3),
+          children: <T, Widget>{
+            for (final (option, label) in options)
+              option: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 7),
+                child: Text(
+                  label,
+                  style: AppText.label.copyWith(
+                    fontSize: 13,
+                    color: option == value
+                        ? Colors.white
+                        : AppColors.textSecondary,
+                  ),
                 ),
               ),
-            ),
+          },
+          onValueChanged: (next) {
+            if (next != null) select(next);
+          },
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<T>(
+        segments: <ButtonSegment<T>>[
+          for (final (option, label) in options)
+            ButtonSegment<T>(value: option, label: Text(label)),
+        ],
+        selected: <T>{value},
+        showSelectedIcon: false,
+        onSelectionChanged: (selection) {
+          if (selection.isNotEmpty) select(selection.first);
         },
-        onValueChanged: (next) {
-          if (next == null) return;
-          Haptics.play(Haptic.selection);
-          onChanged(next);
-        },
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          ),
+          backgroundColor: WidgetStateProperty.resolveWith<Color?>(
+            (states) => states.contains(WidgetState.selected)
+                ? AppColors.accentStrong
+                : AppColors.surfaceHigh,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+            (states) => states.contains(WidgetState.selected)
+                ? Colors.white
+                : AppColors.textSecondary,
+          ),
+          side: WidgetStatePropertyAll(BorderSide(color: AppColors.outline)),
+        ),
       ),
     );
   }

@@ -139,6 +139,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       backgroundColor: AppColors.background,
       body: CustomScrollView(
         controller: _scroll,
+        physics: nativeScrollPhysics(context, alwaysScrollable: true),
         scrollCacheExtent: ScrollCacheExtent.pixels(
           MediaQuery.sizeOf(context).height,
         ),
@@ -159,22 +160,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   Widget _buildHeader(double margin) {
     final video = widget.video;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
-    final routeAnimation = ModalRoute.of(context)?.animation ??
-        const AlwaysStoppedAnimation<double>(1);
-
-    final imageCurve = CurveTween(curve: Curves.easeOutCubic);
-    final imageOpacity = routeAnimation.drive(imageCurve);
-    final imageScale = routeAnimation.drive(
-      Tween<double>(begin: 1.035, end: 1).chain(imageCurve),
-    );
-    final infoCurve = CurveTween(
-      curve: Interval(0.18, 1, curve: Curves.easeOutCubic),
-    );
-    final infoOpacity = routeAnimation.drive(infoCurve);
-    final infoOffset = routeAnimation.drive(
-      Tween<Offset>(begin: const Offset(0, 0.035), end: Offset.zero)
-          .chain(infoCurve),
-    );
 
     final meta = VideoMetaLine(
       video: video,
@@ -187,136 +172,127 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        FadeTransition(
-          opacity: imageOpacity,
-          child: ScaleTransition(
-            scale: imageScale,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(22),
-              ),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ColoredBox(color: AppColors.surfaceHigh),
-                    VideoArtwork(
-                      video: video,
-                      showLabel: false,
-                      fit: BoxFit.contain,
-                    ),
-                    Positioned(
-                      left: margin,
-                      top: context.safe.top + Gaps.sm,
-                      child: const PageBackButton(),
-                    ),
-                  ],
+        // Keep the artwork as a normal page header. There is intentionally no
+        // shared-element/Hero or scale transition, so the image never changes
+        // crop while the native iOS route is being swiped back interactively.
+        ClipRRect(
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(22),
+          ),
+          child: AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(color: AppColors.surfaceHigh),
+                VideoArtwork(
+                  video: video,
+                  showLabel: false,
+                  fit: BoxFit.contain,
                 ),
-              ),
+                Positioned(
+                  left: margin,
+                  top: context.safe.top + Gaps.sm,
+                  child: const PageBackButton(),
+                ),
+              ],
             ),
           ),
         ),
-        FadeTransition(
-          opacity: infoOpacity,
-          child: SlideTransition(
-            position: infoOffset,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                margin,
-                Gaps.lg,
-                margin,
-                Gaps.md,
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            margin,
+            Gaps.lg,
+            margin,
+            Gaps.md,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (video.category.isNotEmpty)
+                Text(
+                  video.category.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.overline,
+                ),
+              const SizedBox(height: 6),
+              ExpandableText(
+                video.title,
+                collapsedLines: 3,
+                style: AppText.display.copyWith(fontSize: 23),
+                toggleStyle: AppText.label.copyWith(
+                  color: AppColors.accent,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+              if (meta.hasContent) ...[
+                const SizedBox(height: Gaps.sm),
+                meta,
+              ],
+              if (video.description.isNotEmpty) ...[
+                const SizedBox(height: Gaps.sm),
+                Text(
+                  video.description,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body.copyWith(fontSize: 13),
+                ),
+              ],
+              const SizedBox(height: Gaps.md),
+              Wrap(
+                spacing: Gaps.sm,
+                runSpacing: Gaps.sm,
                 children: [
-                  if (video.category.isNotEmpty)
-                    Text(
-                      video.category.toUpperCase(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.overline,
-                    ),
-                  const SizedBox(height: 6),
-                  ExpandableText(
-                    video.title,
-                    collapsedLines: 3,
-                    style: AppText.display.copyWith(fontSize: 23),
-                    toggleStyle: AppText.label.copyWith(
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  AppButton(
+                    label: resume != null
+                        ? 'Resume ${_formatResume(resume)}'
+                        : 'Play',
+                    icon: Icons.play_arrow_rounded,
+                    loading: _preparing,
+                    onPressed: _play,
                   ),
-                  if (meta.hasContent) ...[
-                    const SizedBox(height: Gaps.sm),
-                    meta,
-                  ],
-                  if (video.description.isNotEmpty) ...[
-                    const SizedBox(height: Gaps.sm),
-                    Text(
-                      video.description,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.body.copyWith(fontSize: 13),
+                  if (resume != null)
+                    AppButton(
+                      label: 'Start over',
+                      icon: Icons.replay_rounded,
+                      style: AppButtonStyle.secondary,
+                      onPressed: () => _play(fromStart: true),
                     ),
-                  ],
-                  const SizedBox(height: Gaps.md),
-                  Wrap(
-                    spacing: Gaps.sm,
-                    runSpacing: Gaps.sm,
-                    children: [
-                      AppButton(
-                        label: resume != null
-                            ? 'Resume ${_formatResume(resume)}'
-                            : 'Play',
-                        icon: Icons.play_arrow_rounded,
-                        loading: _preparing,
-                        onPressed: _play,
-                      ),
-                      if (resume != null)
-                        AppButton(
-                          label: 'Start over',
-                          icon: Icons.replay_rounded,
-                          style: AppButtonStyle.secondary,
-                          onPressed: () => _play(fromStart: true),
-                        ),
-                      _buildFavoriteButton(),
-                      _buildDownloadButton(),
-                      if (_shareLink != null)
-                        AppButton(
-                          label: 'Copy link',
-                          icon: Icons.link_rounded,
-                          style: AppButtonStyle.secondary,
-                          onPressed: _copyLink,
-                        ),
-                    ],
-                  ),
-                  if (_playError != null) ...[
-                    const SizedBox(height: Gaps.sm),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.error_outline_rounded,
-                          size: 20,
-                          color: AppColors.error,
-                        ),
-                        const SizedBox(width: Gaps.sm),
-                        Flexible(
-                          child: Text(
-                            _playError!,
-                            style: AppText.body.copyWith(
-                              color: AppColors.error,
-                            ),
-                          ),
-                        ),
-                      ],
+                  _buildFavoriteButton(),
+                  _buildDownloadButton(),
+                  if (_shareLink != null)
+                    AppButton(
+                      label: 'Copy link',
+                      icon: Icons.link_rounded,
+                      style: AppButtonStyle.secondary,
+                      onPressed: _copyLink,
                     ),
-                  ],
                 ],
               ),
-            ),
+              if (_playError != null) ...[
+                const SizedBox(height: Gaps.sm),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      size: 20,
+                      color: AppColors.error,
+                    ),
+                    const SizedBox(width: Gaps.sm),
+                    Flexible(
+                      child: Text(
+                        _playError!,
+                        style: AppText.body.copyWith(
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       ],

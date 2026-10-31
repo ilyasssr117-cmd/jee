@@ -903,13 +903,7 @@ class ViewerItem {
 
 void openPhotoViewer(BuildContext context, PhotoViewerPage page) {
   Navigator.of(context).push<void>(
-    PageRouteBuilder<void>(
-      opaque: true,
-      transitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, __, ___) => page,
-      transitionsBuilder: (_, animation, __, child) =>
-          FadeTransition(opacity: animation, child: child),
-    ),
+    adaptivePageRoute<void>(context, builder: (_) => page),
   );
 }
 

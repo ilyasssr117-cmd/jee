@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -74,7 +73,7 @@ class _HomePageState extends State<HomePage>
   Widget? _settingsPage;
   FriendlyError? _error;
 
-  double _dragOffset = 0;
+  final ValueNotifier<double> _dragOffset = ValueNotifier<double>(0);
   _Section? _dragTarget;
   final Map<_Section, GlobalKey> _sectionHostKeys = <_Section, GlobalKey>{
     for (final section in _sectionOrder) section: GlobalKey(),
@@ -95,7 +94,7 @@ class _HomePageState extends State<HomePage>
     _pageSettleController.addListener(() {
       final animation = _pageSettleAnimation;
       if (!mounted || animation == null) return;
-      setState(() => _dragOffset = animation.value);
+      _dragOffset.value = animation.value;
     });
     _loadPage(reset: true);
   }
@@ -147,6 +146,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.removeObserver(this);
     _offlineTimer?.cancel();
     _pageSettleController.dispose();
+    _dragOffset.dispose();
     _search.dispose();
     _scroll
       ..removeListener(_onScroll)
@@ -355,26 +355,22 @@ class _HomePageState extends State<HomePage>
   void _onHorizontalDragStart(DragStartDetails details) {
     if (_searchOpen) return;
     _pageSettleController.stop();
-    setState(() {
-      _dragOffset = 0;
-      _dragTarget = null;
-    });
+    _dragOffset.value = 0;
+    if (_dragTarget != null) setState(() => _dragTarget = null);
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
     if (_searchOpen) return;
     final width = MediaQuery.sizeOf(context).width;
-    final nextOffset = (_dragOffset + (details.primaryDelta ?? 0))
+    final nextOffset = (_dragOffset.value + (details.primaryDelta ?? 0))
         .clamp(-width, width)
         .toDouble();
     final nextTarget = _targetForDrag(nextOffset);
-    if (nextTarget != _dragTarget && nextTarget != null) {
-      Haptics.play(Haptic.selection);
+    if (nextTarget != _dragTarget) {
+      if (nextTarget != null) Haptics.play(Haptic.selection);
+      setState(() => _dragTarget = nextTarget);
     }
-    setState(() {
-      _dragOffset = nextTarget == null ? nextOffset * 0.2 : nextOffset;
-      _dragTarget = nextTarget;
-    });
+    _dragOffset.value = nextTarget == null ? nextOffset * 0.2 : nextOffset;
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
@@ -387,15 +383,13 @@ class _HomePageState extends State<HomePage>
       final physicalDirection = velocity.isNegative ? -1.0 : 1.0;
       target = _targetForDrag(physicalDirection);
       if (target != null) {
-        setState(() {
-          _dragOffset = physicalDirection * width * 0.08;
-          _dragTarget = target;
-        });
+        _dragOffset.value = physicalDirection * width * 0.08;
+        setState(() => _dragTarget = target);
       }
     }
 
     final shouldCommit = target != null &&
-        (_dragOffset.abs() > width * 0.22 || velocity.abs() > 650);
+        (_dragOffset.value.abs() > width * 0.22 || velocity.abs() > 650);
     _settlePageDrag(shouldCommit ? target : null);
   }
 
@@ -403,16 +397,16 @@ class _HomePageState extends State<HomePage>
 
   void _settlePageDrag(_Section? destination) {
     final width = MediaQuery.sizeOf(context).width;
-    final start = _dragOffset;
+    final start = _dragOffset.value;
     final end = destination == null
         ? 0.0
         : (start < 0 ? -width : width);
     _pageSettleController
       ..stop()
       ..duration = Duration(
-        milliseconds: (150 + (end - start).abs() / width * 100)
+        milliseconds: (170 + (end - start).abs() / width * 110)
             .round()
-            .clamp(150, 260)
+            .clamp(170, 280)
             .toInt(),
       );
     _pageSettleAnimation = Tween<double>(begin: start, end: end).animate(
@@ -421,17 +415,19 @@ class _HomePageState extends State<HomePage>
         curve: Curves.easeOutCubic,
       ),
     );
-    _pageSettleController.forward(from: 0).whenComplete(() {
+    _pageSettleController.forward(from: 0).orCancel.then<void>((_) {
       if (!mounted) return;
       setState(() {
         if (destination != null) _section = destination;
-        _dragOffset = 0;
         _dragTarget = null;
       });
+      _dragOffset.value = 0;
       if (destination != null) Haptics.play(Haptic.medium);
+    }).catchError((Object _) {
+      // A new gesture can interrupt an in-flight settle animation. That is a
+      // normal interaction, not an app error.
     });
   }
-
 
   void _transitionToSection(_Section destination) {
     if (destination == _section) return;
@@ -443,10 +439,8 @@ class _HomePageState extends State<HomePage>
     final physicalDirection = (forward != rtl) ? -1.0 : 1.0;
 
     _pageSettleController.stop();
-    setState(() {
-      _dragOffset = physicalDirection * width * 0.06;
-      _dragTarget = destination;
-    });
+    setState(() => _dragTarget = destination);
+    _dragOffset.value = physicalDirection * width * 0.06;
     _settlePageDrag(destination);
   }
 
@@ -465,7 +459,10 @@ class _HomePageState extends State<HomePage>
       case AppTab.reels:
         if (_searchOpen) _closeSearch();
         Navigator.of(context).push<void>(
-          CupertinoPageRoute<void>(builder: (_) => const ReelsPage()),
+          adaptivePageRoute<void>(
+            context,
+            builder: (_) => const ReelsPage(),
+          ),
         );
       case AppTab.library:
         if (_searchOpen) _closeSearch();
@@ -548,44 +545,45 @@ class _HomePageState extends State<HomePage>
       );
     }
 
-    final pageWidth = screen.width;
-    final previewOffset = _dragOffset + (_dragOffset < 0 ? pageWidth : -pageWidth);
-    Widget sectionWidget(_Section section) {
-      switch (section) {
-        case _Section.home:
-          return _buildHome(
-            margin,
-            bottomInset,
-            featured,
-            showCategories,
-            firstLoad,
-            resume,
-          );
-        case _Section.library:
-          return _libraryPage ?? const SizedBox.shrink();
-        case _Section.settings:
-          return _settingsPage ?? const SizedBox.shrink();
-      }
-    }
+    final sectionContents = <_Section, Widget>{
+      _Section.home: _buildHome(
+        margin,
+        bottomInset,
+        featured,
+        showCategories,
+        firstLoad,
+        resume,
+      ),
+      _Section.library: _libraryPage ?? const SizedBox.shrink(),
+      _Section.settings: _settingsPage ?? const SizedBox.shrink(),
+    };
 
     Widget positionedSection(_Section section) {
       final isCurrent = section == _section;
       final isPreview = section == _dragTarget;
       final visible = isCurrent || isPreview;
-      final offset = isCurrent
-          ? _dragOffset
-          : (isPreview ? previewOffset : 0.0);
       return Positioned.fill(
-        child: Transform.translate(
-          offset: Offset(offset, 0),
+        child: ValueListenableBuilder<double>(
+          valueListenable: _dragOffset,
           child: _SectionHost(
             key: _sectionHostKeys[section],
             active: visible,
-            child: IgnorePointer(
-              ignoring: !isCurrent || _dragOffset.abs() > 1,
-              child: RepaintBoundary(child: sectionWidget(section)),
-            ),
+            child: RepaintBoundary(child: sectionContents[section]!),
           ),
+          builder: (context, dragOffset, child) {
+            final previewOffset = dragOffset +
+                (dragOffset < 0 ? screen.width : -screen.width);
+            final offset = isCurrent
+                ? dragOffset
+                : (isPreview ? previewOffset : 0.0);
+            return Transform.translate(
+              offset: Offset(offset, 0),
+              child: IgnorePointer(
+                ignoring: !isCurrent || dragOffset.abs() > 1,
+                child: child,
+              ),
+            );
+          },
         ),
       );
     }

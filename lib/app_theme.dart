@@ -83,7 +83,6 @@ abstract final class AppColors {
 
   static const Color accentStrong = Color(0xFFDC2626);
 
-
   static const Color star = Color(0xFFFFC857);
 }
 
@@ -132,63 +131,63 @@ class TextSet {
   final Palette palette;
 
   TextStyle get display => TextStyle(
-        fontSize: 28,
-        height: 1.12,
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.4,
-        color: palette.textPrimary,
-      );
+    fontSize: 28,
+    height: 1.12,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.4,
+    color: palette.textPrimary,
+  );
 
   TextStyle get headline => TextStyle(
-        fontSize: 21,
-        height: 1.18,
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.2,
-        color: palette.textPrimary,
-      );
+    fontSize: 21,
+    height: 1.18,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.2,
+    color: palette.textPrimary,
+  );
 
   TextStyle get title => TextStyle(
-        fontSize: 16,
-        height: 1.25,
-        fontWeight: FontWeight.w600,
-        color: palette.textPrimary,
-      );
+    fontSize: 16,
+    height: 1.25,
+    fontWeight: FontWeight.w600,
+    color: palette.textPrimary,
+  );
 
   TextStyle get cardTitle => TextStyle(
-        fontSize: 13.5,
-        height: 1.25,
-        fontWeight: FontWeight.w600,
-        color: palette.textPrimary,
-      );
+    fontSize: 13.5,
+    height: 1.25,
+    fontWeight: FontWeight.w600,
+    color: palette.textPrimary,
+  );
 
   TextStyle get body => TextStyle(
-        fontSize: 14,
-        height: 1.4,
-        fontWeight: FontWeight.w400,
-        color: palette.textSecondary,
-      );
+    fontSize: 14,
+    height: 1.4,
+    fontWeight: FontWeight.w400,
+    color: palette.textSecondary,
+  );
 
   TextStyle get label => TextStyle(
-        fontSize: 14,
-        height: 1.2,
-        fontWeight: FontWeight.w600,
-        color: palette.textPrimary,
-      );
+    fontSize: 14,
+    height: 1.2,
+    fontWeight: FontWeight.w600,
+    color: palette.textPrimary,
+  );
 
   TextStyle get caption => TextStyle(
-        fontSize: 12,
-        height: 1.3,
-        fontWeight: FontWeight.w500,
-        color: palette.textTertiary,
-      );
+    fontSize: 12,
+    height: 1.3,
+    fontWeight: FontWeight.w500,
+    color: palette.textTertiary,
+  );
 
   TextStyle get overline => const TextStyle(
-        fontSize: 11,
-        height: 1.2,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.4,
-        color: AppColors.accent,
-      );
+    fontSize: 11,
+    height: 1.2,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 1.4,
+    color: AppColors.accent,
+  );
 }
 
 abstract final class AppText {
@@ -254,10 +253,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       filled: true,
       isDense: true,
       fillColor: p.surfaceHigh,
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 14,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       hintStyle: TextStyle(color: p.textTertiary),
       labelStyle: TextStyle(color: p.textSecondary),
       border: OutlineInputBorder(
@@ -305,11 +301,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       selectionColor: AppColors.accent.withValues(alpha: 0.24),
       selectionHandleColor: AppColors.accentStrong,
     ),
-    dividerTheme: DividerThemeData(
-      color: p.outline,
-      thickness: 1,
-      space: 1,
-    ),
+    dividerTheme: DividerThemeData(color: p.outline, thickness: 1, space: 1),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.accent,
       linearTrackColor: Color(0x263F3F46),
@@ -346,17 +338,13 @@ ThemeData buildAppTheme(Brightness brightness) {
       backgroundColor: p.brightness == Brightness.dark
           ? OnDark.surfaceHigh
           : const Color(0xFF2A2F3D),
-      contentTextStyle: const TextStyle(
-        fontSize: 14,
-        color: Colors.white,
-      ),
+      contentTextStyle: const TextStyle(fontSize: 14, color: Colors.white),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Radii.button),
       ),
     ),
   );
 }
-
 
 /// Uses the interactive iOS edge-swipe route on Apple platforms while keeping
 /// the standard Material route on Android and desktop platforms.
@@ -374,19 +362,19 @@ Route<T> adaptivePageRoute<T>(
 
 class FadePageRoute<T> extends PageRouteBuilder<T> {
   FadePageRoute({required WidgetBuilder builder})
-      : super(
-          pageBuilder: (context, _, __) => builder(context),
-          transitionDuration: const Duration(milliseconds: 380),
-          reverseTransitionDuration: const Duration(milliseconds: 300),
-          transitionsBuilder: (context, animation, _, child) => FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-              reverseCurve: Curves.easeIn,
-            ),
-            child: child,
+    : super(
+        pageBuilder: (context, _, __) => builder(context),
+        transitionDuration: const Duration(milliseconds: 380),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        transitionsBuilder: (context, animation, _, child) => FadeTransition(
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+            reverseCurve: Curves.easeIn,
           ),
-        );
+          child: child,
+        ),
+      );
 }
 
 /// Scroll physics tuned to the platform's native feel.
@@ -395,8 +383,8 @@ ScrollPhysics nativeScrollPhysics(
   bool alwaysScrollable = false,
 }) {
   final platform = Theme.of(context).platform;
-  final isCupertino = platform == TargetPlatform.iOS ||
-      platform == TargetPlatform.macOS;
+  final isCupertino =
+      platform == TargetPlatform.iOS || platform == TargetPlatform.macOS;
   if (!alwaysScrollable) {
     return isCupertino
         ? const BouncingScrollPhysics()
@@ -404,9 +392,7 @@ ScrollPhysics nativeScrollPhysics(
   }
   return isCupertino
       ? const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())
-      : const AlwaysScrollableScrollPhysics(
-          parent: ClampingScrollPhysics(),
-        );
+      : const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics());
 }
 
 class AppScrollBehavior extends MaterialScrollBehavior {
@@ -417,6 +403,5 @@ class AppScrollBehavior extends MaterialScrollBehavior {
     BuildContext context,
     Widget child,
     ScrollableDetails details,
-  ) =>
-      child;
+  ) => child;
 }

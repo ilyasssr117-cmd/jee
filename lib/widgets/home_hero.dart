@@ -89,11 +89,7 @@ class HomeHero extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Positioned(
-                  left: 16,
-                  top: 16,
-                  child: _TopBar(),
-                ),
+                const Positioned(left: 16, top: 16, child: _TopBar()),
                 Positioned(
                   left: 18,
                   right: 18,
@@ -160,12 +156,16 @@ class _TopBar extends StatelessWidget {
                   ],
                 ),
                 child: const Center(
-                  child: Icon(Icons.play_arrow_rounded, size: 20, color: Colors.white),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    size: 20,
+                    color: Colors.white,
+                  ),
                 ),
               ),
               const SizedBox(width: 9),
               Text(
-                'FLOW',
+                'VXTUBE',
                 style: darkText.label.copyWith(
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1.8,
@@ -224,7 +224,7 @@ class _HeroDetails extends StatelessWidget {
             ),
             const SizedBox(width: 7),
             Text(
-              'FEATURED FOR YOU',
+              'FEATURED',
               style: darkText.overline.copyWith(
                 color: const Color(0xFFFF929A),
                 letterSpacing: 1.5,
@@ -243,7 +243,11 @@ class _HeroDetails extends StatelessWidget {
             letterSpacing: -0.7,
             color: Colors.white,
             shadows: const [
-              Shadow(color: Color(0x88000000), blurRadius: 18, offset: Offset(0, 3)),
+              Shadow(
+                color: Color(0x88000000),
+                blurRadius: 18,
+                offset: Offset(0, 3),
+              ),
             ],
           ),
         ),

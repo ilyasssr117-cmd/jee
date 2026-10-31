@@ -85,12 +85,16 @@ class _PreviewView extends StatelessWidget {
         ]),
         builder: (context, _) {
           final session = manager.session.value;
-          final mine = session != null && session.id == video.id ? session : null;
-          final showVideo = mine != null &&
+          final mine = session != null && session.id == video.id
+              ? session
+              : null;
+          final showVideo =
+              mine != null &&
               mine.controller.value.isInitialized &&
               mine.controller.value.size.width > 0 &&
               mine.controller.value.size.height > 0;
-          final waiting = manager.active.value == video.id &&
+          final waiting =
+              manager.active.value == video.id &&
               manager.loading.value &&
               !showVideo;
           final holding = manager.active.value == video.id;

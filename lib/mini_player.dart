@@ -57,16 +57,23 @@ class MiniPlayer extends ChangeNotifier with WidgetsBindingObserver {
     session.controller.removeListener(_onTick);
     _session = null;
     _save(session, force: true);
+    _stopObserving();
     notifyListeners();
     return session;
   }
 
   Future<void> close() async {
     final session = _session;
-    if (session == null) return;
     _session = null;
+    _stopObserving();
     notifyListeners();
-    await _dispose(session);
+    if (session != null) await _dispose(session);
+  }
+
+  void _stopObserving() {
+    if (!_observing) return;
+    WidgetsBinding.instance.removeObserver(this);
+    _observing = false;
   }
 
   Future<void> disposeSession(MiniSession session) => _dispose(session);
@@ -80,7 +87,8 @@ class MiniPlayer extends ChangeNotifier with WidgetsBindingObserver {
       } else {
         final value = controller.value;
         if (value.duration > Duration.zero &&
-            value.position >= value.duration - const Duration(milliseconds: 800)) {
+            value.position >=
+                value.duration - const Duration(milliseconds: 800)) {
           await controller.seekTo(Duration.zero);
         }
         await controller.play();
@@ -110,7 +118,8 @@ class MiniPlayer extends ChangeNotifier with WidgetsBindingObserver {
     final value = session.controller.value;
     if (!value.isInitialized) return;
     final now = DateTime.now();
-    if (!force && now.difference(_lastSave) < const Duration(seconds: 5)) return;
+    if (!force && now.difference(_lastSave) < const Duration(seconds: 5))
+      return;
     _lastSave = now;
     PlaybackProgress.instance.save(
       session.video.id,

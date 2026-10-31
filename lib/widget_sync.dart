@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
@@ -19,6 +20,8 @@ class WidgetSync with WidgetsBindingObserver {
 
   Timer? _timer;
   bool _started = false;
+  bool _writing = false;
+  bool _writeAgain = false;
   String? _thumbUrl;
 
   void start() {
@@ -50,6 +53,22 @@ class WidgetSync with WidgetsBindingObserver {
   }
 
   Future<void> _write() async {
+    if (_writing) {
+      _writeAgain = true;
+      return;
+    }
+    _writing = true;
+    try {
+      do {
+        _writeAgain = false;
+        await _writeOnce();
+      } while (_writeAgain);
+    } finally {
+      _writing = false;
+    }
+  }
+
+  Future<void> _writeOnce() async {
     try {
       final dir = await NativeBridge.instance.widgetContainerPath();
       if (dir == null) return;
@@ -75,15 +94,15 @@ class WidgetSync with WidgetsBindingObserver {
         _thumbUrl = null;
       } else if (wanted != _thumbUrl || !thumb.existsSync()) {
         final uri = Uri.tryParse(wanted);
-        if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+        if (uri != null &&
+            (uri.scheme == 'http' || uri.scheme == 'https') &&
+            uri.host.isNotEmpty &&
+            uri.userInfo.isEmpty &&
+            uri.toString().length <= 4096) {
           try {
-            final response = await http.get(uri, headers: <String, String>{
-              'User-Agent':
-                  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                      'AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
-            }).timeout(const Duration(seconds: 10));
-            if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-              await thumb.writeAsBytes(response.bodyBytes, flush: true);
+            final imageBytes = await _fetchWidgetThumbnail(uri);
+            if (imageBytes != null) {
+              await thumb.writeAsBytes(imageBytes, flush: true);
               _thumbUrl = wanted;
             }
           } catch (_) {}
@@ -115,11 +134,70 @@ class WidgetSync with WidgetsBindingObserver {
         'downloadsActive': active,
         'activeProgress': total > 0 ? (bytes / total).clamp(0.0, 1.0) : -1.0,
       };
-      await File('$dir/widget.json').writeAsString(jsonEncode(json), flush: true);
+      await File('$dir/widget.json')
+          .writeAsString(jsonEncode(json), flush: true);
       await NativeBridge.instance.reloadWidgets();
     } catch (error) {
       debugPrint('[WIDGET] sync failed: ${error.runtimeType}');
     }
+  }
+
+  Future<Uint8List?> _fetchWidgetThumbnail(Uri uri) async {
+    const maxBytes = 2 * 1024 * 1024;
+    final client = http.Client();
+    try {
+      final request = http.Request('GET', uri)
+        ..headers['User-Agent'] =
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+            'AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200 ||
+          (response.contentLength != null &&
+              response.contentLength! > maxBytes)) {
+        await response.stream.drain<void>().timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+        return null;
+      }
+      final builder = BytesBuilder(copy: false);
+      var total = 0;
+      await for (final chunk in response.stream.timeout(
+        const Duration(seconds: 8),
+      )) {
+        total += chunk.length;
+        if (total > maxBytes) return null;
+        builder.add(chunk);
+      }
+      final bytes = builder.takeBytes();
+      if (!_isImageBytes(bytes)) return null;
+      return bytes;
+    } finally {
+      client.close();
+    }
+  }
+
+  bool _isImageBytes(List<int> bytes) {
+    if (bytes.length < 12) return false;
+    final jpeg = bytes[0] == 0xFF && bytes[1] == 0xD8;
+    final png =
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47;
+    final gif = bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46;
+    final webp =
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46 &&
+        bytes[8] == 0x57 &&
+        bytes[9] == 0x45 &&
+        bytes[10] == 0x42 &&
+        bytes[11] == 0x50;
+    return jpeg || png || gif || webp;
   }
 
   Future<void> _open(String raw) async {

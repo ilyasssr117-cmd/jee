@@ -30,7 +30,8 @@ class HistoryStore extends ChangeNotifier {
 
   void load() {
     _items.clear();
-    for (final raw in LocalStore.readList(_key)) {
+    final seen = <String>{};
+    for (final raw in LocalStore.readList(_key).take(_maxItems * 3)) {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is! Map<String, dynamic>) continue;
@@ -38,19 +39,24 @@ class HistoryStore extends ChangeNotifier {
         final time = decoded['t'];
         if (meta is! Map<String, dynamic> || time is! int) continue;
         final video = videoFromJson(meta);
-        if (video == null) continue;
+        if (video == null || !seen.add(video.id)) continue;
         _items.add(
           HistoryEntry(video, DateTime.fromMillisecondsSinceEpoch(time)),
         );
-      } catch (_) {
-      }
+      } catch (_) {}
     }
     _items.sort((a, b) => b.playedAt.compareTo(a.playedAt));
+    if (_items.length > _maxItems) {
+      _items.removeRange(_maxItems, _items.length);
+    }
   }
 
   void record(Video video) {
     _items.removeWhere((entry) => entry.video.id == video.id);
-    _items.insert(0, HistoryEntry(video.copyWith(streamUrl: ''), DateTime.now()));
+    _items.insert(
+      0,
+      HistoryEntry(video.copyWith(streamUrl: ''), DateTime.now()),
+    );
     while (_items.length > _maxItems) {
       _items.removeLast();
     }
@@ -74,14 +80,14 @@ class HistoryStore extends ChangeNotifier {
   }
 
   void _persist() => LocalStore.writeList(
-        _key,
-        _items
-            .map(
-              (entry) => jsonEncode(<String, dynamic>{
-                'v': videoToJson(entry.video),
-                't': entry.playedAt.millisecondsSinceEpoch,
-              }),
-            )
-            .toList(),
-      );
+    _key,
+    _items
+        .map(
+          (entry) => jsonEncode(<String, dynamic>{
+            'v': videoToJson(entry.video),
+            't': entry.playedAt.millisecondsSinceEpoch,
+          }),
+        )
+        .toList(),
+  );
 }

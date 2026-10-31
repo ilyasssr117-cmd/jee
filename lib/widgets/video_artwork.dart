@@ -29,7 +29,8 @@ class VideoArtwork extends StatelessWidget {
     final page = Uri.tryParse(video.pageUrl ?? '');
     if (page == null ||
         (page.scheme != 'http' && page.scheme != 'https') ||
-        page.host.isEmpty) {
+        page.host.isEmpty ||
+        page.userInfo.isNotEmpty) {
       return null;
     }
     return <String, String>{'Referer': '${page.origin}/'};
@@ -51,7 +52,10 @@ class VideoArtwork extends StatelessWidget {
                 File(saved),
                 fit: fit,
                 cacheWidth: constraints.maxWidth.isFinite
-                    ? (constraints.maxWidth * dpr).round().clamp(128, 1280).toInt()
+                    ? (constraints.maxWidth * dpr)
+                          .round()
+                          .clamp(128, 1280)
+                          .toInt()
                     : null,
                 gaplessPlayback: true,
                 excludeFromSemantics: true,
@@ -64,9 +68,11 @@ class VideoArtwork extends StatelessWidget {
 
         final url = video.thumbnailUrl?.trim() ?? '';
         final uri = Uri.tryParse(url);
-        final valid = uri != null &&
+        final valid =
+            uri != null &&
             (uri.scheme == 'http' || uri.scheme == 'https') &&
-            uri.host.isNotEmpty;
+            uri.host.isNotEmpty &&
+            uri.userInfo.isEmpty;
 
         if (!valid) return _Placeholder(video: video, showLabel: showLabel);
 

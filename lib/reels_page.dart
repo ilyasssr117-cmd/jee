@@ -1,7 +1,8 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
+import 'dart:typed_data';
 
 import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/cupertino.dart'
@@ -21,7 +22,6 @@ import 'package:video_player/video_player.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'error_text.dart';
-import 'favorites_store.dart';
 import 'local_store.dart';
 import 'mini_player.dart';
 import 'models.dart';
@@ -49,6 +49,9 @@ const Map<String, String> _kMediaHeaders = {
 const int _kFirstBatch = 12;
 const int _kNextBatch = 12;
 const int _kPreloadAhead = 2;
+const int _kMaxBufferedReels = 96;
+const int _kReelHistoryKeep = 12;
+const int _kReelTrimTrigger = 48;
 const Duration _kNeighborPreloadDelay = Duration(milliseconds: 240);
 const Duration _kControlsHideDelay = Duration(seconds: 4);
 const int _kMaxRefetchTries = 4;
@@ -65,7 +68,6 @@ class ReelItem {
     this.thumbUrl,
     this.avatarUrl,
     this.author = '',
-    this.likes = '',
     this.views = 0,
     this.durationSec = 0,
     this.tags = const <String>[],
@@ -81,61 +83,75 @@ class ReelItem {
   final String? thumbUrl;
   final String? avatarUrl;
   final String author;
-  final String likes;
   final int views;
   final int durationSec;
   final List<String> tags;
 }
 
-String? _str(dynamic v) => v is String && v.isNotEmpty ? v : null;
+String? _str(dynamic v) =>
+    v is String && v.isNotEmpty && v.length <= 8192 ? v : null;
+
+String _clipText(String value, int maxLength) =>
+    value.length <= maxLength ? value : value.substring(0, maxLength);
 
 String? _url(dynamic v) {
   final s = _str(v);
   if (s == null) return null;
   final uri = Uri.tryParse(s);
-  if (uri == null || !uri.hasAuthority || uri.host.isEmpty) return null;
+  if (uri == null ||
+      !uri.hasAuthority ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty) {
+    return null;
+  }
   return uri.scheme == 'http' || uri.scheme == 'https' ? s : null;
 }
 
 String _titleOf(Map video) {
-  final parsed = video['video_text']?['user_display_video_title']?['default']
-      ?['parsed_text'];
-  if (_str(parsed) != null) return parsed as String;
-  return _str(video['action_name']) ?? '';
+  final parsed =
+      video['video_text']?['user_display_video_title']?['default']?['parsed_text'];
+  if (_str(parsed) != null) return _clipText(parsed as String, 240);
+  return _clipText(_str(video['action_name']) ?? '', 240);
 }
 
 List<String> _tagsOf(Map video) {
   final raw = video['tags'];
   if (raw is! List) return const [];
   return [
-    for (final t in raw)
-      if (t is Map && _str(t['name']) != null) t['name'] as String,
+    for (final t in raw.take(24))
+      if (t is Map && _str(t['name']) != null)
+        _clipText(t['name'] as String, 64),
   ];
 }
 
 List<ReelItem> parseReels(dynamic body) {
   if (body is! Map || body['data'] is! List) return const [];
   final out = <ReelItem>[];
-  for (final raw in body['data'] as List) {
+  for (final raw in (body['data'] as List).take(48)) {
     if (raw is! Map) continue;
     final mp4 = _url(raw['mp4_url']);
     final hls = _url(raw['hls_url']);
     final url = mp4 ?? hls;
     if (url == null) continue;
-    out.add(ReelItem(
-      id: '${raw['video_id'] ?? url}',
-      videoUrl: url,
-      fallbackUrl: mp4 != null ? hls : null,
-      downloadUrl: _url(raw['download_url']),
-      title: _titleOf(raw),
-      thumbUrl: _url(raw['poster_url']) ?? _url(raw['thumbnail_url']),
-      avatarUrl: _url(raw['user_avatar']),
-      author: _str(raw['user_name']) ?? '',
-      likes: '${raw['like_count'] ?? ''}',
-      views: raw['view_count'] is num ? (raw['view_count'] as num).toInt() : 0,
-      durationSec: raw['duration'] is num ? (raw['duration'] as num).toInt() : 0,
-      tags: _tagsOf(raw),
-    ));
+    out.add(
+      ReelItem(
+        id: _clipText('${raw['video_id'] ?? url}', 256),
+        videoUrl: url,
+        fallbackUrl: mp4 != null ? hls : null,
+        downloadUrl: _url(raw['download_url']),
+        title: _titleOf(raw),
+        thumbUrl: _url(raw['poster_url']) ?? _url(raw['thumbnail_url']),
+        avatarUrl: _url(raw['user_avatar']),
+        author: _clipText(_str(raw['user_name']) ?? '', 100),
+        views: raw['view_count'] is num
+            ? (raw['view_count'] as num).clamp(0, 2147483647).toInt()
+            : 0,
+        durationSec: raw['duration'] is num
+            ? (raw['duration'] as num).clamp(0, 86400).toInt()
+            : 0,
+        tags: _tagsOf(raw),
+      ),
+    );
   }
   return out;
 }
@@ -149,8 +165,18 @@ http.Client _makeClient() {
   return http.Client();
 }
 
+class _ReelsMethodNotAllowed implements Exception {
+  const _ReelsMethodNotAllowed();
+}
+
+class _ReelsHttpFailure implements Exception {
+  const _ReelsHttpFailure(this.statusCode, {this.retryAfter});
+  final int statusCode;
+  final Duration? retryAfter;
+}
+
 class ReelsRepository {
-  final Set<String> _seen = <String>{};
+  final LinkedHashSet<String> _seen = LinkedHashSet<String>();
   final http.Client _client = _makeClient();
 
   static final Uri _api = Uri.parse(_kApiUrl);
@@ -163,55 +189,128 @@ class ReelsRepository {
   Future<List<ReelItem>> _post(int amount) async {
     final req = http.Request('POST', _api)
       ..headers.addAll(_headers)
-      ..bodyBytes = utf8.encode(jsonEncode({
-        'amount': amount,
-        'filter': [],
-        'sfw_mode': 0,
-        'forcerand': false,
-        'first_chunk': false,
-      }));
-    final res = await http.Response.fromStream(
-      await _client.send(req).timeout(const Duration(seconds: 20)),
-    );
+      ..bodyBytes = utf8.encode(
+        jsonEncode({
+          'amount': amount,
+          'filter': [],
+          'sfw_mode': 0,
+          'forcerand': false,
+          'first_chunk': false,
+        }),
+      );
+    final res = await _sendBounded(req);
     return _decode(res);
   }
 
   Future<List<ReelItem>> _getOnce() async {
-    final res = await _client.get(_api, headers: const {
-      'User-Agent': _kUserAgent,
-      'Accept': 'application/json',
-    }).timeout(const Duration(seconds: 20));
-    return _decode(res);
+    final req = http.Request('GET', _api)
+      ..headers.addAll(const {
+        'User-Agent': _kUserAgent,
+        'Accept': 'application/json',
+      });
+    return _decode(await _sendBounded(req));
+  }
+
+  Future<http.Response> _sendBounded(http.Request request) async {
+    const maxResponseBytes = 6 * 1024 * 1024;
+    final response = await _client
+        .send(request)
+        .timeout(const Duration(seconds: 20));
+    if (response.contentLength != null &&
+        response.contentLength! > maxResponseBytes) {
+      await response.stream.drain<void>().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {},
+      );
+      throw const FormatException('Reels response is too large.');
+    }
+    final bytes = BytesBuilder(copy: false);
+    var received = 0;
+    await for (final chunk in response.stream.timeout(
+      const Duration(seconds: 24),
+    )) {
+      received += chunk.length;
+      if (received > maxResponseBytes) {
+        throw const FormatException('Reels response is too large.');
+      }
+      bytes.add(chunk);
+    }
+    return http.Response.bytes(
+      bytes.takeBytes(),
+      response.statusCode,
+      request: response.request,
+      headers: response.headers,
+      isRedirect: response.isRedirect,
+      persistentConnection: response.persistentConnection,
+      reasonPhrase: response.reasonPhrase,
+    );
+  }
+
+  Duration? _retryAfter(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final seconds = int.tryParse(value.trim());
+    if (seconds != null && seconds >= 0) {
+      return Duration(seconds: seconds.clamp(0, 6).toInt());
+    }
+    DateTime? date = DateTime.tryParse(value.trim());
+    if (date == null) {
+      try {
+        date = HttpDate.parse(value.trim());
+      } catch (_) {}
+    }
+    if (date == null) return null;
+    final remaining = date.difference(DateTime.now());
+    if (remaining.isNegative) return Duration.zero;
+    return remaining > const Duration(seconds: 6)
+        ? const Duration(seconds: 6)
+        : remaining;
   }
 
   List<ReelItem> _decode(http.Response res) {
+    if (res.statusCode == 405 || res.statusCode == 501) {
+      throw const _ReelsMethodNotAllowed();
+    }
     if (res.statusCode != 200) {
-      final body = utf8.decode(res.bodyBytes, allowMalformed: true);
-      final snippet = body.length > 100 ? body.substring(0, 100) : body;
-      throw Exception('HTTP ${res.statusCode} $snippet');
+      throw _ReelsHttpFailure(
+        res.statusCode,
+        retryAfter: _retryAfter(res.headers['retry-after']),
+      );
     }
     final json = jsonDecode(utf8.decode(res.bodyBytes));
     if (json is Map && json['code'] != null && json['code'] != 200) {
-      throw Exception('API ${json['code']}: ${json['message']}');
+      throw const FormatException('Reels service returned an error response.');
     }
     return parseReels(json);
   }
 
   Future<List<ReelItem>> _fetch(int amount) async {
-    try {
-      return await _post(amount);
-    } catch (e) {
-      final out = <ReelItem>[];
-      for (var i = 0; i < (amount > 5 ? 5 : amount); i++) {
-        try {
-          out.addAll(await _getOnce());
-        } catch (_) {
-          if (out.isEmpty && i == 0) rethrow;
+    const retryableStatuses = <int>{408, 425, 429, 500, 502, 503, 504};
+    for (var attempt = 0; attempt < 2; attempt++) {
+      Duration? retryAfter;
+      try {
+        return await _post(amount);
+      } on _ReelsMethodNotAllowed {
+        // Only fall back to GET when the endpoint explicitly rejects POST.
+        return _getOnce();
+      } on _ReelsHttpFailure catch (error) {
+        if (!retryableStatuses.contains(error.statusCode) || attempt == 1) {
+          rethrow;
         }
+        retryAfter = error.retryAfter;
+      } on SocketException {
+        if (attempt == 1) rethrow;
+      } on HandshakeException {
+        if (attempt == 1) rethrow;
+      } on http.ClientException {
+        if (attempt == 1) rethrow;
+      } on TimeoutException {
+        if (attempt == 1) rethrow;
       }
-      if (out.isEmpty) rethrow;
-      return out;
+      await Future<void>.delayed(
+        retryAfter ?? Duration(milliseconds: 500 * (attempt + 1)),
+      );
     }
+    return _post(amount);
   }
 
   Future<List<ReelItem>> nextBatch(int amount) async {
@@ -219,16 +318,23 @@ class ReelsRepository {
     var emptyRounds = 0;
     var rounds = 0;
     while (fresh.length < amount &&
-        rounds < 12 &&
+        rounds < 4 &&
         emptyRounds < _kMaxRefetchTries) {
       rounds++;
       final fetched = await _fetch(amount - fresh.length);
       var added = 0;
       for (final item in fetched) {
-        if (_seen.add(item.id) && _seen.add('url:${item.videoUrl}')) {
-          fresh.add(item);
-          added++;
-        }
+        final idKey = 'id:${item.id}';
+        final urlKey = 'url:${item.videoUrl}';
+        if (_seen.contains(idKey) || _seen.contains(urlKey)) continue;
+        _seen
+          ..add(idKey)
+          ..add(urlKey);
+        fresh.add(item);
+        added++;
+      }
+      while (_seen.length > 1200) {
+        _seen.remove(_seen.first);
       }
       emptyRounds = added == 0 ? emptyRounds + 1 : 0;
     }
@@ -236,6 +342,15 @@ class ReelsRepository {
   }
 
   void dispose() => _client.close();
+}
+
+String _safeReelFileToken(String value) {
+  // FNV-1a produces a stable filename without trusting API data as a path.
+  var hash = 0x811c9dc5;
+  for (final unit in value.codeUnits) {
+    hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
+  }
+  return hash.toRadixString(16).padLeft(8, '0');
 }
 
 String _compact(num n) {
@@ -272,6 +387,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _loading = false;
   bool _resumeOnForeground = false;
   bool _syncPending = false;
+  bool _trimming = false;
   bool _exhausted = false;
   bool _muted = false;
   bool _clear = false;
@@ -359,7 +475,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         _ensureNeighbors();
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('[REELS] load failed: $e');
+      if (kDebugMode) debugPrint('[REELS] load failed: ${e.runtimeType}');
       if (!mounted) return;
       setState(() {
         _error = describeError(e, subject: 'reels').message;
@@ -426,15 +542,18 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         unawaited(_disposeReelController(controller));
         if (fallback != null) _controllers[index] = _build(fallback, index);
         if (mounted) setState(() {});
-        if (kDebugMode) debugPrint('[REELS] controller init failed: $error');
+        if (kDebugMode)
+          debugPrint('[REELS] controller init failed: ${error.runtimeType}');
       }
     }();
     _initializations[controller] = initialization;
-    unawaited(initialization.whenComplete(() {
-      if (identical(_initializations[controller], initialization)) {
-        _initializations.remove(controller);
-      }
-    }));
+    unawaited(
+      initialization.whenComplete(() {
+        if (identical(_initializations[controller], initialization)) {
+          _initializations.remove(controller);
+        }
+      }),
+    );
     return controller;
   }
 
@@ -457,9 +576,10 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 
   void _syncControllers(int index) {
-    final keep = <int>{index, index + 1}
-        .where((i) => i >= 0 && i < _items.length)
-        .toSet();
+    final keep = <int>{
+      index,
+      index + 1,
+    }.where((i) => i >= 0 && i < _items.length).toSet();
     for (final i in _controllers.keys.toList()) {
       if (!keep.contains(i)) _evictController(i);
     }
@@ -518,11 +638,65 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 
   bool _onScrollNotification(ScrollNotification n) {
-    if (n is ScrollEndNotification && n.depth == 0 && _syncPending) {
-      _syncPending = false;
-      _syncControllers(_current);
+    if (n is ScrollEndNotification && n.depth == 0) {
+      if (_syncPending) {
+        _syncPending = false;
+        _syncControllers(_current);
+      }
+      _trimOldReelsIfNeeded();
     }
     return false;
+  }
+
+  void _trimOldReelsIfNeeded() {
+    if (!mounted ||
+        _trimming ||
+        _items.length <= _kMaxBufferedReels ||
+        _current < _kReelTrimTrigger) {
+      return;
+    }
+
+    final pending = <Future<void>>[];
+    for (final controller in _controllers.values) {
+      final initialization = _initializations[controller];
+      if (initialization != null) pending.add(initialization);
+    }
+    if (pending.isNotEmpty) {
+      _trimming = true;
+      unawaited(
+        Future.wait<void>(pending).whenComplete(() {
+          _trimming = false;
+          if (mounted) _trimOldReelsIfNeeded();
+        }),
+      );
+      return;
+    }
+
+    final shift = _current - _kReelHistoryKeep;
+    if (shift <= 0 || shift >= _items.length) return;
+
+    final reindexed = <int, VideoPlayerController>{};
+    for (final entry in _controllers.entries) {
+      if (entry.key >= shift) {
+        reindexed[entry.key - shift] = entry.value;
+      } else {
+        unawaited(_disposeReelController(entry.value));
+      }
+    }
+
+    setState(() {
+      _items.removeRange(0, shift);
+      _controllers
+        ..clear()
+        ..addAll(reindexed);
+      _current -= shift;
+      _syncPending = false;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pager.hasClients) return;
+      _pager.jumpToPage(_current);
+    });
   }
 
   void _next() {
@@ -546,19 +720,19 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void _toast(String message) => showToast(context, message, aboveBar: false);
 
   Video _videoOf(ReelItem item) => Video(
-        id: 'reel_${item.id}',
-        title: item.title.isEmpty ? 'Reel by @${item.author}' : item.title,
-        thumbnailUrl: item.thumbUrl,
-        duration: _clock(Duration(seconds: item.durationSec)),
-        views: _compact(item.views),
-        likes: item.likes,
-        category: 'Reels',
-      );
+    id: 'reel_${item.id}',
+    title: item.title.isEmpty ? 'Reel by @${item.author}' : item.title,
+    thumbnailUrl: item.thumbUrl,
+    duration: _clock(Duration(seconds: item.durationSec)),
+    views: _compact(item.views),
+    category: 'Reels',
+  );
 
   bool _enqueue(ReelItem item, {bool silent = false}) {
     final url = item.downloadUrl ?? item.videoUrl;
     if (url.toLowerCase().contains('.m3u8')) {
-      if (!silent) _toast('This video is a stream and can\u2019t be downloaded.');
+      if (!silent)
+        _toast('This video is a stream and can\u2019t be downloaded.');
       return false;
     }
     final store = DownloadStore.instance;
@@ -573,26 +747,16 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       if (!silent) _toast('Already downloading\u2026');
       return false;
     }
-    store.enqueueDirect(_videoOf(item), url);
+    final accepted = store.enqueueDirect(_videoOf(item), url);
+    if (!accepted) {
+      if (!silent) _toast('Download queue is full. Remove an old item first.');
+      return false;
+    }
     return true;
   }
 
   void _download(ReelItem item) {
     if (_enqueue(item)) _toast('Downloading\u2026');
-  }
-
-  void _toggleFavorite(ReelItem item) {
-    final favorites = FavoritesStore.instance;
-    final id = 'reel_${item.id}';
-    if (favorites.isFavorite(id)) {
-      favorites.remove(id);
-      _toast('Removed from favorites.');
-      return;
-    }
-    favorites.add(_videoOf(item));
-    Haptics.play(Haptic.medium);
-    _enqueue(item, silent: true);
-    _toast('Added to favorites.');
   }
 
   Future<void> _showSaveMenu(ReelItem item) async {
@@ -624,7 +788,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     );
   }
 
-
   void _setSaving(String id, double? value) {
     if (!mounted) return;
     final next = Map<String, double>.of(_saving.value);
@@ -648,23 +811,44 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     File? file;
     try {
       final dir = await getTemporaryDirectory();
-      file = File('${dir.path}/reel_${item.id}.mp4');
-      final req = http.Request('GET', Uri.parse(url))
-        ..headers.addAll(_kMediaHeaders);
+      final uri = Uri.tryParse(url);
+      if (uri == null ||
+          (uri.scheme != 'http' && uri.scheme != 'https') ||
+          uri.host.isEmpty ||
+          uri.userInfo.isNotEmpty) {
+        throw const FormatException('Invalid video URL.');
+      }
+      file = File('${dir.path}/reel_${_safeReelFileToken(item.id)}.mp4');
+      final req = http.Request('GET', uri)..headers.addAll(_kMediaHeaders);
       final res = await _media.send(req).timeout(const Duration(seconds: 20));
-      if (res.statusCode != 200) throw HttpException('HTTP ${res.statusCode}');
+      if (res.statusCode != 200) {
+        await res.stream.drain<void>();
+        throw HttpException('HTTP ${res.statusCode}');
+      }
+      const maxVideoBytes = 350 * 1024 * 1024;
       final total = res.contentLength ?? 0;
+      if (total > maxVideoBytes) {
+        await res.stream.drain<void>();
+        throw const FormatException('Video is too large to save.');
+      }
       var got = 0;
       final sink = file.openWrite();
       try {
-        await for (final chunk in res.stream) {
-          sink.add(chunk);
+        await for (final chunk in res.stream.timeout(
+          const Duration(seconds: 35),
+        )) {
           got += chunk.length;
+          if (got > maxVideoBytes) {
+            throw const FormatException('Video is too large to save.');
+          }
+          sink.add(chunk);
           if (total > 0) _setSaving(item.id, got / total);
         }
-      } finally {
+      } catch (_) {
         await sink.close();
+        rethrow;
       }
+      await sink.close();
       final result = await PhotoSaver.saveVideoToGallery(file.path);
       if (!mounted) return;
       if (result.denied) {
@@ -691,76 +875,81 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
       child: Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          if (_items.isNotEmpty)
-            NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: PageView.builder(
-              controller: _pager,
-              scrollDirection: Axis.vertical,
-              pageSnapping: true,
-              physics: PageScrollPhysics(
-                parent: nativeScrollPhysics(context, alwaysScrollable: true),
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            if (_items.isNotEmpty)
+              NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: PageView.builder(
+                  controller: _pager,
+                  scrollDirection: Axis.vertical,
+                  pageSnapping: true,
+                  physics: PageScrollPhysics(
+                    parent: nativeScrollPhysics(
+                      context,
+                      alwaysScrollable: true,
+                    ),
+                  ),
+                  itemCount: _items.length,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, i) {
+                    final item = _items[i];
+                    return _ReelView(
+                      key: ValueKey(item.id),
+                      item: item,
+                      controller: _controllers[i],
+                      isActive: i == _current,
+                      muted: _muted,
+                      saving: _saving,
+                      isLast: i == _items.length - 1 && _exhausted,
+                      onNext: _next,
+                      onMute: _toggleMute,
+                      clear: _clear,
+                      onSaveMenu: () => _showSaveMenu(item),
+                      onRetry: () => _retry(i),
+                    );
+                  },
+                ),
+              )
+            else if (_loading)
+              const Center(
+                child: CupertinoActivityIndicator(
+                  radius: 14,
+                  color: Colors.white70,
+                ),
+              )
+            else if (_error != null)
+              _ErrorView(
+                message: _error!,
+                onRetry: () => _loadMore(first: true),
+              )
+            else
+              Center(
+                child: Text(
+                  'No videos right now.',
+                  style: AppText.body.copyWith(color: Colors.white70),
+                ),
               ),
-              itemCount: _items.length,
-              onPageChanged: _onPageChanged,
-              itemBuilder: (context, i) {
-                final item = _items[i];
-                return _ReelView(
-                  key: ValueKey(item.id),
-                  item: item,
-                  controller: _controllers[i],
-                  isActive: i == _current,
-                  muted: _muted,
-                  saving: _saving,
-                  isLast: i == _items.length - 1 && _exhausted,
-                  onNext: _next,
-                  onMute: _toggleMute,
-                  clear: _clear,
-                  onFavorite: () => _toggleFavorite(item),
-                  onSaveMenu: () => _showSaveMenu(item),
-                  onRetry: () => _retry(i),
-                );
-              },
+            if (_error != null && _items.isNotEmpty)
+              Positioned(
+                bottom: context.safe.bottom + 48,
+                left: 16,
+                right: 16,
+                child: _ErrorView(message: _error!, onRetry: _loadMore),
               ),
-            )
-          else if (_loading)
-            const Center(
-              child: CupertinoActivityIndicator(
-                radius: 14,
-                color: Colors.white70,
-              ),
-            )
-          else if (_error != null)
-            _ErrorView(message: _error!, onRetry: () => _loadMore(first: true))
-          else
-            Center(
-              child: Text(
-                'No videos right now.',
-                style: AppText.body.copyWith(color: Colors.white70),
-              ),
-            ),
-          if (_error != null && _items.isNotEmpty)
             Positioned(
-              bottom: context.safe.bottom + 48,
-              left: 16,
-              right: 16,
-              child: _ErrorView(message: _error!, onRetry: _loadMore),
+              top: context.safe.top + 6,
+              left: 12,
+              right: 12,
+              child: _ReelsTopBar(
+                clear: _clear,
+                onBack: () => Navigator.of(context).maybePop(),
+                onToggleClear: _toggleClear,
+              ),
             ),
-          Positioned(
-            top: context.safe.top + 6,
-            left: 12,
-            right: 12,
-            child: _ReelsTopBar(
-              clear: _clear,
-              onBack: () => Navigator.of(context).maybePop(),
-              onToggleClear: _toggleClear,
-            ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -779,7 +968,6 @@ class _ReelsTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCompact = MediaQuery.sizeOf(context).width < 360;
     return SizedBox(
       height: 46,
       child: Row(
@@ -789,9 +977,17 @@ class _ReelsTopBar extends StatelessWidget {
             label: 'Back',
             onTap: onBack,
           ),
-          Expanded(
+          const Expanded(
             child: Center(
-              child: _ForYouPill(compact: isCompact),
+              child: Text(
+                'Reels',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.1,
+                ),
+              ),
             ),
           ),
           _ReelsTopButton(
@@ -800,72 +996,6 @@ class _ReelsTopBar extends StatelessWidget {
             onTap: onToggleClear,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ForYouPill extends StatelessWidget {
-  const _ForYouPill({required this.compact});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 7, sigmaY: 7),
-        child: Container(
-          constraints: BoxConstraints(maxWidth: compact ? 106 : 124),
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? 13 : 16,
-            vertical: 9,
-          ),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xA82B3341), Color(0x75202735)],
-            ),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x44000000),
-                blurRadius: 22,
-                offset: Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 6,
-                height: 6,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFFE5E7EB),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  'For You',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.label.copyWith(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -900,33 +1030,31 @@ class _ReelsTopButton extends StatelessWidget {
             height: 44,
             child: ClipOval(
               child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xB52B3341), Color(0x78202735)],
-                    ),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.24),
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x3D000000),
-                        blurRadius: 12,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xB52B3341), Color(0x78202735)],
                   ),
-                  child: Center(
-                    child: Icon(icon, color: Colors.white, size: 19),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.24),
                   ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x3D000000),
+                      blurRadius: 12,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
                 ),
+                child: Center(child: Icon(icon, color: Colors.white, size: 19)),
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 }
 
@@ -942,7 +1070,6 @@ class _ReelView extends StatefulWidget {
     required this.onNext,
     required this.onMute,
     required this.clear,
-    required this.onFavorite,
     required this.onSaveMenu,
     required this.onRetry,
   });
@@ -956,7 +1083,6 @@ class _ReelView extends StatefulWidget {
   final VoidCallback onNext;
   final VoidCallback onMute;
   final bool clear;
-  final VoidCallback onFavorite;
   final VoidCallback onSaveMenu;
   final VoidCallback onRetry;
 
@@ -1010,12 +1136,18 @@ class _ReelViewState extends State<_ReelView> {
 
   void _scheduleControlsHide() {
     _controlsTimer?.cancel();
-    if (!mounted || widget.clear || !widget.isActive || _c?.value.isPlaying != true) {
+    if (!mounted ||
+        widget.clear ||
+        !widget.isActive ||
+        _c?.value.isPlaying != true) {
       if (!_controlsVisible && mounted) setState(() => _controlsVisible = true);
       return;
     }
     _controlsTimer = Timer(_kControlsHideDelay, () {
-      if (!mounted || !widget.isActive || widget.clear || _c?.value.isPlaying != true) {
+      if (!mounted ||
+          !widget.isActive ||
+          widget.clear ||
+          _c?.value.isPlaying != true) {
         return;
       }
       if (_controlsVisible) setState(() => _controlsVisible = false);
@@ -1097,7 +1229,8 @@ class _ReelViewState extends State<_ReelView> {
 
     final now = DateTime.now();
     final previousTap = _lastTapTime;
-    _secondTapCandidate = previousTap != null &&
+    _secondTapCandidate =
+        previousTap != null &&
         now.difference(previousTap) <= _kReelDoubleTapWindow;
 
     if (_secondTapCandidate) {
@@ -1250,7 +1383,8 @@ class _ReelViewState extends State<_ReelView> {
         Semantics(
           button: true,
           label: 'Video player',
-          hint: 'Tap to pause or play. Double-tap the left or right side '
+          hint:
+              'Tap to pause or play. Double-tap the left or right side '
               'to rewind or skip 10 seconds. Press and hold for 2x speed.',
           onTap: _togglePlay,
           child: Listener(
@@ -1269,8 +1403,11 @@ class _ReelViewState extends State<_ReelView> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline_rounded,
-                            color: Colors.white54, size: 40),
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          color: Colors.white54,
+                          size: 40,
+                        ),
                         const SizedBox(height: Gaps.md),
                         AppButton(
                           label: 'Try again',
@@ -1301,35 +1438,35 @@ class _ReelViewState extends State<_ReelView> {
                           opacity: v.isPlaying ? 0 : 1,
                           child: ClipOval(
                             child: Container(
-                                width: 64,
-                                height: 64,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: const LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: [
-                                      Color(0xA8323948),
-                                      Color(0x70202735),
-                                    ],
-                                  ),
-                                  border: Border.all(
-                                    color: const Color(0x55FFFFFF),
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x44000000),
-                                      blurRadius: 24,
-                                      offset: Offset(0, 8),
-                                    ),
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: const LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color(0xA8323948),
+                                    Color(0x70202735),
                                   ],
                                 ),
-                                child: const Icon(
-                                  Icons.play_arrow_rounded,
-                                  color: Colors.white,
-                                  size: 36,
+                                border: Border.all(
+                                  color: const Color(0x55FFFFFF),
                                 ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x44000000),
+                                    blurRadius: 24,
+                                    offset: Offset(0, 8),
+                                  ),
+                                ],
                               ),
+                              child: const Icon(
+                                Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 36,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1343,21 +1480,21 @@ class _ReelViewState extends State<_ReelView> {
         _UiFade(
           hidden: widget.clear || !_controlsVisible,
           child: const IgnorePointer(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0, 0.18, 0.55, 1],
-                colors: [
-                  Color(0x99000000),
-                  Color(0x00000000),
-                  Color(0x00000000),
-                  Color(0xCC000000),
-                ],
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: [0, 0.18, 0.55, 1],
+                  colors: [
+                    Color(0x99000000),
+                    Color(0x00000000),
+                    Color(0x00000000),
+                    Color(0xCC000000),
+                  ],
+                ),
               ),
             ),
-          ),
           ),
         ),
 
@@ -1383,7 +1520,6 @@ class _ReelViewState extends State<_ReelView> {
               isLast: widget.isLast,
               onNext: widget.onNext,
               onMute: widget.onMute,
-              onFavorite: widget.onFavorite,
               onSaveMenu: widget.onSaveMenu,
             ),
           ),
@@ -1452,38 +1588,38 @@ class _ReelViewState extends State<_ReelView> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(Radii.pill),
                   child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 7,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xB52B3341), Color(0x88202735)],
                       ),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xB52B3341), Color(0x88202735)],
+                      borderRadius: BorderRadius.circular(Radii.pill),
+                      border: Border.all(color: const Color(0x44FFFFFF)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.fast_forward_rounded,
+                          color: Colors.white,
+                          size: 20,
                         ),
-                        borderRadius: BorderRadius.circular(Radii.pill),
-                        border: Border.all(color: const Color(0x44FFFFFF)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.fast_forward_rounded,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '2x',
-                            style: AppText.label.copyWith(color: Colors.white),
-                          ),
-                        ],
-                      ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '2x',
+                          style: AppText.label.copyWith(color: Colors.white),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
             ),
           ),
+        ),
 
         if (ready && c != null)
           Positioned(
@@ -1650,7 +1786,6 @@ class _ActionRail extends StatelessWidget {
     required this.isLast,
     required this.onNext,
     required this.onMute,
-    required this.onFavorite,
     required this.onSaveMenu,
   });
 
@@ -1660,7 +1795,6 @@ class _ActionRail extends StatelessWidget {
   final bool isLast;
   final VoidCallback onNext;
   final VoidCallback onMute;
-  final VoidCallback onFavorite;
   final VoidCallback onSaveMenu;
 
   @override
@@ -1669,19 +1803,6 @@ class _ActionRail extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ListenableBuilder(
-          listenable: FavoritesStore.instance,
-          builder: (_, __) {
-            final fav = FavoritesStore.instance.isFavorite(downloadId);
-            return _RailButton(
-              icon: fav ? CupertinoIcons.star_fill : CupertinoIcons.star,
-              iconColor: fav ? AppColors.star : Colors.white,
-              label: fav ? 'Favorited' : 'Favorite',
-              onTap: onFavorite,
-            );
-          },
-        ),
-        const SizedBox(height: Gaps.sm),
         ValueListenableBuilder<Map<String, double>>(
           valueListenable: saving,
           builder: (_, map, __) {
@@ -1819,10 +1940,12 @@ class _StallSpinnerState extends State<_StallSpinner> {
       if (_show) setState(() => _show = false);
       return;
     }
-    final stalled = v.isInitialized &&
+    final stalled =
+        v.isInitialized &&
         v.isPlaying &&
         v.isBuffering &&
-        DateTime.now().difference(_lastMove) > const Duration(milliseconds: 700);
+        DateTime.now().difference(_lastMove) >
+            const Duration(milliseconds: 700);
     if (stalled != _show) setState(() => _show = stalled);
   }
 
@@ -1847,11 +1970,9 @@ class _RailButton extends StatelessWidget {
     required this.onTap,
     this.progress,
     this.active = false,
-    this.iconColor = Colors.white,
   });
 
   final IconData icon;
-  final Color iconColor;
   final String label;
   final VoidCallback onTap;
 
@@ -1872,51 +1993,51 @@ class _RailButton extends StatelessWidget {
           children: [
             ClipOval(
               child: AnimatedContainer(
-                  duration: Motion.quick,
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: active
-                        ? const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xD15B3540), Color(0x9E291E2B)],
-                          )
-                        : const LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xA9364050), Color(0x7E1B2431)],
-                          ),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: active ? 0.38 : 0.26),
-                    ),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x44000000),
-                        blurRadius: 10,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      if (busy)
-                        SizedBox(
-                          width: 44,
-                          height: 44,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            value: progress! < 0 ? null : progress,
-                            color: AppColors.accent,
-                            backgroundColor: const Color(0x33FFFFFF),
-                          ),
+                duration: Motion.quick,
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: active
+                      ? const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xD15B3540), Color(0x9E291E2B)],
+                        )
+                      : const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xA9364050), Color(0x7E1B2431)],
                         ),
-                      Icon(icon, color: iconColor, size: 21),
-                    ],
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: active ? 0.38 : 0.26),
                   ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x44000000),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
                 ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (busy)
+                      SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          value: progress! < 0 ? null : progress,
+                          color: AppColors.accent,
+                          backgroundColor: const Color(0x33FFFFFF),
+                        ),
+                      ),
+                    Icon(icon, color: Colors.white, size: 21),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 5),
             Text(
@@ -1928,7 +2049,9 @@ class _RailButton extends StatelessWidget {
                 fontSize: 9.5,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.1,
-                shadows: const [Shadow(blurRadius: 8, color: Color(0xCC000000))],
+                shadows: const [
+                  Shadow(blurRadius: 8, color: Color(0xCC000000)),
+                ],
               ),
             ),
           ],
@@ -1994,129 +2117,142 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, box) {
-      final width = box.maxWidth;
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onHorizontalDragStart: (d) => _start(d.localPosition.dx, width),
-        onHorizontalDragUpdate: (d) => _update(d.localPosition.dx, width),
-        onHorizontalDragEnd: (_) => _end(),
-        onHorizontalDragCancel: _end,
-        onTapUp: (d) {
-          final fraction = _fracAt(d.localPosition.dx, width);
-          setState(() => _frac = fraction);
-          unawaited(_seekToFraction(fraction));
-        },
-        child: SizedBox(
-          height: 34,
-          child: ValueListenableBuilder<VideoPlayerValue>(
-            valueListenable: _c,
-            builder: (_, v, __) {
-              final total = v.duration.inMilliseconds;
-              final played = total <= 0
-                  ? 0.0
-                  : (v.position.inMilliseconds / total).clamp(0.0, 1.0);
-              final buffered = total <= 0 || v.buffered.isEmpty
-                  ? 0.0
-                  : (v.buffered.last.end.inMilliseconds / total)
-                      .clamp(0.0, 1.0);
-              final shown = _dragging ? _frac : played.toDouble();
-              final barH = _dragging ? 7.0 : 3.0;
-              final thumbSize = _dragging ? 13.0 : 8.0;
-              final trackInset = _dragging ? 12.0 : 0.0;
-              final trackWidth =
-                  (width - trackInset * 2).clamp(0.0, width).toDouble();
-              final thumbLeft = (trackInset + trackWidth * shown - thumbSize / 2)
-                  .clamp(0.0, width - thumbSize)
-                  .toDouble();
-              return Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.bottomLeft,
-                children: [
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 10,
-                    child: AnimatedContainer(
-                      duration: Motion.quick,
-                      height: barH,
-                      margin: EdgeInsets.symmetric(
-                          horizontal: _dragging ? 12 : 0),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(Radii.pill),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            const ColoredBox(color: Color(0x33FFFFFF)),
-                            FractionallySizedBox(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: buffered.toDouble(),
-                              child: const ColoredBox(color: Color(0x4DFFFFFF)),
-                            ),
-                            FractionallySizedBox(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: shown,
-                              child:
-                                  const ColoredBox(color: AppColors.accent),
+    return LayoutBuilder(
+      builder: (context, box) {
+        final width = box.maxWidth;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (d) => _start(d.localPosition.dx, width),
+          onHorizontalDragUpdate: (d) => _update(d.localPosition.dx, width),
+          onHorizontalDragEnd: (_) => _end(),
+          onHorizontalDragCancel: _end,
+          onTapUp: (d) {
+            final fraction = _fracAt(d.localPosition.dx, width);
+            setState(() => _frac = fraction);
+            unawaited(_seekToFraction(fraction));
+          },
+          child: SizedBox(
+            height: 34,
+            child: ValueListenableBuilder<VideoPlayerValue>(
+              valueListenable: _c,
+              builder: (_, v, __) {
+                final total = v.duration.inMilliseconds;
+                final played = total <= 0
+                    ? 0.0
+                    : (v.position.inMilliseconds / total).clamp(0.0, 1.0);
+                final buffered = total <= 0 || v.buffered.isEmpty
+                    ? 0.0
+                    : (v.buffered.last.end.inMilliseconds / total).clamp(
+                        0.0,
+                        1.0,
+                      );
+                final shown = _dragging ? _frac : played.toDouble();
+                final barH = _dragging ? 7.0 : 3.0;
+                final thumbSize = _dragging ? 13.0 : 8.0;
+                final trackInset = _dragging ? 12.0 : 0.0;
+                final trackWidth = (width - trackInset * 2)
+                    .clamp(0.0, width)
+                    .toDouble();
+                final thumbLeft =
+                    (trackInset + trackWidth * shown - thumbSize / 2)
+                        .clamp(0.0, width - thumbSize)
+                        .toDouble();
+                return Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.bottomLeft,
+                  children: [
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 10,
+                      child: AnimatedContainer(
+                        duration: Motion.quick,
+                        height: barH,
+                        margin: EdgeInsets.symmetric(
+                          horizontal: _dragging ? 12 : 0,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(Radii.pill),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              const ColoredBox(color: Color(0x33FFFFFF)),
+                              FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: buffered.toDouble(),
+                                child: const ColoredBox(
+                                  color: Color(0x4DFFFFFF),
+                                ),
+                              ),
+                              FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: shown,
+                                child: const ColoredBox(
+                                  color: AppColors.accent,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: thumbLeft,
+                      bottom: 6,
+                      child: AnimatedContainer(
+                        duration: Motion.quick,
+                        width: thumbSize,
+                        height: thumbSize,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppColors.accent,
+                            width: _dragging ? 2 : 1.5,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x66000000),
+                              blurRadius: 7,
+                              offset: Offset(0, 2),
                             ),
                           ],
                         ),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    left: thumbLeft,
-                    bottom: 6,
-                    child: AnimatedContainer(
-                      duration: Motion.quick,
-                      width: thumbSize,
-                      height: thumbSize,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: AppColors.accent,
-                          width: _dragging ? 2 : 1.5,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x66000000),
-                            blurRadius: 7,
-                            offset: Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_dragging)
-                    Positioned(
-                      bottom: 36,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: const Color(0xB3000000),
-                            borderRadius: BorderRadius.circular(Radii.pill),
-                          ),
-                          child: Text(
-                            '${_clock(Duration(milliseconds: (total * _frac).round()))}'
-                            ' / ${_clock(v.duration)}',
-                            style:
-                                AppText.label.copyWith(color: Colors.white),
+                    if (_dragging)
+                      Positioned(
+                        bottom: 36,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xB3000000),
+                              borderRadius: BorderRadius.circular(Radii.pill),
+                            ),
+                            child: Text(
+                              '${_clock(Duration(milliseconds: (total * _frac).round()))}'
+                              ' / ${_clock(v.duration)}',
+                              style: AppText.label.copyWith(
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 }
 

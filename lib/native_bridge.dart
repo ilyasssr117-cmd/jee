@@ -57,7 +57,8 @@ class NativeBridge {
   Future<void> init() async {
     _channel.setMethodCallHandler(_onCall);
     try {
-      _pipSupported = await _channel.invokeMethod<bool>('pipSupported') ?? false;
+      _pipSupported =
+          await _channel.invokeMethod<bool>('pipSupported') ?? false;
     } catch (_) {
       _pipSupported = false;
     }
@@ -77,7 +78,8 @@ class NativeBridge {
   }) async {
     if (!_pipSupported) return false;
     try {
-      final started = await _channel.invokeMethod<bool>('pipStart', <String, Object?>{
+      final started =
+          await _channel.invokeMethod<bool>('pipStart', <String, Object?>{
             'url': url,
             'isFile': isFile,
             'headers': headers,
@@ -113,10 +115,7 @@ class NativeBridge {
     } catch (_) {}
   }
 
-  Future<void> endLiveActivity({
-    String? title,
-    bool finished = true,
-  }) async {
+  Future<void> endLiveActivity({String? title, bool finished = true}) async {
     try {
       await _channel.invokeMethod<bool>('liveEnd', <String, Object?>{
         if (title != null) 'title': title,

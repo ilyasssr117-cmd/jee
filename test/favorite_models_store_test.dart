@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:watch_tube/favorite_models_store.dart';
-import 'package:watch_tube/local_store.dart';
-import 'package:watch_tube/models.dart';
+import 'package:vxtube_final/favorite_models_store.dart';
+import 'package:vxtube_final/local_store.dart';
+import 'package:vxtube_final/models.dart';
 
 void main() {
   const model = ModelRef(
@@ -36,13 +36,21 @@ void main() {
     store.init();
 
     expect(store.items, hasLength(1));
-    expect(store.items.single.imageUrl, 'https://x.example.test/contents/m.jpg');
+    expect(
+      store.items.single.imageUrl,
+      'https://x.example.test/contents/m.jpg',
+    );
   });
 
   test('newest favourite comes first', () {
     final store = FavoriteModelsStore.instance;
     store.toggle(model);
-    store.toggle(const ModelRef(name: 'Second', url: 'https://x.example.test/models/second/'));
+    store.toggle(
+      const ModelRef(
+        name: 'Second',
+        url: 'https://x.example.test/models/second/',
+      ),
+    );
     expect(store.items.map((m) => m.name), <String>['Second', 'Playwithanny']);
   });
 }

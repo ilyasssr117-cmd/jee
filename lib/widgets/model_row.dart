@@ -35,10 +35,12 @@ class _ModelRowState extends State<ModelRow> {
         () => videoRepository.getModelProfile(widget.model),
       );
       if (!mounted || profile.imageUrl == null) return;
-      FavoriteModelsStore.instance.updateImage(widget.model.url, profile.imageUrl);
+      FavoriteModelsStore.instance.updateImage(
+        widget.model.url,
+        profile.imageUrl,
+      );
       setState(() => _image = profile.imageUrl);
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 
   @override
@@ -83,9 +85,13 @@ class _ModelRowState extends State<ModelRow> {
                   child: Padding(
                     padding: const EdgeInsets.all(10),
                     child: Icon(
-                      isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                      isFavorite
+                          ? Icons.star_rounded
+                          : Icons.star_border_rounded,
                       size: 26,
-                      color: isFavorite ? AppColors.star : AppColors.textTertiary,
+                      color: isFavorite
+                          ? AppColors.star
+                          : AppColors.textTertiary,
                     ),
                   ),
                 );

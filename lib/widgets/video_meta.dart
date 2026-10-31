@@ -68,7 +68,9 @@ class VideoMetaLine extends StatelessWidget {
     if (video.views.isNotEmpty) {
       separator();
       parts.add(
-        Flexible(child: _IconText(Icons.visibility_outlined, video.views, style)),
+        Flexible(
+          child: _IconText(Icons.visibility_outlined, video.views, style),
+        ),
       );
     }
 
@@ -81,7 +83,8 @@ class VideoMetaLine extends StatelessWidget {
       );
     }
 
-    final showCat = video.category.isNotEmpty &&
+    final showCat =
+        video.category.isNotEmpty &&
         (showCategory || (fallbackToCategory && parts.isEmpty));
     if (showCat) {
       separator();

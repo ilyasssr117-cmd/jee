@@ -34,7 +34,8 @@ class SavedAlbumsView extends StatelessWidget {
           return StatusView(
             icon: Icons.photo_library_outlined,
             title: 'No saved albums yet',
-            message: 'Open a model, choose Photos, then tap Download to keep '
+            message:
+                'Open a model, choose Photos, then tap Download to keep '
                 'an album here.',
             actionLabel: 'Browse videos',
             actionIcon: Icons.home_rounded,
@@ -44,7 +45,12 @@ class SavedAlbumsView extends StatelessWidget {
         final groups = <String, List<SavedAlbum>>{};
         for (final album in albums) {
           final name = (album.modelName ?? '').trim();
-          groups.putIfAbsent(name.isEmpty ? 'Other albums' : name, () => <SavedAlbum>[]).add(album);
+          groups
+              .putIfAbsent(
+                name.isEmpty ? 'Other albums' : name,
+                () => <SavedAlbum>[],
+              )
+              .add(album);
         }
 
         return CustomScrollView(
@@ -65,7 +71,11 @@ class SavedAlbumsView extends StatelessWidget {
                 sliver: SliverToBoxAdapter(
                   child: Row(
                     children: [
-                      const Icon(Icons.person_rounded, size: 20, color: AppColors.accent),
+                      const Icon(
+                        Icons.person_rounded,
+                        size: 20,
+                        color: AppColors.accent,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -149,8 +159,10 @@ class _SavedAlbumCard extends StatelessWidget {
                   ColoredBox(
                     color: AppColors.surfaceHigh,
                     child: cover == null
-                        ? Icon(Icons.photo_library_outlined,
-                            color: AppColors.textTertiary)
+                        ? Icon(
+                            Icons.photo_library_outlined,
+                            color: AppColors.textTertiary,
+                          )
                         : Image.file(
                             cover,
                             fit: BoxFit.cover,
@@ -313,38 +325,35 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
                       children: [
                         CustomScrollView(
                           slivers: [
-                            SliverToBoxAdapter(
-                              child: _header(album, margin),
-                            ),
+                            SliverToBoxAdapter(child: _header(album, margin)),
                             SliverPadding(
                               padding: EdgeInsets.symmetric(horizontal: margin),
                               sliver: SliverGrid(
                                 gridDelegate:
                                     const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 3,
-                                  crossAxisSpacing: 4,
-                                  mainAxisSpacing: 4,
-                                  childAspectRatio: 3 / 4,
-                                ),
-                                delegate: SliverChildBuilderDelegate(
-                                  (context, index) {
-                                    final photo = album.photos[index];
-                                    return _LocalTile(
-                                      key: ValueKey<String>(photo.id),
-                                      file: store.fileOf(album, photo),
-                                      selecting: _selection.active,
-                                      selected:
-                                          _selection.ids.contains(photo.id),
-                                      onTap: () => _selection.active
-                                          ? _selection.toggle(photo.id)
-                                          : _open(album, index),
-                                      onLongPress: _selection.active
-                                          ? null
-                                          : () => _selection.start(photo.id),
-                                    );
-                                  },
-                                  childCount: album.photos.length,
-                                ),
+                                      crossAxisCount: 3,
+                                      crossAxisSpacing: 4,
+                                      mainAxisSpacing: 4,
+                                      childAspectRatio: 3 / 4,
+                                    ),
+                                delegate: SliverChildBuilderDelegate((
+                                  context,
+                                  index,
+                                ) {
+                                  final photo = album.photos[index];
+                                  return _LocalTile(
+                                    key: ValueKey<String>(photo.id),
+                                    file: store.fileOf(album, photo),
+                                    selecting: _selection.active,
+                                    selected: _selection.ids.contains(photo.id),
+                                    onTap: () => _selection.active
+                                        ? _selection.toggle(photo.id)
+                                        : _open(album, index),
+                                    onLongPress: _selection.active
+                                        ? null
+                                        : () => _selection.start(photo.id),
+                                  );
+                                }, childCount: album.photos.length),
                               ),
                             ),
                             SliverToBoxAdapter(
@@ -455,8 +464,11 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
             expand: true,
             onPressed: () {
               if (count == 0) {
-                showToast(context, 'Tap photos to select them.',
-                    aboveBar: false);
+                showToast(
+                  context,
+                  'Tap photos to select them.',
+                  aboveBar: false,
+                );
                 return;
               }
               sendToPhotos(context, _paths(album, only: _selection.ids));
@@ -521,12 +533,17 @@ class _LocalTile extends StatelessWidget {
                   height: 24,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: selected ? AppColors.accent : const Color(0x66000000),
+                    color: selected
+                        ? AppColors.accent
+                        : const Color(0x66000000),
                     border: Border.all(color: Colors.white, width: 2),
                   ),
                   child: selected
-                      ? const Icon(Icons.check_rounded,
-                          size: 20, color: Colors.white)
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 20,
+                          color: Colors.white,
+                        )
                       : null,
                 ),
               ),

@@ -44,11 +44,13 @@ class _AppBottomBarState extends State<AppBottomBar> {
   AppTab? _hovered;
   double? _dragIndicatorLeft;
 
-  AppTab get _indicatorTab => _dragging ? (_hovered ?? widget.selected) : widget.selected;
+  AppTab get _indicatorTab =>
+      _dragging ? (_hovered ?? widget.selected) : widget.selected;
 
   void _beginDrag(AppTab tab) {
     final bar = _barKey.currentContext?.findRenderObject() as RenderBox?;
-    final tabBox = _tabKeys[tab]?.currentContext?.findRenderObject() as RenderBox?;
+    final tabBox =
+        _tabKeys[tab]?.currentContext?.findRenderObject() as RenderBox?;
     double? startLeft;
     if (bar != null && bar.hasSize && tabBox != null && tabBox.hasSize) {
       final tabCenter = tabBox.localToGlobal(
@@ -104,8 +106,11 @@ class _AppBottomBarState extends State<AppBottomBar> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = widget.bottomGap ?? math.max(context.safe.bottom - 4, 10.0).toDouble();
-    final width = math.min(MediaQuery.sizeOf(context).width - 28, 420.0).toDouble();
+    final bottom =
+        widget.bottomGap ?? math.max(context.safe.bottom - 4, 10.0).toDouble();
+    final width = math
+        .min(MediaQuery.sizeOf(context).width - 28, 420.0)
+        .toDouble();
 
     // Scaffold gives bottomNavigationBar a loose height constraint. A bare
     // Center expands to that maximum and makes the dock appear mid-screen.
@@ -157,7 +162,8 @@ class _AppBottomBarState extends State<AppBottomBar> {
                   builder: (context, constraints) {
                     final itemWidth = constraints.maxWidth / _tabs.length;
                     final selectedLeft =
-                        _tabs.indexWhere((item) => item.tab == _indicatorTab) * itemWidth;
+                        _tabs.indexWhere((item) => item.tab == _indicatorTab) *
+                        itemWidth;
                     final indicatorLeft = _dragging
                         ? (_dragIndicatorLeft ?? selectedLeft)
                         : selectedLeft;
@@ -205,7 +211,8 @@ class _AppBottomBarState extends State<AppBottomBar> {
                                       Haptics.play(Haptic.selection);
                                       widget.onSelect(item.tab);
                                     },
-                                    onLongPressStart: () => _beginDrag(item.tab),
+                                    onLongPressStart: () =>
+                                        _beginDrag(item.tab),
                                     onLongPressMove: _updateDrag,
                                     onLongPressEnd: _finishDrag,
                                   ),
@@ -277,7 +284,8 @@ class _TabItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onLongPressStart: (_) => onLongPressStart(),
-      onLongPressMoveUpdate: (details) => onLongPressMove(details.globalPosition),
+      onLongPressMoveUpdate: (details) =>
+          onLongPressMove(details.globalPosition),
       onLongPressEnd: (_) => onLongPressEnd(),
       child: SizedBox(
         height: 58,
@@ -292,9 +300,7 @@ class _TabItem extends StatelessWidget {
               child: SizedBox(
                 width: 26,
                 height: 26,
-                child: Center(
-                  child: Icon(icon, size: 20, color: color),
-                ),
+                child: Center(child: Icon(icon, size: 20, color: color)),
               ),
             ),
             const SizedBox(height: 3),

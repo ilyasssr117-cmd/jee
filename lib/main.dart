@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
@@ -12,6 +13,8 @@ import 'favorites_store.dart';
 import 'history_store.dart';
 import 'home_page.dart';
 import 'local_store.dart';
+import 'offline_listing_cache.dart';
+import 'offline_album_cache.dart';
 import 'widget_sync.dart';
 import 'widgets/mini_player_overlay.dart';
 import 'native_bridge.dart';
@@ -23,26 +26,31 @@ import 'preview_manager.dart';
 import 'search_history.dart';
 
 void main() {
-  runZonedGuarded<Future<void>>(
-    _bootstrap,
-    (error, stack) => debugPrint('[FATAL][zone] $error\n$stack'),
-  );
+  runZonedGuarded<Future<void>>(_bootstrap, (error, stack) {
+    if (kDebugMode) debugPrint('[FATAL][zone] ${error.runtimeType}\n$stack');
+  });
 }
 
 Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    debugPrint('[FATAL][flutter] ${details.exceptionAsString()}\n${details.stack}');
+    if (kDebugMode) FlutterError.presentError(details);
+    if (kDebugMode)
+      debugPrint(
+        '[FATAL][flutter] ${details.exception.runtimeType}\n${details.stack}',
+      );
   };
   ui.PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint('[FATAL][platform] $error\n$stack');
+    if (kDebugMode)
+      debugPrint('[FATAL][platform] ${error.runtimeType}\n$stack');
     return true;
   };
 
   ErrorWidget.builder = (details) {
-    final message = details.exceptionAsString();
+    final message = kDebugMode
+        ? details.exceptionAsString()
+        : 'Please try again. If the problem continues, restart VXTUBEFinal.';
     return Directionality(
       textDirection: TextDirection.ltr,
       child: ColoredBox(
@@ -51,8 +59,7 @@ Future<void> _bootstrap() async {
           child: Padding(
             padding: const EdgeInsets.all(32),
             child: Text(
-              'Something went wrong\n\n'
-              '${message.length > 600 ? message.substring(0, 600) : message}',
+              kDebugMode ? 'Something went wrong\n\n$message' : message,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppColors.textPrimary,
@@ -70,13 +77,15 @@ Future<void> _bootstrap() async {
   final imageCache = PaintingBinding.instance.imageCache;
   // Keep the decoded-image cache bounded for older iPhones. Large image
   // caches compete with AVPlayer's video buffers and can cause long FPS drops.
-  imageCache.maximumSize = 120;
-  imageCache.maximumSizeBytes = 48 << 20;
+  imageCache.maximumSize = 96;
+  imageCache.maximumSizeBytes = 32 << 20;
 
   await applyBrowseOrientation();
 
   try {
     await LocalStore.init();
+    OfflineListingCache.init();
+    OfflineAlbumCache.init();
     unawaited(purgeStaleTempFiles());
     AppSettings.instance.load();
     FavoritesStore.instance.load();
@@ -90,36 +99,38 @@ Future<void> _bootstrap() async {
       NativeBridge.instance.init(),
     ]);
   } catch (error) {
-    debugPrint('[STARTUP] Local data failed to load: $error');
+    if (kDebugMode)
+      debugPrint('[STARTUP] Local data failed: ${error.runtimeType}');
   }
 
-  runApp(const FlowApp());
+  runApp(const VXTUBEFinalApp());
   WidgetSync.instance.start();
 }
 
-class FlowApp extends StatefulWidget {
-  const FlowApp({super.key});
+class VXTUBEFinalApp extends StatefulWidget {
+  const VXTUBEFinalApp({super.key});
 
   @override
-  State<FlowApp> createState() => _FlowAppState();
+  State<VXTUBEFinalApp> createState() => _VXTUBEFinalAppState();
 }
 
-class _FlowAppState extends State<FlowApp>
+class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late Brightness _brightness = _resolve();
 
   final GlobalKey _boundaryKey = GlobalKey();
   ui.Image? _snapshot;
-  late final AnimationController _fade = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 380),
-  )..addStatusListener((status) {
-      if (status == AnimationStatus.completed && mounted) {
-        final old = _snapshot;
-        setState(() => _snapshot = null);
-        old?.dispose();
-      }
-    });
+  late final AnimationController _fade =
+      AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 380),
+      )..addStatusListener((status) {
+        if (status == AnimationStatus.completed && mounted) {
+          final old = _snapshot;
+          setState(() => _snapshot = null);
+          old?.dispose();
+        }
+      });
 
   Brightness _resolve() {
     switch (AppSettings.instance.themeMode) {
@@ -161,8 +172,9 @@ class _FlowAppState extends State<FlowApp>
   }
 
   void _applyPalette() {
-    AppColors.palette =
-        _brightness == Brightness.dark ? Palette.dark : Palette.light;
+    AppColors.palette = _brightness == Brightness.dark
+        ? Palette.dark
+        : Palette.light;
   }
 
   Future<void> _onSettings() async {
@@ -170,8 +182,9 @@ class _FlowAppState extends State<FlowApp>
 
     ui.Image? shot;
     try {
-      final boundary = _boundaryKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
+      final boundary =
+          _boundaryKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
       if (boundary != null && boundary.hasSize && mounted) {
         shot = await boundary.toImage(
           pixelRatio: MediaQuery.devicePixelRatioOf(context),
@@ -207,7 +220,7 @@ class _FlowAppState extends State<FlowApp>
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flow',
+      title: 'VXTUBEFinal',
       navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(_brightness),
@@ -219,14 +232,16 @@ class _FlowAppState extends State<FlowApp>
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
-            statusBarIconBrightness:
-                isDark ? Brightness.light : Brightness.dark,
+            statusBarIconBrightness: isDark
+                ? Brightness.light
+                : Brightness.dark,
             // iOS uses the opposite brightness convention for status content.
             statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
             systemNavigationBarColor: Colors.transparent,
             systemNavigationBarDividerColor: Colors.transparent,
-            systemNavigationBarIconBrightness:
-                isDark ? Brightness.light : Brightness.dark,
+            systemNavigationBarIconBrightness: isDark
+                ? Brightness.light
+                : Brightness.dark,
             systemStatusBarContrastEnforced: false,
             systemNavigationBarContrastEnforced: false,
           ),

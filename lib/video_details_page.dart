@@ -36,6 +36,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   late Future<List<Video>> _relatedFuture;
   late Future<List<ModelRef>> _modelsFuture;
   final ScrollController _scroll = ScrollController();
+  final GlobalKey _headerKey = GlobalKey();
 
   final ValueNotifier<bool> _overHeader = ValueNotifier<bool>(true);
   double _headerLimit = 200;
@@ -61,14 +62,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 
   Future<List<Video>> _loadRelated() => relatedCache.fetch(
-        widget.video.id,
-        () => videoRepository.getRelated(widget.video),
-      );
+    widget.video.id,
+    () => videoRepository.getRelated(widget.video),
+  );
 
   Future<List<ModelRef>> _loadModels() => modelsCache.fetch(
-        widget.video.id,
-        () => videoRepository.getVideoModels(widget.video),
-      );
+    widget.video.id,
+    () => videoRepository.getVideoModels(widget.video),
+  );
 
   void _openModel(ModelRef model) {
     Navigator.of(context).push<void>(
@@ -124,35 +125,47 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
-    _headerLimit =
-        _headerHeight(MediaQuery.sizeOf(context)) - context.safe.top;
+    _headerLimit = _headerHeight(MediaQuery.sizeOf(context)) - context.safe.top;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final render = _headerKey.currentContext?.findRenderObject();
+      if (render is RenderBox && render.hasSize) {
+        final measured = render.size.height - context.safe.top;
+        if ((measured - _headerLimit).abs() > 1) {
+          _headerLimit = measured;
+          final over = !_scroll.hasClients || _scroll.offset < _headerLimit;
+          if (_overHeader.value != over) _overHeader.value = over;
+        }
+      }
+    });
     final darkMode = AppColors.palette.brightness == Brightness.dark;
     return ValueListenableBuilder<bool>(
       valueListenable: _overHeader,
-      builder: (context, overHeader, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-        value: darkMode || overHeader
-            ? SystemUiOverlayStyle.light
-            : SystemUiOverlayStyle.dark,
-        child: child!,
-      ),
-      child: Scaffold(
-      backgroundColor: AppColors.background,
-      body: CustomScrollView(
-        controller: _scroll,
-        physics: nativeScrollPhysics(context, alwaysScrollable: true),
-        scrollCacheExtent: ScrollCacheExtent.pixels(
-          MediaQuery.sizeOf(context).height,
-        ),
-        slivers: [
-          SliverToBoxAdapter(child: _buildHeader(margin)),
-          SliverToBoxAdapter(child: _buildModels(margin)),
-          SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
-          _buildRelated(margin),
-          SliverToBoxAdapter(
-            child: SizedBox(height: Gaps.xl + context.safe.bottom),
+      builder: (context, overHeader, child) =>
+          AnnotatedRegion<SystemUiOverlayStyle>(
+            value: darkMode || overHeader
+                ? SystemUiOverlayStyle.light
+                : SystemUiOverlayStyle.dark,
+            child: child!,
           ),
-        ],
-      ),
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: CustomScrollView(
+          controller: _scroll,
+          physics: nativeScrollPhysics(context, alwaysScrollable: true),
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            MediaQuery.sizeOf(context).height,
+          ),
+          slivers: [
+            SliverToBoxAdapter(child: _buildHeader(margin)),
+            SliverToBoxAdapter(child: _buildModels(margin)),
+            SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
+            _buildRelated(margin),
+            SliverToBoxAdapter(
+              child: SizedBox(height: Gaps.xl + context.safe.bottom),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -163,147 +176,187 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
     final meta = VideoMetaLine(
       video: video,
-      style: AppText.caption.copyWith(color: AppColors.textSecondary),
+      style: const TextStyle(
+        color: Color(0xFFD6D9E2),
+        fontSize: 12,
+        height: 1.3,
+        fontWeight: FontWeight.w500,
+      ),
       showDuration: true,
       showDate: true,
       fallbackToCategory: false,
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Keep the artwork as a normal page header. There is intentionally no
-        // shared-element/Hero or scale transition, so the image never changes
-        // crop while the native iOS route is being swiped back interactively.
-        ClipRRect(
-          borderRadius: const BorderRadius.vertical(
-            bottom: Radius.circular(22),
-          ),
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ColoredBox(color: AppColors.surfaceHigh),
-                VideoArtwork(
-                  video: video,
-                  showLabel: false,
-                  fit: BoxFit.contain,
-                ),
-                Positioned(
-                  left: margin,
-                  top: context.safe.top + Gaps.sm,
-                  child: const PageBackButton(),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            margin,
-            Gaps.lg,
-            margin,
-            Gaps.md,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (video.category.isNotEmpty)
-                Text(
-                  video.category.toUpperCase(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.overline,
-                ),
-              const SizedBox(height: 6),
-              ExpandableText(
-                video.title,
-                collapsedLines: 3,
-                style: AppText.display.copyWith(fontSize: 23),
-                toggleStyle: AppText.label.copyWith(
-                  color: AppColors.accent,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (meta.hasContent) ...[
-                const SizedBox(height: Gaps.sm),
-                meta,
-              ],
-              if (video.description.isNotEmpty) ...[
-                const SizedBox(height: Gaps.sm),
-                Text(
-                  video.description,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.body.copyWith(fontSize: 13),
-                ),
-              ],
-              const SizedBox(height: Gaps.md),
-              Wrap(
-                spacing: Gaps.sm,
-                runSpacing: Gaps.sm,
+    // The artwork is a fixed background layer. Details are laid over it,
+    // restoring the original visual composition without a shared Hero route.
+    return ConstrainedBox(
+      key: _headerKey,
+      constraints: BoxConstraints(
+        minHeight: _headerHeight(MediaQuery.sizeOf(context)),
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        child: Stack(
+          alignment: Alignment.bottomLeft,
+          children: [
+            Positioned.fill(
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  AppButton(
-                    label: resume != null
-                        ? 'Resume ${_formatResume(resume)}'
-                        : 'Play',
-                    icon: Icons.play_arrow_rounded,
-                    loading: _preparing,
-                    onPressed: _play,
+                  ColoredBox(color: AppColors.surfaceHigh),
+                  VideoArtwork(
+                    video: video,
+                    showLabel: false,
+                    fit: BoxFit.cover,
                   ),
-                  if (resume != null)
-                    AppButton(
-                      label: 'Start over',
-                      icon: Icons.replay_rounded,
-                      style: AppButtonStyle.secondary,
-                      onPressed: () => _play(fromStart: true),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: [0.0, 0.24, 0.56, 1.0],
+                        colors: [
+                          Color(0x55000000),
+                          Color(0x18000000),
+                          Color(0xB8000000),
+                          Color(0xF20B0D12),
+                        ],
+                      ),
                     ),
-                  _buildFavoriteButton(),
-                  _buildDownloadButton(),
-                  if (_shareLink != null)
-                    AppButton(
-                      label: 'Copy link',
-                      icon: Icons.link_rounded,
-                      style: AppButtonStyle.secondary,
-                      onPressed: _copyLink,
-                    ),
+                  ),
                 ],
               ),
-              if (_playError != null) ...[
-                const SizedBox(height: Gaps.sm),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.error_outline_rounded,
-                      size: 20,
-                      color: AppColors.error,
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                margin,
+                context.safe.top + Gaps.sm + 52,
+                margin,
+                Gaps.lg,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (video.category.isNotEmpty)
+                    Text(
+                      video.category.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: darkText.overline.copyWith(
+                        color: Colors.white.withValues(alpha: 0.78),
+                      ),
                     ),
-                    const SizedBox(width: Gaps.sm),
-                    Flexible(
-                      child: Text(
-                        _playError!,
-                        style: AppText.body.copyWith(
-                          color: AppColors.error,
-                        ),
+                  const SizedBox(height: 6),
+                  ExpandableText(
+                    video.title,
+                    collapsedLines: 3,
+                    style: darkText.display.copyWith(
+                      fontSize: 23,
+                      color: Colors.white,
+                      height: 1.12,
+                      shadows: const [
+                        Shadow(color: Color(0x66000000), blurRadius: 12),
+                      ],
+                    ),
+                    toggleStyle: AppText.label.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (meta.hasContent) ...[
+                    const SizedBox(height: Gaps.sm),
+                    meta,
+                  ],
+                  if (video.description.isNotEmpty) ...[
+                    const SizedBox(height: Gaps.sm),
+                    Text(
+                      video.description,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFD6D9E2),
+                        fontSize: 13,
+                        height: 1.42,
                       ),
                     ),
                   ],
-                ),
-              ],
-            ],
-          ),
+                  const SizedBox(height: Gaps.md),
+                  Wrap(
+                    spacing: Gaps.sm,
+                    runSpacing: Gaps.sm,
+                    children: [
+                      AppButton(
+                        label: resume != null
+                            ? 'Resume ${_formatResume(resume)}'
+                            : 'Play',
+                        icon: Icons.play_arrow_rounded,
+                        loading: _preparing,
+                        onPressed: _play,
+                      ),
+                      if (resume != null)
+                        AppButton(
+                          label: 'Start over',
+                          icon: Icons.replay_rounded,
+                          style: AppButtonStyle.secondary,
+                          onDark: true,
+                          onPressed: () => _play(fromStart: true),
+                        ),
+                      _buildFavoriteButton(),
+                      _buildDownloadButton(),
+                      if (_shareLink != null)
+                        AppButton(
+                          label: 'Copy link',
+                          icon: Icons.link_rounded,
+                          style: AppButtonStyle.secondary,
+                          onDark: true,
+                          onPressed: _copyLink,
+                        ),
+                    ],
+                  ),
+                  if (_playError != null) ...[
+                    const SizedBox(height: Gaps.sm),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          size: 20,
+                          color: Color(0xFFFF8A80),
+                        ),
+                        const SizedBox(width: Gaps.sm),
+                        Flexible(
+                          child: Text(
+                            _playError!,
+                            style: const TextStyle(
+                              color: Color(0xFFFF8A80),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Positioned(
+              left: margin,
+              top: context.safe.top + Gaps.sm,
+              child: const PageBackButton(),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
   String? get _shareLink {
     final uri = Uri.tryParse(widget.video.pageUrl?.trim() ?? '');
-    final valid = uri != null &&
+    final valid =
+        uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
-        uri.host.isNotEmpty;
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty;
     return valid ? uri.toString() : null;
   }
 
@@ -326,6 +379,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           icon: active ? Icons.star_rounded : Icons.star_border_rounded,
           iconColor: active ? AppColors.star : null,
           style: AppButtonStyle.secondary,
+          onDark: true,
           onPressed: () {
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
@@ -348,7 +402,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             label: 'Download',
             icon: Icons.download_rounded,
             style: AppButtonStyle.secondary,
-              onPressed: () {
+            onDark: true,
+            onPressed: () {
               store.enqueue(widget.video);
               showToast(context, 'Download started', aboveBar: false);
             },
@@ -365,7 +420,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 icon: Icons.download_done_rounded,
                 iconColor: AppColors.accent,
                 style: AppButtonStyle.secondary,
-                      onPressed: () async {
+                onDark: true,
+                onPressed: () async {
                   final ok = await confirmDialog(
                     context,
                     title: 'Delete this download?',
@@ -379,7 +435,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 label: 'Save to Photos',
                 icon: Icons.photo_library_outlined,
                 style: AppButtonStyle.secondary,
-                      onPressed: () => saveVideoToPhotos(context, id, aboveBar: false),
+                onDark: true,
+                onPressed: () =>
+                    saveVideoToPhotos(context, id, aboveBar: false),
               ),
             ],
           );
@@ -389,21 +447,27 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           valueListenable: item.bytes,
           builder: (context, _, __) {
             final fraction = item.progress;
-            final percent = fraction == null ? '' : ' ${(fraction * 100).round()}%';
+            final percent = fraction == null
+                ? ''
+                : ' ${(fraction * 100).round()}%';
             switch (item.status) {
               case DownloadStatus.downloading:
                 return AppButton(
-                  label: fraction == null ? 'Downloading\u2026' : '${(fraction * 100).round()}%',
+                  label: fraction == null
+                      ? 'Downloading\u2026'
+                      : '${(fraction * 100).round()}%',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.secondary,
-                          onPressed: () => store.pause(id),
+                  onDark: true,
+                  onPressed: () => store.pause(id),
                 );
               case DownloadStatus.queued:
                 return AppButton(
                   label: 'Waiting\u2026',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.secondary,
-                          onPressed: () => store.pause(id),
+                  onDark: true,
+                  onPressed: () => store.pause(id),
                 );
               case DownloadStatus.paused:
               case DownloadStatus.failed:
@@ -412,7 +476,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   label: item.hasPartial ? 'Resume$percent' : 'Retry download',
                   icon: Icons.play_arrow_rounded,
                   style: AppButtonStyle.secondary,
-                          onPressed: () => store.resume(id),
+                  onDark: true,
+                  onPressed: () => store.resume(id),
                 );
             }
           },
@@ -466,7 +531,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       future: _relatedFuture,
       builder: (context, snapshot) {
         final waiting = snapshot.connectionState != ConnectionState.done;
-        if (!waiting && !snapshot.hasError && (snapshot.data ?? const []).isEmpty) {
+        if (!waiting &&
+            !snapshot.hasError &&
+            (snapshot.data ?? const []).isEmpty) {
           return const SizedBox.shrink();
         }
         return Padding(

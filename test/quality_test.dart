@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:watch_tube/models.dart';
-import 'package:watch_tube/scraper.dart';
+import 'package:vxtube_final/models.dart';
+import 'package:vxtube_final/scraper.dart';
 
 void main() {
   const video = Video(
@@ -32,8 +32,8 @@ void main() {
   });
 
   test('detail page lists every labelled quality, highest first', () async {
-    final client = MockClient((request) async => http.Response(
-          '''
+    final client = MockClient(
+      (request) async => http.Response('''
           <html><body>
             <h1>Title</h1>
             <script>
@@ -45,19 +45,20 @@ void main() {
               video_alt_url2_text: '480p'
             </script>
           </body></html>
-          ''',
-          200,
-        ));
+          ''', 200),
+    );
     final scraper = Scraper(
       const ScraperConfig(baseUrl: 'https://videos.example.test'),
       client: client,
     );
 
-    final resolved = await scraper.resolveForPlayback(const Video(
-      id: 'one',
-      title: 'Fallback',
-      pageUrl: 'https://videos.example.test/watch/one',
-    ));
+    final resolved = await scraper.resolveForPlayback(
+      const Video(
+        id: 'one',
+        title: 'Fallback',
+        pageUrl: 'https://videos.example.test/watch/one',
+      ),
+    );
 
     expect(resolved.streamUrl, 'https://cdn.example.test/v_1080.mp4');
     expect(resolved.qualities.map((q) => q.height), <int>[1080, 720, 480]);

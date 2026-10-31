@@ -53,8 +53,8 @@ Future<String?> launchPlayer(
     }
     final localPath = DownloadStore.instance.localPath(video.id);
     final suppliedUrl = video.streamUrl.trim();
-    final hasUsableDirectUrl = suppliedUrl.isNotEmpty &&
-        suppliedUrl != video.previewUrl.trim();
+    final hasUsableDirectUrl =
+        suppliedUrl.isNotEmpty && suppliedUrl != video.previewUrl.trim();
     final playable = localPath != null || source != null || hasUsableDirectUrl
         ? video
         : await videoRepository.resolveForPlayback(

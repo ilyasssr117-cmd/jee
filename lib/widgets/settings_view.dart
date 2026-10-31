@@ -150,7 +150,8 @@ class _SettingsViewState extends State<SettingsView> {
                   icon: Icons.cleaning_services_rounded,
                   color: const Color(0xFFF29900),
                   title: 'Clear cache',
-                  subtitle: 'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
+                  subtitle:
+                      'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
                   onTap: _clearImageCache,
                 ),
                 _Row(
@@ -284,7 +285,10 @@ class _Row extends StatelessWidget {
         pressedScale: 1,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Gaps.md, vertical: 11),
+          padding: const EdgeInsets.symmetric(
+            horizontal: Gaps.md,
+            vertical: 11,
+          ),
           child: Row(
             children: [
               Container(
@@ -367,8 +371,8 @@ class _Segmented<T extends Object> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final platform = Theme.of(context).platform;
-    final isCupertino = platform == TargetPlatform.iOS ||
-        platform == TargetPlatform.macOS;
+    final isCupertino =
+        platform == TargetPlatform.iOS || platform == TargetPlatform.macOS;
 
     void select(T next) {
       if (next == value) return;

@@ -9,6 +9,7 @@ import 'app_theme.dart';
 import 'download_store.dart';
 import 'error_text.dart';
 import 'local_store.dart';
+import 'offline_listing_cache.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
@@ -84,7 +85,10 @@ class _HomePageState extends State<HomePage>
   );
   Animation<double>? _pageSettleAnimation;
 
-  List<String> get _categories => <String>['All', ...videoRepository.categories];
+  List<String> get _categories => <String>[
+    'All',
+    ...videoRepository.categories,
+  ];
 
   @override
   void initState() {
@@ -118,7 +122,7 @@ class _HomePageState extends State<HomePage>
     if (_error?.offline != true) return;
     final category = _category;
     try {
-      await listingCache.fetch(
+      final result = await listingCache.fetch(
         'home|$category|0',
         () => videoRepository.getVideos(
           page: 0,
@@ -126,6 +130,7 @@ class _HomePageState extends State<HomePage>
           category: category == 'All' ? null : category,
         ),
       );
+      OfflineListingCache.write('home|$category|0', result);
       if (!mounted || category != _category || _videos.isNotEmpty) return;
       unawaited(_loadPage(reset: true));
     } catch (_) {
@@ -218,6 +223,33 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
+    final offline = OfflineListingCache.read(key);
+    if (offline != null) {
+      final requestedCategory = _category;
+      setState(() {
+        _error = null;
+        if (reset) {
+          _videos.clear();
+          _recomputeDerived();
+          _page = 0;
+          _emptyPages = 0;
+          _hasMore = true;
+        }
+        _applyPage(offline, requestedPage);
+        // Keep the small loading state while a fresh network copy is fetched.
+        _loading = true;
+      });
+      unawaited(
+        _revalidateOfflinePage(
+          key: key,
+          page: requestedPage,
+          generation: requestGeneration,
+          category: requestedCategory,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
@@ -231,15 +263,17 @@ class _HomePageState extends State<HomePage>
     });
 
     try {
+      final requestedCategory = _category;
       final result = await listingCache.fetch(
         key,
         () => videoRepository.getVideos(
           page: requestedPage,
           pageSize: _pageSize,
-          category: _category == 'All' ? null : _category,
+          category: requestedCategory == 'All' ? null : requestedCategory,
         ),
       );
       if (!mounted || requestGeneration != _generation) return;
+      OfflineListingCache.write(key, result);
 
       setState(() => _applyPage(result, requestedPage));
       if (_hasMore) _scheduleFillViewport();
@@ -252,6 +286,32 @@ class _HomePageState extends State<HomePage>
         _error = describeError(error);
       });
       if (_error?.offline == true && _videos.isEmpty) _watchConnection();
+    }
+  }
+
+  Future<void> _revalidateOfflinePage({
+    required String key,
+    required int page,
+    required int generation,
+    required String category,
+  }) async {
+    try {
+      final result = await listingCache.fetch(
+        key,
+        () => videoRepository.getVideos(
+          page: page,
+          pageSize: _pageSize,
+          category: category == 'All' ? null : category,
+        ),
+        force: true,
+      );
+      OfflineListingCache.write(key, result);
+    } catch (_) {
+      // Keep the last successful page visible when the connection is weak.
+    } finally {
+      if (!mounted || generation != _generation) return;
+      setState(() => _loading = false);
+      if (_hasMore) _scheduleFillViewport();
     }
   }
 
@@ -269,6 +329,7 @@ class _HomePageState extends State<HomePage>
         force: true,
       );
       if (!mounted || generation != _generation) return;
+      OfflineListingCache.write('home|$_category|0', result);
       final seen = <String>{};
       final fresh = <Video>[
         for (final video in result)
@@ -388,7 +449,8 @@ class _HomePageState extends State<HomePage>
       }
     }
 
-    final shouldCommit = target != null &&
+    final shouldCommit =
+        target != null &&
         (_dragOffset.value.abs() > width * 0.22 || velocity.abs() > 650);
     _settlePageDrag(shouldCommit ? target : null);
   }
@@ -398,9 +460,7 @@ class _HomePageState extends State<HomePage>
   void _settlePageDrag(_Section? destination) {
     final width = MediaQuery.sizeOf(context).width;
     final start = _dragOffset.value;
-    final end = destination == null
-        ? 0.0
-        : (start < 0 ? -width : width);
+    final end = destination == null ? 0.0 : (start < 0 ? -width : width);
     _pageSettleController
       ..stop()
       ..duration = Duration(
@@ -415,18 +475,22 @@ class _HomePageState extends State<HomePage>
         curve: Curves.easeOutCubic,
       ),
     );
-    _pageSettleController.forward(from: 0).orCancel.then<void>((_) {
-      if (!mounted) return;
-      setState(() {
-        if (destination != null) _section = destination;
-        _dragTarget = null;
-      });
-      _dragOffset.value = 0;
-      if (destination != null) Haptics.play(Haptic.medium);
-    }).catchError((Object _) {
-      // A new gesture can interrupt an in-flight settle animation. That is a
-      // normal interaction, not an app error.
-    });
+    _pageSettleController
+        .forward(from: 0)
+        .orCancel
+        .then<void>((_) {
+          if (!mounted) return;
+          setState(() {
+            if (destination != null) _section = destination;
+            _dragTarget = null;
+          });
+          _dragOffset.value = 0;
+          if (destination != null) Haptics.play(Haptic.medium);
+        })
+        .catchError((Object _) {
+          // A new gesture can interrupt an in-flight settle animation. That is a
+          // normal interaction, not an app error.
+        });
   }
 
   void _transitionToSection(_Section destination) {
@@ -459,10 +523,7 @@ class _HomePageState extends State<HomePage>
       case AppTab.reels:
         if (_searchOpen) _closeSearch();
         Navigator.of(context).push<void>(
-          adaptivePageRoute<void>(
-            context,
-            builder: (_) => const ReelsPage(),
-          ),
+          adaptivePageRoute<void>(context, builder: (_) => const ReelsPage()),
         );
       case AppTab.library:
         if (_searchOpen) _closeSearch();
@@ -522,7 +583,11 @@ class _HomePageState extends State<HomePage>
         ? null
         : PlaybackProgress.instance.resumePosition(featured.id);
     final screen = MediaQuery.sizeOf(context);
-    _heroLimit = math.min(screen.height * 0.48, 450.0).toDouble() + context.safe.top + Gaps.sm - 30;
+    _heroLimit =
+        math.min(screen.height * 0.48, 450.0).toDouble() +
+        context.safe.top +
+        Gaps.sm -
+        30;
     final darkMode = AppColors.palette.brightness == Brightness.dark;
 
     final libraryActive = _section == _Section.library;
@@ -571,8 +636,8 @@ class _HomePageState extends State<HomePage>
             child: RepaintBoundary(child: sectionContents[section]!),
           ),
           builder: (context, dragOffset, child) {
-            final previewOffset = dragOffset +
-                (dragOffset < 0 ? screen.width : -screen.width);
+            final previewOffset =
+                dragOffset + (dragOffset < 0 ? screen.width : -screen.width);
             final offset = isCurrent
                 ? dragOffset
                 : (isPreview ? previewOffset : 0.0);
@@ -612,7 +677,8 @@ class _HomePageState extends State<HomePage>
         child: content,
       ),
       builder: (context, searchOpen, page) {
-        final lightIcons = darkMode ||
+        final lightIcons =
+            darkMode ||
             (_section == _Section.home && !searchOpen && _heroVisible);
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: lightIcons
@@ -678,53 +744,53 @@ class _HomePageState extends State<HomePage>
       edgeOffset: context.safe.top + Gaps.sm,
       displacement: 44,
       child: CustomScrollView(
-      key: const PageStorageKey<String>('home-scroll'),
-      controller: _scroll,
-      physics: nativeScrollPhysics(context, alwaysScrollable: true),
-      scrollCacheExtent: ScrollCacheExtent.pixels(
-        MediaQuery.sizeOf(context).height,
-      ),
-      slivers: [
-        SliverToBoxAdapter(
-          child: HomeHero(
-            video: featured,
-            loading: firstLoad,
-            playLabel: resume != null ? 'Resume' : 'Play',
-            playBusy: _playingFeatured,
-            onPlay: _playFeatured,
-            onDetails: () {
-              if (featured != null) {
-                _openDetails(featured, List<Video>.of(_videos));
-              }
-            },
-          ),
+        key: const PageStorageKey<String>('home-scroll'),
+        controller: _scroll,
+        physics: nativeScrollPhysics(context, alwaysScrollable: true),
+        scrollCacheExtent: ScrollCacheExtent.pixels(
+          MediaQuery.sizeOf(context).height,
         ),
-        SliverToBoxAdapter(child: ContinueRow(onPlay: _resume)),
-        if (showCategories)
+        slivers: [
+          SliverToBoxAdapter(
+            child: HomeHero(
+              video: featured,
+              loading: firstLoad,
+              playLabel: resume != null ? 'Resume' : 'Play',
+              playBusy: _playingFeatured,
+              onPlay: _playFeatured,
+              onDetails: () {
+                if (featured != null) {
+                  _openDetails(featured, List<Video>.of(_videos));
+                }
+              },
+            ),
+          ),
+          SliverToBoxAdapter(child: ContinueRow(onPlay: _resume)),
+          if (showCategories)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: Gaps.xs),
+                child: CategoryBar(
+                  categories: _categories,
+                  selected: _category,
+                  onSelected: _changeCategory,
+                ),
+              ),
+            ),
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.only(top: Gaps.xs),
-              child: CategoryBar(
-                categories: _categories,
-                selected: _category,
-                onSelected: _changeCategory,
+              padding: EdgeInsets.fromLTRB(margin, Gaps.md, margin, Gaps.md),
+              child: Text(
+                _category == 'All' ? 'Latest videos' : _category,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.headline,
               ),
             ),
           ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(margin, Gaps.md, margin, Gaps.md),
-            child: Text(
-              _category == 'All' ? 'Latest videos' : _category,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.headline,
-            ),
-          ),
-        ),
-        ..._contentSlivers(margin),
-        SliverToBoxAdapter(child: SizedBox(height: Gaps.xl + bottomInset)),
-      ],
+          ..._contentSlivers(margin),
+          SliverToBoxAdapter(child: SizedBox(height: Gaps.xl + bottomInset)),
+        ],
       ),
     );
   }
@@ -747,7 +813,8 @@ class _HomePageState extends State<HomePage>
             message: error.message,
             actionLabel: 'Retry',
             onAction: () => _loadPage(reset: true),
-            secondaryLabel: error.offline &&
+            secondaryLabel:
+                error.offline &&
                     DownloadStore.instance.items.any(
                       (item) => item.status == DownloadStatus.done,
                     )

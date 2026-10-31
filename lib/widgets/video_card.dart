@@ -40,8 +40,9 @@ class VideoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completed = PlaybackProgress.instance.isCompleted(video.id);
-    final progress =
-        completed ? null : PlaybackProgress.instance.fraction(video.id);
+    final progress = completed
+        ? null
+        : PlaybackProgress.instance.fraction(video.id);
 
     return Pressable(
       pressedScale: 0.97,
@@ -103,7 +104,8 @@ class VideoCard extends StatelessWidget {
           ),
           const SizedBox(height: VideoCardMetrics.gapAfterThumb),
           SizedBox(
-            height: MediaQuery.textScalerOf(context)
+            height:
+                MediaQuery.textScalerOf(context)
                     .scale(VideoCardMetrics.titleSize) *
                 VideoCardMetrics.titleHeight *
                 2,
@@ -152,7 +154,9 @@ class _FavoriteButton extends StatelessWidget {
                 height: 30,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: active ? const Color(0xCC000000) : const Color(0x73000000),
+                  color: active
+                      ? const Color(0xCC000000)
+                      : const Color(0x73000000),
                 ),
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 260),
@@ -160,7 +164,9 @@ class _FavoriteButton extends StatelessWidget {
                   transitionBuilder: (child, animation) =>
                       ScaleTransition(scale: animation, child: child),
                   child: Icon(
-                    active ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                    active
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
                     key: ValueKey<bool>(active),
                     size: 20,
                     color: active ? AppColors.accent : Colors.white,

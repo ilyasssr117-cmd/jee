@@ -65,10 +65,7 @@ List<String> _parseCommaSeparated(String value) => value
 
 final ScraperConfig _scraperConfig = ScraperConfig(
   baseUrl: sourceBaseUrl,
-  homePath: const String.fromEnvironment(
-    'VIDEO_HOME_PATH',
-    defaultValue: '/',
-  ),
+  homePath: const String.fromEnvironment('VIDEO_HOME_PATH', defaultValue: '/'),
   pagePathTemplate: const String.fromEnvironment(
     'VIDEO_PAGE_PATH_TEMPLATE',
     defaultValue: '/video/{page}/',
@@ -83,8 +80,7 @@ final ScraperConfig _scraperConfig = ScraperConfig(
   ),
   cardSelector: const String.fromEnvironment(
     'VIDEO_CARD_SELECTOR',
-    defaultValue:
-        '.thumbs__list .item.thumb, .thumb-spot, article[data-video], .video-card, .video-item',
+    defaultValue: '.thumbs__list .item.thumb, .thumb-spot, article[data-video], .video-card, .video-item',
   ),
   anchorSelector: const String.fromEnvironment(
     'VIDEO_ANCHOR_SELECTOR',
@@ -96,8 +92,7 @@ final ScraperConfig _scraperConfig = ScraperConfig(
   ),
   titleSelector: const String.fromEnvironment(
     'VIDEO_TITLE_SELECTOR',
-    defaultValue:
-        '[itemprop="name"], .thumb-spot__title, .thumb__title, .video-title, .title, h2, h3',
+    defaultValue: '[itemprop="name"], .thumb-spot__title, .thumb__title, .video-title, .title, h2, h3',
   ),
   durationSelector: const String.fromEnvironment(
     'VIDEO_DURATION_SELECTOR',
@@ -138,8 +133,7 @@ final ScraperConfig _scraperConfig = ScraperConfig(
   ),
   relatedCardSelector: const String.fromEnvironment(
     'VIDEO_RELATED_CARD_SELECTOR',
-    defaultValue:
-        '.related .item.thumb, .related-videos .item.thumb, .related .video-card, .related .video-item',
+    defaultValue: '.related .item.thumb, .related-videos .item.thumb, .related .video-card, .related .video-item',
   ),
   streamUrlPattern: const String.fromEnvironment(
     'VIDEO_STREAM_URL_PATTERN',
@@ -175,6 +169,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   );
 
   static const Duration _cookieTtl = Duration(minutes: 10);
+  static const int _maxCookieEntries = 128;
+  static const int _maxCookieVisits = 16;
+  static const int _maxCookieHeaderLength = 16 * 1024;
   final Map<String, DateTime> _cookieVisits = <String, DateTime>{};
   final Map<String, Future<void>> _cookieRunning = <String, Future<void>>{};
 
@@ -191,12 +188,18 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
 
   void _ensureConfigured() {
     final uri = Uri.tryParse(scraper.config.baseUrl.trim());
-    final isHttp = uri != null &&
-        (uri.scheme == 'http' || uri.scheme == 'https') &&
-        uri.host.isNotEmpty;
-    final isPlaceholder = scraper.config.baseUrl
-        .toLowerCase()
-        .contains('your-authorized-source');
+    final host = uri?.host.toLowerCase() ?? '';
+    final isLoopback =
+        host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    final isHttp =
+        uri != null &&
+        (uri.scheme == 'https' || (isLoopback && uri.scheme == 'http')) &&
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty &&
+        uri.fragment.isEmpty;
+    final isPlaceholder = scraper.config.baseUrl.toLowerCase().contains(
+      'your-authorized-source',
+    );
 
     if (!isHttp || isPlaceholder) {
       throw const ScraperException(
@@ -273,7 +276,10 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   }
 
   @override
-  Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0}) async {
+  Future<List<AlbumPhoto>> getAlbumPhotos(
+    AlbumRef album, {
+    int chunk = 0,
+  }) async {
     _ensureConfigured();
     return scraper.albumPhotos(album, chunk: chunk);
   }
@@ -312,7 +318,8 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     final configuredUri = Uri.parse(scraper.config.baseUrl.trim());
     final configuredRoot = configuredUri.resolve('/');
     final parsedPage = Uri.tryParse(pageUrl?.trim() ?? '');
-    final validPage = parsedPage != null &&
+    final validPage =
+        parsedPage != null &&
         (parsedPage.scheme == 'http' || parsedPage.scheme == 'https') &&
         parsedPage.host.isNotEmpty &&
         _sameConfiguredSite(parsedPage.host, configuredUri.host);
@@ -336,11 +343,19 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       if (running != null) return running;
     }
     late final Future<void> task;
-    task = _fetchCookieResponse(uri, userAgent).then((ok) {
-      if (ok) _cookieVisits[key] = DateTime.now();
-    }).whenComplete(() {
-      if (identical(_cookieRunning[key], task)) _cookieRunning.remove(key);
-    });
+    task = _fetchCookieResponse(uri, userAgent)
+        .then((ok) {
+          if (ok) {
+            _cookieVisits.remove(key);
+            _cookieVisits[key] = DateTime.now();
+            while (_cookieVisits.length > _maxCookieVisits) {
+              _cookieVisits.remove(_cookieVisits.keys.first);
+            }
+          }
+        })
+        .whenComplete(() {
+          if (identical(_cookieRunning[key], task)) _cookieRunning.remove(key);
+        });
     _cookieRunning[key] = task;
     return task;
   }
@@ -364,9 +379,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
           request.headers.set(HttpHeaders.cookieHeader, existingCookies);
         }
 
-        final response = await request
-            .close()
-            .timeout(const Duration(seconds: 15));
+        final response = await request.close().timeout(
+          const Duration(seconds: 15),
+        );
 
         for (final cookie in response.cookies) {
           _storeCookie(cookie, currentUri);
@@ -379,8 +394,12 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
             redirectCount < 5) {
           await response.drain<void>().timeout(const Duration(seconds: 10));
           final nextUri = currentUri.resolve(location);
+          final configuredHost =
+              Uri.tryParse(scraper.config.baseUrl)?.host ?? '';
           if ((nextUri.scheme != 'http' && nextUri.scheme != 'https') ||
-              nextUri.host.isEmpty) {
+              (currentUri.scheme == 'https' && nextUri.scheme != 'https') ||
+              nextUri.host.isEmpty ||
+              !_sameConfiguredSite(nextUri.host, configuredHost)) {
             break;
           }
           currentUri = nextUri;
@@ -392,7 +411,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       }
       return true;
     } catch (error) {
-      debugPrint('[FLOW] Cookie response fetch failed (${error.runtimeType}).');
+      debugPrint(
+        '[VXTUBE] Cookie response fetch failed (${error.runtimeType}).',
+      );
       return false;
     } finally {
       client.close(force: true);
@@ -406,9 +427,28 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
         ? responseUri.host.toLowerCase()
         : rawDomain.replaceFirst(RegExp(r'^\.'), '');
     final responseHost = responseUri.host.toLowerCase();
+    final configuredHost =
+        Uri.tryParse(scraper.config.baseUrl)?.host.toLowerCase() ?? '';
 
+    // Never accept cookies set by an unrelated redirect host or a public-suffix
+    // parent such as "com" / "co.uk". This keeps source cookies scoped to the
+    // configured site and its own subdomains.
+    final domainIsResponseParent =
+        responseHost == domain || responseHost.endsWith('.$domain');
+    final domainIsConfiguredParent =
+        configuredHost == domain ||
+        configuredHost.endsWith('.$domain') ||
+        domain.endsWith('.$configuredHost');
+    final isBroadParent =
+        domain != configuredHost && domain.split('.').length < 3;
     if (domain.isEmpty ||
-        !(responseHost == domain || responseHost.endsWith('.$domain'))) {
+        cookie.name.isEmpty ||
+        cookie.name.length > 128 ||
+        cookie.value.length > 4096 ||
+        !_sameConfiguredSite(responseHost, configuredHost) ||
+        !domainIsResponseParent ||
+        !domainIsConfiguredParent ||
+        isBroadParent) {
       return;
     }
 
@@ -424,6 +464,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       return;
     }
 
+    _cookieJar.remove(key);
     _cookieJar[key] = _RepositoryCookie(
       name: cookie.name,
       value: cookie.value,
@@ -435,27 +476,41 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       maxAge: cookie.maxAge,
       receivedAt: now,
     );
+    while (_cookieJar.length > _maxCookieEntries) {
+      _cookieJar.remove(_cookieJar.keys.first);
+    }
   }
 
   String _cookieHeaderForUri(Uri uri) {
     final now = DateTime.now();
     _cookieJar.removeWhere((_, cookie) => cookie.isExpired(now));
-    final matching = _cookieJar.values
-        .where((cookie) => cookie.matches(uri, now))
-        .toList()
-      ..sort((a, b) => b.path.length.compareTo(a.path.length));
-    return matching.map((cookie) => '${cookie.name}=${cookie.value}').join('; ');
+    final matching =
+        _cookieJar.values.where((cookie) => cookie.matches(uri, now)).toList()
+          ..sort((a, b) => b.path.length.compareTo(a.path.length));
+    final parts = <String>[];
+    var length = 0;
+    for (final cookie in matching) {
+      final part = '${cookie.name}=${cookie.value}';
+      final separator = parts.isEmpty ? 0 : 2;
+      if (length + separator + part.length > _maxCookieHeaderLength) break;
+      parts.add(part);
+      length += separator + part.length;
+    }
+    return parts.join('; ');
   }
 
   static bool _sameConfiguredSite(String host, String configuredHost) {
-    String normalize(String value) => value.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    String normalize(String value) =>
+        value.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
     final candidate = normalize(host);
     final configured = normalize(configuredHost);
     return candidate == configured || candidate.endsWith('.$configured');
   }
 
   static String _defaultCookiePath(String requestPath) {
-    if (requestPath.isEmpty || !requestPath.startsWith('/') || requestPath == '/') {
+    if (requestPath.isEmpty ||
+        !requestPath.startsWith('/') ||
+        requestPath == '/') {
       return '/';
     }
     final lastSlash = requestPath.lastIndexOf('/');

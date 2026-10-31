@@ -33,10 +33,8 @@ class ContinueRow extends StatelessWidget {
 
         final margin = context.hMargin;
         final scaler = MediaQuery.textScalerOf(context);
-        final height = _cardWidth * 9 / 16 +
-            8 +
-            scaler.scale(13.5) * 1.25 * 2 +
-            6;
+        final height =
+            _cardWidth * 9 / 16 + 8 + scaler.scale(13.5) * 1.25 * 2 + 6;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -115,13 +113,17 @@ class _ContinueCard extends StatelessWidget {
                       child: SizedBox(
                         height: 3,
                         child: DecoratedBox(
-                          decoration: const BoxDecoration(color: Color(0x80000000)),
+                          decoration: const BoxDecoration(
+                            color: Color(0x80000000),
+                          ),
                           child: Align(
                             alignment: Alignment.centerLeft,
                             child: FractionallySizedBox(
                               widthFactor: fraction.clamp(0.0, 1.0).toDouble(),
                               child: const DecoratedBox(
-                                decoration: BoxDecoration(color: AppColors.accent),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent,
+                                ),
                                 child: SizedBox.expand(),
                               ),
                             ),

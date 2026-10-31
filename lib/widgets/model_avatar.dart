@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -25,11 +27,30 @@ class ModelAvatar extends StatefulWidget {
 class _ModelAvatarState extends State<ModelAvatar> {
   static const int _lastAttempt = 2;
   int _attempt = 0;
+  Timer? _retryTimer;
 
   @override
   void didUpdateWidget(ModelAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) _attempt = 0;
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+      _attempt = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _retryTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleRetry() {
+    if (_attempt >= _lastAttempt || _retryTimer != null) return;
+    _retryTimer = Timer(Duration(milliseconds: 800 * (_attempt + 1)), () {
+      _retryTimer = null;
+      if (mounted) setState(() => _attempt++);
+    });
   }
 
   Map<String, String>? get _headers {
@@ -73,14 +94,9 @@ class _ModelAvatarState extends State<ModelAvatar> {
             cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
             headers: _headers,
             errorBuilder: (context, error, stackTrace) {
-              debugPrint(
-                '[AVATAR] attempt $_attempt failed (${error.runtimeType}) for $url',
-              );
-              if (_attempt < _lastAttempt) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) setState(() => _attempt++);
-                });
-              }
+              // Retry slowly on unstable connections, without exposing signed
+              // image URLs or tokens in debug logs.
+              _scheduleRetry();
               return placeholder;
             },
             loadingBuilder: (context, child, progress) =>

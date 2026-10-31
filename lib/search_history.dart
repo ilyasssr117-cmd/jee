@@ -9,6 +9,7 @@ class SearchHistory extends ChangeNotifier {
 
   static const String _key = 'recent_searches_v1';
   static const int maxItems = 4;
+  static const int _maxQueryLength = 160;
 
   final List<String> _items = <String>[];
 
@@ -20,17 +21,27 @@ class SearchHistory extends ChangeNotifier {
   void load() {
     _items
       ..clear()
-      ..addAll(LocalStore.readList(_key).take(maxItems));
+      ..addAll(
+        LocalStore.readList(_key)
+            .take(maxItems * 6)
+            .where((value) => value.trim().isNotEmpty)
+            .map(normalize)
+            .where((value) => value.length <= _maxQueryLength)
+            .take(maxItems),
+      );
   }
 
   void add(String query) {
     final value = normalize(query);
     if (value.isEmpty) return;
-    final lower = value.toLowerCase();
-    if (_items.isNotEmpty && _items.first == value) return;
+    final bounded = value.length > _maxQueryLength
+        ? value.substring(0, _maxQueryLength)
+        : value;
+    final lower = bounded.toLowerCase();
+    if (_items.isNotEmpty && _items.first == bounded) return;
     _items
       ..removeWhere((item) => item.toLowerCase() == lower)
-      ..insert(0, value);
+      ..insert(0, bounded);
     if (_items.length > maxItems) _items.removeRange(maxItems, _items.length);
     _persist();
     notifyListeners();

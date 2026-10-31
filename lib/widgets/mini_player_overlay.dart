@@ -59,14 +59,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: AppColors.palette.brightness == Brightness.dark
-                          ? const [
-                              Color(0xE52B3341),
-                              Color(0xD2181D28),
-                            ]
-                          : const [
-                              Color(0xF4FFFFFF),
-                              Color(0xE8E8EDF5),
-                            ],
+                          ? const [Color(0xE52B3341), Color(0xD2181D28)]
+                          : const [Color(0xF4FFFFFF), Color(0xE8E8EDF5)],
                     ),
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(
@@ -104,13 +98,20 @@ class MiniPlayerOverlay extends StatelessWidget {
                                         color: Colors.black,
                                         child: Center(
                                           child: AspectRatio(
-                                            aspectRatio: session.controller.value
+                                            aspectRatio:
+                                                session
+                                                        .controller
+                                                        .value
                                                         .aspectRatio >
                                                     0
-                                                ? session.controller.value
-                                                    .aspectRatio
+                                                ? session
+                                                      .controller
+                                                      .value
+                                                      .aspectRatio
                                                 : 16 / 9,
-                                            child: VideoPlayer(session.controller),
+                                            child: VideoPlayer(
+                                              session.controller,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -119,7 +120,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                                   const SizedBox(width: 11),
                                   Expanded(
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
@@ -148,7 +150,9 @@ class MiniPlayerOverlay extends StatelessWidget {
                                   ValueListenableBuilder<VideoPlayerValue>(
                                     valueListenable: session.controller,
                                     builder: (context, value, _) => _MiniAction(
-                                      tooltip: value.isPlaying ? 'Pause' : 'Play',
+                                      tooltip: value.isPlaying
+                                          ? 'Pause'
+                                          : 'Play',
                                       icon: value.isPlaying
                                           ? CupertinoIcons.pause_fill
                                           : CupertinoIcons.play_fill,
@@ -160,9 +164,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                                   _MiniAction(
                                     tooltip: 'Close',
                                     icon: CupertinoIcons.xmark,
-                                    onPressed: () => unawaited(
-                                      MiniPlayer.instance.close(),
-                                    ),
+                                    onPressed: () =>
+                                        unawaited(MiniPlayer.instance.close()),
                                     muted: true,
                                   ),
                                 ],
@@ -183,8 +186,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                               final progress = duration <= 0
                                   ? 0.0
                                   : (value.position.inMilliseconds / duration)
-                                      .clamp(0.0, 1.0)
-                                      .toDouble();
+                                        .clamp(0.0, 1.0)
+                                        .toDouble();
                               return ClipRRect(
                                 borderRadius: BorderRadius.circular(99),
                                 child: SizedBox(

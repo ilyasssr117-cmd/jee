@@ -73,11 +73,7 @@ class AppButton extends StatelessWidget {
             if (loading)
               CupertinoActivityIndicator(radius: 8, color: foreground)
             else if (icon != null)
-              Icon(
-                icon,
-                size: 20,
-                color: iconColor ?? foreground,
-              ),
+              Icon(icon, size: 20, color: iconColor ?? foreground),
             if (loading || icon != null) const SizedBox(width: 6),
             Flexible(
               child: Text(

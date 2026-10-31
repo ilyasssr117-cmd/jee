@@ -19,7 +19,8 @@ const String kBrowserUserAgent =
 
 Map<String, String> streamHeaders(Uri streamUri, String? pageUrl) {
   final pageUri = Uri.tryParse(pageUrl?.trim() ?? '');
-  final hasPage = pageUri != null &&
+  final hasPage =
+      pageUri != null &&
       (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
       pageUri.host.isNotEmpty;
   final origin = hasPage ? pageUri.origin : streamUri.origin;

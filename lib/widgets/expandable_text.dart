@@ -51,7 +51,8 @@ class _ExpandableTextState extends State<ExpandableText> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final canExpand = constraints.maxWidth.isFinite &&
+        final canExpand =
+            constraints.maxWidth.isFinite &&
             _overflows(context, constraints.maxWidth);
 
         Widget text = Text(
@@ -79,7 +80,8 @@ class _ExpandableTextState extends State<ExpandableText> {
           return text;
         }
 
-        final toggle = widget.toggleStyle ??
+        final toggle =
+            widget.toggleStyle ??
             widget.style.copyWith(
               fontSize: (widget.style.fontSize ?? 14) - 1,
               fontWeight: FontWeight.w700,

@@ -20,7 +20,8 @@ Future<PlaybackSource> resolvePlaybackSource(
 }) async {
   var headers = streamHeaders(streamUri, pageUrl);
   final page = Uri.tryParse(pageUrl?.trim() ?? '');
-  final validPage = page != null &&
+  final validPage =
+      page != null &&
       (page.scheme == 'http' || page.scheme == 'https') &&
       page.host.isNotEmpty;
   try {
@@ -42,6 +43,17 @@ Future<PlaybackSource> resolvePlaybackSource(
   final finalUri = preserveUrl
       ? streamUri
       : await resolveFinalStreamUri(streamUri, headers, refresh: refresh);
+  if (finalUri.origin != streamUri.origin) {
+    headers = <String, String>{...headers}
+      ..removeWhere(
+        (name, _) => const <String>{
+          'cookie',
+          'authorization',
+          'proxy-authorization',
+          'referer',
+        }.contains(name.toLowerCase()),
+      );
+  }
   return PlaybackSource(finalUri.toString(), headers);
 }
 

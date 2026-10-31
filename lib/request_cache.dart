@@ -85,22 +85,19 @@ class _Entry<V> {
   final DateTime expires;
 }
 
-final TtlCache<List<Video>> listingCache =
-    TtlCache<List<Video>>(
+final TtlCache<List<Video>> listingCache = TtlCache<List<Video>>(
   ttl: const Duration(minutes: 4),
   maxEntries: 60,
   cacheable: (videos) => videos.isNotEmpty,
 );
 
-final TtlCache<List<Video>> relatedCache =
-    TtlCache<List<Video>>(
+final TtlCache<List<Video>> relatedCache = TtlCache<List<Video>>(
   ttl: const Duration(minutes: 15),
   maxEntries: 30,
   cacheable: (videos) => videos.isNotEmpty,
 );
 
-final TtlCache<List<ModelRef>> modelsCache =
-    TtlCache<List<ModelRef>>(
+final TtlCache<List<ModelRef>> modelsCache = TtlCache<List<ModelRef>>(
   ttl: const Duration(minutes: 30),
   maxEntries: 60,
   cacheable: (models) => models.isNotEmpty,
@@ -118,8 +115,10 @@ final TtlCache<List<AlbumRef>> albumsCache = TtlCache<List<AlbumRef>>(
   cacheable: (albums) => albums.isNotEmpty,
 );
 
-final TtlCache<ModelProfile> profileCache =
-    TtlCache<ModelProfile>(ttl: const Duration(hours: 6), maxEntries: 120);
+final TtlCache<ModelProfile> profileCache = TtlCache<ModelProfile>(
+  ttl: const Duration(hours: 6),
+  maxEntries: 120,
+);
 
 void clearRequestCaches() {
   profileCache.clear();

@@ -85,7 +85,10 @@ class _LibraryViewState extends State<LibraryView> {
                   listenable: HistoryStore.instance,
                   builder: (context, _) => HistoryStore.instance.items.isEmpty
                       ? const SizedBox.shrink()
-                      : _TextAction(label: 'Clear', onTap: _confirmClearHistory),
+                      : _TextAction(
+                          label: 'Clear',
+                          onTap: _confirmClearHistory,
+                        ),
                 ),
             ],
           ),
@@ -117,13 +120,13 @@ class _LibraryViewState extends State<LibraryView> {
                 LibrarySegment.history => _buildHistory(margin),
                 LibrarySegment.downloads => _buildDownloads(margin),
                 LibrarySegment.models => FavoriteModelsView(
-                    onBrowse: widget.onBrowse,
-                    bottomInset: widget.bottomInset,
-                  ),
+                  onBrowse: widget.onBrowse,
+                  bottomInset: widget.bottomInset,
+                ),
                 LibrarySegment.albums => SavedAlbumsView(
-                    onBrowse: widget.onBrowse,
-                    bottomInset: widget.bottomInset,
-                  ),
+                  onBrowse: widget.onBrowse,
+                  bottomInset: widget.bottomInset,
+                ),
               },
             ),
           ),
@@ -196,8 +199,18 @@ class _LibraryViewState extends State<LibraryView> {
   }
 
   static const List<String> _months = <String>[
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   static String _when(DateTime time) {
@@ -238,8 +251,8 @@ class _LibraryViewState extends State<LibraryView> {
           final status = completed
               ? 'Watched'
               : (fraction != null
-                  ? '${(fraction * 100).round()}% watched'
-                  : video.duration);
+                    ? '${(fraction * 100).round()}% watched'
+                    : video.duration);
           rows.add(
             Dismissible(
               key: ValueKey<String>('history-${video.id}'),
@@ -485,8 +498,9 @@ class _VideoRow extends StatelessWidget {
                           child: SizedBox(
                             height: 3,
                             child: DecoratedBox(
-                              decoration:
-                                  const BoxDecoration(color: Color(0x80000000)),
+                              decoration: const BoxDecoration(
+                                color: Color(0x80000000),
+                              ),
                               child: Align(
                                 alignment: Alignment.centerLeft,
                                 child: FractionallySizedBox(
@@ -592,8 +606,8 @@ class _DownloadRow extends StatelessWidget {
             title: video.title,
             subtitle: paused
                 ? (item.hasPartial
-                    ? 'Paused \u00b7 ${_amount(item, done)}'
-                    : 'Paused')
+                      ? 'Paused \u00b7 ${_amount(item, done)}'
+                      : 'Paused')
                 : (item.error ?? 'Download failed'),
             subtitleColor: paused ? null : AppColors.error,
             below: item.hasPartial ? _bar(item, waiting: false) : null,
@@ -617,8 +631,8 @@ class _DownloadRow extends StatelessWidget {
             final text = waiting
                 ? 'Waiting\u2026'
                 : (fraction != null
-                    ? '${(fraction * 100).round()}% \u00b7 ${_amount(item, done)}'
-                    : 'Downloading \u00b7 ${formatBytes(done)}');
+                      ? '${(fraction * 100).round()}% \u00b7 ${_amount(item, done)}'
+                      : 'Downloading \u00b7 ${formatBytes(done)}');
             return _VideoRow(
               video: video,
               title: video.title,

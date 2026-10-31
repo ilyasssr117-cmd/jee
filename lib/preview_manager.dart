@@ -31,8 +31,9 @@ class PreviewManager {
   static const Duration _maxPlay = Duration(seconds: 30);
   static const Duration _initTimeout = Duration(seconds: 12);
 
-  final ValueNotifier<PreviewSession?> session =
-      ValueNotifier<PreviewSession?>(null);
+  final ValueNotifier<PreviewSession?> session = ValueNotifier<PreviewSession?>(
+    null,
+  );
 
   final ValueNotifier<String?> active = ValueNotifier<String?>(null);
 
@@ -92,10 +93,25 @@ class PreviewManager {
   Future<void> _start(Video video, int generation) async {
     if (generation != _generation) return;
     try {
+      // Wait for any previous preview decoder to finish its native teardown.
+      // This prevents overlapping AVPlayer allocations during fast browsing.
+      await _pendingTeardown;
+      final previousInitialization = _initializing;
+      if (previousInitialization != null) {
+        try {
+          await previousInitialization.timeout(
+            _initTimeout + const Duration(seconds: 2),
+          );
+        } catch (_) {}
+      }
+      await _disposing;
+      if (generation != _generation) return;
       final wantSound = AppSettings.instance.previewSound;
       final clip = video.previewUrl.trim();
 
-      if (!wantSound && clip.isNotEmpty && await _play(video, clip, generation)) {
+      if (!wantSound &&
+          clip.isNotEmpty &&
+          await _play(video, clip, generation)) {
         return;
       }
       if (generation != _generation) return;
@@ -104,8 +120,9 @@ class PreviewManager {
       if (url == clip) url = '';
       var pageUrl = video.pageUrl;
       if (url.isEmpty) {
-        final resolved = await videoRepository
-            .resolveForPlayback(video.copyWith(streamUrl: ''));
+        final resolved = await videoRepository.resolveForPlayback(
+          video.copyWith(streamUrl: ''),
+        );
         url = resolved.streamUrl.trim();
         pageUrl = resolved.pageUrl ?? pageUrl;
       }
@@ -118,7 +135,7 @@ class PreviewManager {
 
       if (wantSound && clip.isNotEmpty) await _play(video, clip, generation);
     } catch (error) {
-      debugPrint('[PREVIEW] ${video.id}: $error');
+      debugPrint('[PREVIEW] ${video.id}: ${error.runtimeType}');
     } finally {
       if (generation == _generation) {
         loading.value = false;
@@ -195,7 +212,7 @@ class PreviewManager {
       });
       return true;
     } catch (error) {
-      debugPrint('[PREVIEW] ${video.id} $url: $error');
+      debugPrint('[PREVIEW] ${video.id}: ${error.runtimeType}');
       _initializing = null;
       if (controller != null && !identical(_live, controller)) {
         unawaited(_scheduleDispose(controller));
@@ -213,10 +230,7 @@ class PreviewManager {
     );
   }
 
-  Future<void> _runTeardown(
-    VideoPlayerController controller,
-    bool fade,
-  ) async {
+  Future<void> _runTeardown(VideoPlayerController controller, bool fade) async {
     final current = session.value;
     if (fade && current != null && identical(current.controller, controller)) {
       session.value = current.faded();
@@ -242,8 +256,7 @@ class PreviewManager {
     } catch (_) {}
     try {
       await controller.dispose().timeout(const Duration(seconds: 5));
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 }
 

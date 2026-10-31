@@ -36,17 +36,14 @@ class SliverVideoGrid extends StatelessWidget {
               mainAxisSpacing: Gaps.lg,
               mainAxisExtent: VideoCardMetrics.height(context, cardWidth),
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final video = videos[index];
-                return VideoCard(
-                  key: ValueKey<String>(video.id),
-                  video: video,
-                  onTap: () => onOpen(video),
-                );
-              },
-              childCount: videos.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final video = videos[index];
+              return VideoCard(
+                key: ValueKey<String>(video.id),
+                video: video,
+                onTap: () => onOpen(video),
+              );
+            }, childCount: videos.length),
           ),
         );
       },

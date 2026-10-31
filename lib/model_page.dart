@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'album_page.dart';
 import 'app_theme.dart';
 import 'favorite_models_store.dart';
+import 'offline_listing_cache.dart';
+import 'offline_album_cache.dart';
 import 'error_text.dart';
 import 'models.dart';
 import 'video_details_page.dart';
@@ -37,10 +39,14 @@ class _ModelPageState extends State<ModelPage> {
 
   _Mode _mode = _Mode.videos;
 
+  final ScrollController _scrollController = ScrollController();
+
   final List<AlbumRef> _albums = <AlbumRef>[];
   final Set<String> _albumSeen = <String>{};
   int _albumNext = 1;
   bool _albumsLoading = true;
+  bool _albumsRequestActive = false;
+  bool _albumsFinishedLoading = false;
   Object? _albumsError;
   int _albumRun = 0;
 
@@ -52,6 +58,7 @@ class _ModelPageState extends State<ModelPage> {
   ModelProfile? _profile;
   int _nextPage = 1;
   bool _loading = true;
+  bool _videosFinishedLoading = false;
   Object? _error;
 
   int _run = 0;
@@ -59,6 +66,7 @@ class _ModelPageState extends State<ModelPage> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _loadAll();
     _loadAlbums();
   }
@@ -67,28 +75,53 @@ class _ModelPageState extends State<ModelPage> {
   void dispose() {
     _run++;
     _albumRun++;
-    _soloLoader?.dispose();
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    _soloLoader
+      ?..removeListener(_onSoloLoaderChanged)
+      ..dispose();
     _selection.dispose();
     super.dispose();
   }
 
   Future<void> _loadAlbums() async {
+    if (!mounted ||
+        _albumsRequestActive ||
+        _albumsFinishedLoading ||
+        _albumNext > _maxAlbumPages) {
+      return;
+    }
     final run = ++_albumRun;
-    while (mounted && run == _albumRun && _albumNext <= _maxAlbumPages) {
-      final page = _albumNext;
-      final List<AlbumRef> result;
-      try {
-        result = await videoRepository.getModelAlbums(widget.model, page: page);
-      } catch (error) {
-        if (!mounted || run != _albumRun) return;
-        setState(() {
-          _albumsLoading = false;
-          _albumsError = error;
-        });
-        return;
-      }
-      if (!mounted || run != _albumRun) return;
+    final page = _albumNext;
+    _albumsRequestActive = true;
+    if (!_albumsLoading || _albumsError != null) {
+      setState(() {
+        _albumsLoading = true;
+        _albumsError = null;
+      });
+    }
 
+    final cacheKey = _offlineAlbumKey(page);
+    final cached = OfflineAlbumCache.read(cacheKey);
+    if (cached != null && cached.isNotEmpty && mounted && run == _albumRun) {
+      setState(() {
+        for (final album in cached) {
+          if (_albumSeen.add(album.id)) _albums.add(album);
+        }
+        _albumsError = null;
+        _albumsLoading = true;
+      });
+      _scheduleLoadIfViewportIsShort();
+    }
+
+    try {
+      final result = await videoRepository.getModelAlbums(
+        widget.model,
+        page: page,
+      );
+      if (!mounted || run != _albumRun) return;
+      OfflineAlbumCache.write(cacheKey, result);
       var added = 0;
       for (final album in result) {
         if (_albumSeen.add(album.id)) {
@@ -96,19 +129,26 @@ class _ModelPageState extends State<ModelPage> {
           added++;
         }
       }
+      final finished =
+          result.isEmpty ||
+          (added == 0 && cached == null) ||
+          page >= _maxAlbumPages;
       setState(() {
         _albumNext = page + 1;
-        if (added == 0) _albumsLoading = false;
+        _albumsLoading = false;
+        _albumsFinishedLoading = finished;
+        _albumsError = null;
       });
-      if (added == 0) {
-        _albumsFinished();
-        return;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    if (mounted && run == _albumRun) {
-      setState(() => _albumsLoading = false);
-      _albumsFinished();
+      if (finished) _albumsFinished();
+      _scheduleLoadIfViewportIsShort();
+    } catch (error) {
+      if (!mounted || run != _albumRun) return;
+      setState(() {
+        _albumsLoading = false;
+        _albumsError = error;
+      });
+    } finally {
+      if (run == _albumRun) _albumsRequestActive = false;
     }
   }
 
@@ -118,16 +158,16 @@ class _ModelPageState extends State<ModelPage> {
       setState(() => _mode = _Mode.videos);
     }
     if (_albums.length == 1 && _soloLoader == null) {
-      _soloLoader = AlbumLoader(_albums.first);
+      _soloLoader = AlbumLoader(_albums.first)
+        ..addListener(_onSoloLoaderChanged);
       if (_mode == _Mode.photos) _soloLoader!.load();
     }
   }
 
+  void _onSoloLoaderChanged() => _scheduleLoadIfViewportIsShort();
+
   void _retryAlbums() {
-    setState(() {
-      _albumsLoading = true;
-      _albumsError = null;
-    });
+    if (_albumsRequestActive || _albumsFinishedLoading) return;
     _loadAlbums();
   }
 
@@ -135,6 +175,7 @@ class _ModelPageState extends State<ModelPage> {
     if (mode == _mode) return;
     setState(() => _mode = mode);
     if (mode == _Mode.photos) {
+      _loadAlbums();
       _soloLoader?.load();
     } else {
       _selection.clear();
@@ -152,23 +193,57 @@ class _ModelPageState extends State<ModelPage> {
 
   bool get _hasPhotos => _albums.isNotEmpty || _albumsError != null;
 
-  Future<void> _loadAll() async {
-    final run = ++_run;
-    while (mounted && run == _run && _nextPage <= _maxPages) {
-      final page = _nextPage;
-      final ModelPageResult result;
-      try {
-        result = await videoRepository.getModelPage(widget.model, page: page);
-      } catch (error) {
-        if (!mounted || run != _run) return;
-        setState(() {
-          _loading = false;
-          _error = error;
-        });
-        return;
-      }
-      if (!mounted || run != _run) return;
+  String _offlineKey(int page) {
+    var hash = 0x811c9dc5;
+    for (final unit in widget.model.url.codeUnits) {
+      hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
+    }
+    return 'model_${hash.toRadixString(16)}_$page';
+  }
 
+  String _offlineAlbumKey(int page) {
+    var hash = 0x811c9dc5;
+    for (final unit in widget.model.url.codeUnits) {
+      hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
+    }
+    return 'model_albums_${hash.toRadixString(16)}_$page';
+  }
+
+  Future<void> _loadAll() async {
+    if (!mounted || _loading == false && _videosFinishedLoading) return;
+    if (_runInFlight) return;
+    final run = ++_run;
+    final page = _nextPage;
+    _runInFlight = true;
+    if (!_loading || _error != null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
+    final cacheKey = _offlineKey(page);
+    final cached = OfflineListingCache.read(cacheKey);
+    if (cached != null && cached.isNotEmpty) {
+      var cachedAdded = 0;
+      for (final video in cached) {
+        if (_seen.add(video.id)) {
+          _videos.add(video);
+          cachedAdded++;
+        }
+      }
+      if (cachedAdded > 0 && mounted && run == _run) {
+        setState(() => _error = null);
+        _scheduleLoadIfViewportIsShort();
+      }
+    }
+
+    try {
+      final result = await videoRepository.getModelPage(
+        widget.model,
+        page: page,
+      );
+      if (!mounted || run != _run) return;
       var added = 0;
       for (final video in result.videos) {
         if (_seen.add(video.id)) {
@@ -176,27 +251,73 @@ class _ModelPageState extends State<ModelPage> {
           added++;
         }
       }
-      final last = added == 0;
+      OfflineListingCache.write(cacheKey, result.videos);
       if (result.profile?.imageUrl != null) {
-        FavoriteModelsStore.instance
-            .updateImage(widget.model.url, result.profile!.imageUrl);
+        FavoriteModelsStore.instance.updateImage(
+          widget.model.url,
+          result.profile!.imageUrl,
+        );
       }
+      final finished =
+          result.videos.isEmpty ||
+          (added == 0 && cached == null) ||
+          page >= _maxPages;
       setState(() {
         _profile ??= result.profile;
         _nextPage = page + 1;
-        if (last) _loading = false;
+        _loading = false;
+        _videosFinishedLoading = finished;
+        _error = null;
       });
-      if (last) return;
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      _scheduleLoadIfViewportIsShort();
+    } catch (error) {
+      if (!mounted || run != _run) return;
+      setState(() {
+        _loading = false;
+        _error = error;
+      });
+    } finally {
+      if (run == _run) _runInFlight = false;
     }
-    if (mounted && run == _run) setState(() => _loading = false);
+  }
+
+  bool _runInFlight = false;
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.extentAfter < 700) {
+      _loadNextForVisibleMode();
+    }
+  }
+
+  void _loadNextForVisibleMode() {
+    if (_mode == _Mode.videos) {
+      if (!_loading && !_videosFinishedLoading && _error == null) {
+        _loadAll();
+      }
+      return;
+    }
+    if (_soloLoader != null) {
+      final loader = _soloLoader!;
+      if (!loader.loading && !loader.finished && loader.error == null) {
+        loader.load();
+      }
+    } else if (!_albumsLoading &&
+        !_albumsFinishedLoading &&
+        _albumsError == null) {
+      _loadAlbums();
+    }
+  }
+
+  void _scheduleLoadIfViewportIsShort() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _onScroll();
+    });
   }
 
   void _retry() {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (_runInFlight || _videosFinishedLoading) return;
     _loadAll();
   }
 
@@ -241,90 +362,104 @@ class _ModelPageState extends State<ModelPage> {
           child: child!,
         ),
         child: Scaffold(
-        backgroundColor: AppColors.background,
-        body: Stack(
-          children: [
-        CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(child: _buildHeader(margin, name)),
-            if (_mode == _Mode.photos)
-              ..._photoSlivers(margin)
-            else ...[
-            if (firstLoad)
-                SliverSkeletonGrid(
-                  count: 4,
-                  padding: EdgeInsets.symmetric(horizontal: margin),
-                )
-              else if (failedEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: StatusView(
-                    icon: describeError(_error!).icon,
-                    title: describeError(_error!).title,
-                    message: describeError(_error!).message,
-                    actionLabel: 'Retry',
-                    onAction: _retry,
-                  ),
-                )
-              else if (finishedEmpty)
-                const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: StatusView(
-                    icon: Icons.video_library_outlined,
-                    title: 'No videos found',
-                    message: 'This model has no videos yet.',
-                  ),
-                )
-              else
-                SliverVideoGrid(
-                  videos: _videos,
-                  padding: EdgeInsets.symmetric(horizontal: margin),
-                  onOpen: _openVideo,
-                ),
-              if (_error != null && _videos.isNotEmpty)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: margin,
-                      vertical: Gaps.lg,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Couldn\u2019t load the rest of the videos.',
-                            style: AppText.body,
+          backgroundColor: AppColors.background,
+          body: Stack(
+            children: [
+              CustomScrollView(
+                controller: _scrollController,
+                slivers: [
+                  SliverToBoxAdapter(child: _buildHeader(margin, name)),
+                  if (_mode == _Mode.photos)
+                    ..._photoSlivers(margin)
+                  else ...[
+                    if (firstLoad)
+                      SliverSkeletonGrid(
+                        count: 4,
+                        padding: EdgeInsets.symmetric(horizontal: margin),
+                      )
+                    else if (failedEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: StatusView(
+                          icon: describeError(_error!).icon,
+                          title: describeError(_error!).title,
+                          message: describeError(_error!).message,
+                          actionLabel: 'Retry',
+                          onAction: _retry,
+                        ),
+                      )
+                    else if (finishedEmpty)
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: StatusView(
+                          icon: Icons.video_library_outlined,
+                          title: 'No videos found',
+                          message: 'This model has no videos yet.',
+                        ),
+                      )
+                    else
+                      SliverVideoGrid(
+                        videos: _videos,
+                        padding: EdgeInsets.symmetric(horizontal: margin),
+                        onOpen: _openVideo,
+                      ),
+                    if (_error != null && _videos.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: margin,
+                            vertical: Gaps.lg,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Couldn\u2019t load the rest of the videos.',
+                                  style: AppText.body,
+                                ),
+                              ),
+                              AppButton(
+                                label: 'Retry',
+                                icon: Icons.refresh_rounded,
+                                style: AppButtonStyle.secondary,
+                                onPressed: _retry,
+                              ),
+                            ],
                           ),
                         ),
-                        AppButton(
-                          label: 'Retry',
-                          icon: Icons.refresh_rounded,
-                          style: AppButtonStyle.secondary,
-                          onPressed: _retry,
+                      ),
+                    if (_loading && _videos.isNotEmpty)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: Gaps.lg),
+                          child: Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                  ],
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: Gaps.xl + context.safe.bottom),
+                  ),
+                ],
+              ),
+              if (_soloLoader != null && _mode == _Mode.photos)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: PhotoSelectionBar(
+                    loader: _soloLoader!,
+                    selection: _selection,
+                    modelName: widget.model.name,
                   ),
                 ),
             ],
-            SliverToBoxAdapter(
-              child: SizedBox(height: Gaps.xl + context.safe.bottom),
-            ),
-          ],
-        ),
-            if (_soloLoader != null && _mode == _Mode.photos)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: PhotoSelectionBar(
-                  loader: _soloLoader!,
-                  selection: _selection,
-                  modelName: widget.model.name,
-                ),
-              ),
-          ],
-        ),
+          ),
         ),
       ),
     );
@@ -456,6 +591,19 @@ class _ModelPageState extends State<ModelPage> {
             ),
           ),
         ),
+      if (_albumsLoading && _albums.isNotEmpty)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: Gaps.lg),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        ),
     ];
   }
 
@@ -513,11 +661,13 @@ class _ModelPageState extends State<ModelPage> {
                     haptic: Haptic.medium,
                     pressedScale: 0.85,
                     onTap: () {
-                      favorites.toggle(ModelRef(
-                        name: name,
-                        url: widget.model.url,
-                        imageUrl: _profile?.imageUrl ?? widget.model.imageUrl,
-                      ));
+                      favorites.toggle(
+                        ModelRef(
+                          name: name,
+                          url: widget.model.url,
+                          imageUrl: _profile?.imageUrl ?? widget.model.imageUrl,
+                        ),
+                      );
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(10),

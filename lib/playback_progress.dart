@@ -26,7 +26,7 @@ class PlaybackProgress {
   bool _observing = false;
 
   void save(String id, Duration position, Duration duration) {
-    if (duration <= Duration.zero) return;
+    if (id.isEmpty || id.length > 512 || duration <= Duration.zero) return;
     if (position < _minimumResume) return;
     if (position >= duration - _finishedMargin) {
       if (_entries.remove(id) != null) _schedulePersist();
@@ -57,24 +57,37 @@ class PlaybackProgress {
   void load() {
     _completed
       ..clear()
-      ..addAll(LocalStore.readList(_completedKey));
+      ..addAll(
+        LocalStore.readList(_completedKey)
+            .where((id) => id.isNotEmpty && id.length <= 512)
+            .take(_maxCompleted),
+      );
 
     _entries.clear();
-    for (final raw in LocalStore.readList(_progressKey)) {
+    for (final raw in LocalStore.readList(_progressKey).take(_maxEntries * 3)) {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is! List || decoded.length != 3) continue;
         final id = decoded[0];
         final position = decoded[1];
         final duration = decoded[2];
-        if (id is! String || position is! int || duration is! int) continue;
-        if (duration <= 0 || position <= 0) continue;
+        if (id is! String ||
+            id.isEmpty ||
+            id.length > 512 ||
+            position is! int ||
+            duration is! int) {
+          continue;
+        }
+        if (duration <= 0 ||
+            position <= 0 ||
+            position > duration + const Duration(hours: 1).inMilliseconds) {
+          continue;
+        }
         _entries[id] = _Entry(
           Duration(milliseconds: position),
           Duration(milliseconds: duration),
         );
-      } catch (_) {
-      }
+      } catch (_) {}
     }
     while (_entries.length > _maxEntries) {
       _entries.remove(_entries.keys.first);
@@ -99,17 +112,14 @@ class PlaybackProgress {
     });
   }
 
-  void _persistProgress() => LocalStore.writeList(
-        _progressKey,
-        <String>[
-          for (final entry in _entries.entries)
-            jsonEncode(<Object>[
-              entry.key,
-              entry.value.position.inMilliseconds,
-              entry.value.duration.inMilliseconds,
-            ]),
-        ],
-      );
+  void _persistProgress() => LocalStore.writeList(_progressKey, <String>[
+    for (final entry in _entries.entries)
+      jsonEncode(<Object>[
+        entry.key,
+        entry.value.position.inMilliseconds,
+        entry.value.duration.inMilliseconds,
+      ]),
+  ]);
 
   void clearAll() {
     _entries.clear();
@@ -121,6 +131,7 @@ class PlaybackProgress {
   bool isCompleted(String id) => _completed.contains(id);
 
   void markCompleted(String id) {
+    if (id.isEmpty || id.length > 512) return;
     if (_entries.remove(id) != null) _schedulePersist();
     _completed
       ..remove(id)

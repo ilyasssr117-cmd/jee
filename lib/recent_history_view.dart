@@ -35,16 +35,19 @@ class _RecentHistoryViewState extends State<RecentHistoryView> {
       listenable: RecentVideosStore.instance,
       builder: (context, _) {
         final all = RecentVideosStore.instance.items;
-        final videos = all.where((video) {
-          switch (_filter) {
-            case _HistoryFilter.all:
-              return true;
-            case _HistoryFilter.inProgress:
-              return PlaybackProgress.instance.resumePosition(video.id) != null;
-            case _HistoryFilter.watched:
-              return PlaybackProgress.instance.isCompleted(video.id);
-          }
-        }).toList(growable: false);
+        final videos = all
+            .where((video) {
+              switch (_filter) {
+                case _HistoryFilter.all:
+                  return true;
+                case _HistoryFilter.inProgress:
+                  return PlaybackProgress.instance.resumePosition(video.id) !=
+                      null;
+                case _HistoryFilter.watched:
+                  return PlaybackProgress.instance.isCompleted(video.id);
+              }
+            })
+            .toList(growable: false);
 
         return CustomScrollView(
           key: const PageStorageKey<String>('recent-history-scroll'),
@@ -88,7 +91,10 @@ class _RecentHistoryViewState extends State<RecentHistoryView> {
                 child: SegmentedButton<_HistoryFilter>(
                   showSelectedIcon: false,
                   segments: const [
-                    ButtonSegment(value: _HistoryFilter.all, label: Text('All')),
+                    ButtonSegment(
+                      value: _HistoryFilter.all,
+                      label: Text('All'),
+                    ),
                     ButtonSegment(
                       value: _HistoryFilter.inProgress,
                       label: Text('Continue'),
@@ -116,8 +122,8 @@ class _RecentHistoryViewState extends State<RecentHistoryView> {
                     title: all.isEmpty
                         ? 'Nothing played yet'
                         : _filter == _HistoryFilter.watched
-                            ? 'No watched videos yet'
-                            : 'Nothing to continue',
+                        ? 'No watched videos yet'
+                        : 'Nothing to continue',
                     message: all.isEmpty
                         ? 'Videos you play will appear here, ready to pick up again.'
                         : 'Try another filter to see your recent videos.',

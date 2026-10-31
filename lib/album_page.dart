@@ -19,53 +19,72 @@ import 'widgets/state_views.dart';
 class AlbumLoader extends ChangeNotifier {
   AlbumLoader(this.album);
 
-  static const int _maxChunks = 400;
+  static const int _maxChunks = 120;
+  static const int _maxPhotos = 1200;
 
   final AlbumRef album;
   final List<AlbumPhoto> photos = <AlbumPhoto>[];
   final Set<String> _seen = <String>{};
   bool loading = false;
   bool finished = false;
+  bool limitReached = false;
   Object? error;
 
   int _next = 0;
   int _stale = 0;
   int _run = 0;
   bool _disposed = false;
-  Completer<void> _done = Completer<void>();
+  Future<void>? _loadFuture;
 
   Map<String, String>? get imageHeaders => imageHeadersFor(album.url);
 
-  Future<void> get done => _done.future;
+  /// Fetches one chunk only. UI scrolling decides when another chunk is needed.
+  Future<void> load() {
+    if (_disposed || finished) return Future<void>.value();
+    final current = _loadFuture;
+    if (current != null) return current;
 
-  void _complete() {
-    if (!_done.isCompleted) _done.complete();
+    late final Future<void> future;
+    future = _loadChunk().whenComplete(() {
+      if (identical(_loadFuture, future)) _loadFuture = null;
+    });
+    _loadFuture = future;
+    return future;
   }
 
-  Future<void> load() async {
-    if (loading || finished || _disposed) return;
+  /// Used only for explicit full-album actions such as Save All.
+  Future<void> loadAll() async {
+    while (!_disposed && !finished) {
+      final active = _loadFuture;
+      if (active != null) {
+        await active;
+      } else {
+        await load();
+      }
+      if (error != null || _disposed) return;
+      if (!finished) {
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+    }
+  }
+
+  Future<void> _loadChunk() async {
+    if (_disposed || finished || loading) return;
     final run = ++_run;
     loading = true;
     error = null;
-    if (_done.isCompleted) _done = Completer<void>();
     notifyListeners();
 
-    while (!_disposed && run == _run && _next <= _maxChunks) {
-      final List<AlbumPhoto> chunk;
-      try {
-        chunk = await videoRepository.getAlbumPhotos(album, chunk: _next);
-      } catch (e) {
-        if (_disposed || run != _run) return;
-        loading = false;
-        error = e;
-        _complete();
-        notifyListeners();
-        return;
-      }
+    try {
+      final chunk = await videoRepository.getAlbumPhotos(album, chunk: _next);
       if (_disposed || run != _run) return;
 
       var added = 0;
       for (final photo in chunk) {
+        if (photos.length >= _maxPhotos) {
+          limitReached = true;
+          break;
+        }
         if (_seen.add(photo.id)) {
           photos.add(photo);
           added++;
@@ -73,35 +92,36 @@ class AlbumLoader extends ChangeNotifier {
       }
       _next++;
       _stale = added == 0 ? _stale + 1 : 0;
-      if (chunk.isEmpty || _stale >= 3) {
-        loading = false;
+      if (chunk.isEmpty ||
+          _stale >= 3 ||
+          limitReached ||
+          photos.length >= _maxPhotos ||
+          _next > _maxChunks) {
         finished = true;
-        _complete();
-        notifyListeners();
-        return;
       }
-      notifyListeners();
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    if (!_disposed && run == _run) {
-      loading = false;
-      finished = true;
-      _complete();
-      notifyListeners();
+    } catch (e) {
+      if (_disposed || run != _run) return;
+      error = e;
+    } finally {
+      if (!_disposed && run == _run) {
+        loading = false;
+        notifyListeners();
+      }
     }
   }
 
   String get countLabel {
     final n = photos.length;
     final base = '$n photo${n == 1 ? '' : 's'}';
-    return loading ? '$base \u00b7 loading\u2026' : base;
+    if (loading) return '$base · loading…';
+    if (limitReached) return '$base · display limit reached';
+    return base;
   }
 
   @override
   void dispose() {
     _disposed = true;
     _run++;
-    _complete();
     super.dispose();
   }
 }
@@ -150,9 +170,8 @@ Future<void> savePhotosToAlbums(
   }
 
   if (only == null && !loader.finished) {
-    showToast(context, 'Loading the whole album first\u2026', aboveBar: false);
-    unawaited(loader.load());
-    await loader.done;
+    showToast(context, 'Preparing the whole album…', aboveBar: false);
+    await loader.loadAll();
     if (!context.mounted) return;
     if (loader.error != null) {
       showToast(context, 'Couldn\u2019t load all the photos.', aboveBar: false);
@@ -249,15 +268,40 @@ class AlbumPage extends StatefulWidget {
 class _AlbumPageState extends State<AlbumPage> {
   late final AlbumLoader _loader = AlbumLoader(widget.album);
   final PhotoSelection _selection = PhotoSelection();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
+    _loader.addListener(_onLoaderChanged);
     _loader.load();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients ||
+        _loader.loading ||
+        _loader.finished ||
+        _loader.error != null) {
+      return;
+    }
+    if (_scrollController.position.extentAfter < 700) {
+      unawaited(_loader.load());
+    }
+  }
+
+  void _onLoaderChanged() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _onScroll();
+    });
   }
 
   @override
   void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    _loader.removeListener(_onLoaderChanged);
     _selection.dispose();
     _loader.dispose();
     super.dispose();
@@ -283,6 +327,7 @@ class _AlbumPageState extends State<AlbumPage> {
           body: Stack(
             children: [
               CustomScrollView(
+                controller: _scrollController,
                 slivers: [
                   SliverToBoxAdapter(
                     child: Padding(
@@ -330,9 +375,7 @@ class _AlbumPageState extends State<AlbumPage> {
                     padding: EdgeInsets.symmetric(horizontal: margin),
                   ),
                   SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: Gaps.xl + context.safe.bottom + 72,
-                    ),
+                    child: SizedBox(height: Gaps.xl + context.safe.bottom + 72),
                   ),
                 ],
               ),
@@ -374,7 +417,8 @@ class AlbumToolbar extends StatelessWidget {
       builder: (context, _) {
         final job = store.jobFor(loader.album.id);
         final photos = loader.photos;
-        final allSaved = loader.finished &&
+        final allSaved =
+            loader.finished &&
             photos.isNotEmpty &&
             store.savedCount(loader.album.id, photos) == photos.length;
 
@@ -389,18 +433,15 @@ class AlbumToolbar extends StatelessWidget {
           downloadLabel = 'Saved in Albums';
           downloadIcon = Icons.download_done_rounded;
           downloadAction = () => showToast(
-                context,
-                'Find it in Library > Albums.',
-                aboveBar: false,
-              );
+            context,
+            'Find it in Library > Albums.',
+            aboveBar: false,
+          );
         } else {
           downloadLabel = 'Download all';
           downloadIcon = Icons.download_rounded;
-          downloadAction = () => savePhotosToAlbums(
-                context,
-                loader,
-                modelName: modelName,
-              );
+          downloadAction = () =>
+              savePhotosToAlbums(context, loader, modelName: modelName);
         }
 
         return Wrap(
@@ -449,7 +490,8 @@ class PhotoSelectionBar extends StatelessWidget {
         final count = selection.ids.length;
         return SelectionBarFrame(
           count: count,
-          onSelectAll: () => selection.selectAll(loader.photos.map((p) => p.id)),
+          onSelectAll: () =>
+              selection.selectAll(loader.photos.map((p) => p.id)),
           actions: [
             Expanded(
               child: AppButton(
@@ -458,8 +500,11 @@ class PhotoSelectionBar extends StatelessWidget {
                 expand: true,
                 onPressed: () async {
                   if (count == 0) {
-                    showToast(context, 'Tap photos to select them.',
-                        aboveBar: false);
+                    showToast(
+                      context,
+                      'Tap photos to select them.',
+                      aboveBar: false,
+                    );
                     return;
                   }
                   final chosen = [
@@ -530,7 +575,10 @@ class SelectionBarFrame extends StatelessWidget {
                 haptic: Haptic.selection,
                 onTap: onSelectAll,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 4,
+                  ),
                   child: Text(
                     'Select all',
                     style: AppText.caption.copyWith(
@@ -613,9 +661,8 @@ class PhotoGridSliver extends StatelessWidget {
             sliver: SliverGrid(
               gridDelegate: _gridDelegate,
               delegate: SliverChildBuilderDelegate(
-                (context, index) => const SkeletonPulse(
-                  child: SkeletonBlock(radius: 6),
-                ),
+                (context, index) =>
+                    const SkeletonPulse(child: SkeletonBlock(radius: 6)),
                 childCount: 12,
               ),
             ),
@@ -629,32 +676,29 @@ class PhotoGridSliver extends StatelessWidget {
               padding: padding,
               sliver: SliverGrid(
                 gridDelegate: _gridDelegate,
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final photo = photos[index];
-                    return _PhotoTile(
-                      key: ValueKey<String>(photo.id),
-                      image: NetworkImage(
-                        photo.thumbUrl,
-                        headers: loader.imageHeaders,
-                      ),
-                      selecting: selecting,
-                      selected: selection?.ids.contains(photo.id) ?? false,
-                      saved: store.isSaved(loader.album.id, photo.id),
-                      onTap: () {
-                        if (selecting) {
-                          selection!.toggle(photo.id);
-                        } else {
-                          _openViewer(context, index);
-                        }
-                      },
-                      onLongPress: selection == null || selecting
-                          ? null
-                          : () => selection!.start(photo.id),
-                    );
-                  },
-                  childCount: photos.length,
-                ),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final photo = photos[index];
+                  return _PhotoTile(
+                    key: ValueKey<String>(photo.id),
+                    image: NetworkImage(
+                      photo.thumbUrl,
+                      headers: loader.imageHeaders,
+                    ),
+                    selecting: selecting,
+                    selected: selection?.ids.contains(photo.id) ?? false,
+                    saved: store.isSaved(loader.album.id, photo.id),
+                    onTap: () {
+                      if (selecting) {
+                        selection!.toggle(photo.id);
+                      } else {
+                        _openViewer(context, index);
+                      }
+                    },
+                    onLongPress: selection == null || selecting
+                        ? null
+                        : () => selection!.start(photo.id),
+                  );
+                }, childCount: photos.length),
               ),
             ),
             if (loader.error != null)
@@ -676,6 +720,19 @@ class PhotoGridSliver extends StatelessWidget {
                         onPressed: loader.load,
                       ),
                     ],
+                  ),
+                ),
+              ),
+            if (loader.loading)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: Gaps.lg),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   ),
                 ),
               ),
@@ -710,11 +767,11 @@ class PhotoGridSliver extends StatelessWidget {
 
   static const SliverGridDelegate _gridDelegate =
       SliverGridDelegateWithFixedCrossAxisCount(
-    crossAxisCount: 3,
-    crossAxisSpacing: 4,
-    mainAxisSpacing: 4,
-    childAspectRatio: 3 / 4,
-  );
+        crossAxisCount: 3,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+        childAspectRatio: 3 / 4,
+      );
 }
 
 class AlbumCard extends StatelessWidget {
@@ -834,8 +891,7 @@ class _PhotoTile extends StatelessWidget {
                 ),
               ),
             ),
-            if (selected)
-              const ColoredBox(color: Color(0x55F04452)),
+            if (selected) const ColoredBox(color: Color(0x55F04452)),
             if (selecting)
               Positioned(
                 top: 6,
@@ -845,21 +901,22 @@ class _PhotoTile extends StatelessWidget {
                   height: 24,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: selected ? AppColors.accent : const Color(0x66000000),
+                    color: selected
+                        ? AppColors.accent
+                        : const Color(0x66000000),
                     border: Border.all(color: Colors.white, width: 2),
                   ),
                   child: selected
-                      ? const Icon(Icons.check_rounded,
-                          size: 20, color: Colors.white)
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 20,
+                          color: Colors.white,
+                        )
                       : null,
                 ),
               )
             else if (saved)
-              const Positioned(
-                right: 6,
-                bottom: 6,
-                child: _SavedBadge(),
-              ),
+              const Positioned(right: 6, bottom: 6, child: _SavedBadge()),
           ],
         ),
       ),
@@ -879,8 +936,11 @@ class _SavedBadge extends StatelessWidget {
         shape: BoxShape.circle,
         color: Color(0xCC1FA971),
       ),
-      child: const Icon(Icons.download_done_rounded,
-          size: 20, color: Colors.white),
+      child: const Icon(
+        Icons.download_done_rounded,
+        size: 20,
+        color: Colors.white,
+      ),
     );
   }
 }
@@ -902,9 +962,8 @@ class ViewerItem {
 }
 
 void openPhotoViewer(BuildContext context, PhotoViewerPage page) {
-  Navigator.of(context).push<void>(
-    adaptivePageRoute<void>(context, builder: (_) => page),
-  );
+  Navigator.of(context)
+      .push<void>(adaptivePageRoute<void>(context, builder: (_) => page));
 }
 
 class PhotoViewerPage extends StatefulWidget {
@@ -931,8 +990,9 @@ class PhotoViewerPage extends StatefulWidget {
 }
 
 class _PhotoViewerPageState extends State<PhotoViewerPage> {
-  late final PageController _pages =
-      PageController(initialPage: widget.initialIndex);
+  late final PageController _pages = PageController(
+    initialPage: widget.initialIndex,
+  );
   late int _index = widget.initialIndex;
   bool _zoomed = false;
   bool _busy = false;
@@ -952,11 +1012,9 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
 
     final store = PhotoStore.instance;
     if (!store.isSaved(album.id, remote.id)) {
-      await store.savePhotos(
-        album,
-        <AlbumPhoto>[remote],
-        modelName: widget.modelName,
-      );
+      await store.savePhotos(album, <AlbumPhoto>[
+        remote,
+      ], modelName: widget.modelName);
     }
     final saved = store.album(album.id);
     final photo = saved?.photos.where((p) => p.id == remote.id).firstOrNull;
@@ -974,11 +1032,9 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
       return;
     }
     setState(() => _busy = true);
-    final saved = await store.savePhotos(
-      album,
-      <AlbumPhoto>[remote],
-      modelName: widget.modelName,
-    );
+    final saved = await store.savePhotos(album, <AlbumPhoto>[
+      remote,
+    ], modelName: widget.modelName);
     if (!mounted) return;
     setState(() => _busy = false);
     showToast(
@@ -1008,16 +1064,18 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body: ListenableBuilder(
-          listenable: Listenable.merge(
-            <Listenable>[widget.listenable, PhotoStore.instance],
-          ),
+          listenable: Listenable.merge(<Listenable>[
+            widget.listenable,
+            PhotoStore.instance,
+          ]),
           builder: (context, _) {
             final items = widget.items();
             final current = items.isEmpty
                 ? null
                 : items[_index.clamp(0, items.length - 1)];
             final album = widget.album;
-            final isSaved = current?.localPath != null ||
+            final isSaved =
+                current?.localPath != null ||
                 (current?.remote != null &&
                     album != null &&
                     PhotoStore.instance.isSaved(album.id, current!.remote!.id));
@@ -1150,10 +1208,22 @@ class _ZoomablePhotoState extends State<_ZoomablePhoto> {
     const scale = 2.5;
     final p = _doubleTapAt;
     _controller.value = Matrix4(
-      scale, 0, 0, 0,
-      0, scale, 0, 0,
-      0, 0, 1, 0,
-      -p.dx * (scale - 1), -p.dy * (scale - 1), 0, 1,
+      scale,
+      0,
+      0,
+      0,
+      0,
+      scale,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      -p.dx * (scale - 1),
+      -p.dy * (scale - 1),
+      0,
+      1,
     );
   }
 

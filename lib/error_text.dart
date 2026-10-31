@@ -35,7 +35,8 @@ FriendlyError describeError(Object error, {String subject = 'videos'}) {
     if (code != null) {
       return FriendlyError(
         title: 'Unable to load $subject',
-        message: 'The video source returned an error ($code). '
+        message:
+            'The video source returned an error ($code). '
             'Please try again in a moment.',
         icon: Icons.cloud_off_rounded,
       );

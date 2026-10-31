@@ -2,9 +2,9 @@ import 'package:flutter/services.dart';
 
 Future<void> applyBrowseOrientation() async {
   try {
-    await SystemChrome.setPreferredOrientations(
-      const [DeviceOrientation.portraitUp],
-    );
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+    ]);
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   } catch (_) {}
 }

@@ -80,19 +80,42 @@ Future<({Uri uri, bool ok})> _probe(
 ) async {
   final client = http.Client();
   var current = uri;
+  final requestHeaders = <String, String>{...headers};
   try {
     for (var hop = 0; hop < maxHops; hop++) {
       final request = http.Request('GET', current)
         ..followRedirects = false
-        ..headers.addAll(<String, String>{...headers, 'Range': 'bytes=0-0'});
+        ..headers.addAll(<String, String>{
+          ...requestHeaders,
+          'Range': 'bytes=0-0',
+        });
       final response = await client.send(request).timeout(timeout);
       final location = response.headers['location'];
       if (response.isRedirect && location != null && location.isNotEmpty) {
         await response.stream.drain<void>().timeout(
-              const Duration(seconds: 3),
-              onTimeout: () {},
-            );
-        current = current.resolve(location);
+          const Duration(seconds: 3),
+          onTimeout: () {},
+        );
+        final next = current.resolve(location);
+        if ((next.scheme != 'http' && next.scheme != 'https') ||
+            (current.scheme == 'https' && next.scheme != 'https') ||
+            next.host.isEmpty ||
+            next.userInfo.isNotEmpty) {
+          return (uri: uri, ok: false);
+        }
+        if (next.origin != current.origin) {
+          // After leaving the initial origin, never reattach its credentials
+          // later in a redirect chain.
+          requestHeaders.removeWhere(
+            (name, _) => const <String>{
+              'cookie',
+              'authorization',
+              'proxy-authorization',
+              'referer',
+            }.contains(name.toLowerCase()),
+          );
+        }
+        current = next;
         continue;
       }
       final status = response.statusCode;

@@ -34,7 +34,12 @@ class FavoriteModelsView extends StatelessWidget {
           );
         }
         return ListView.builder(
-          padding: EdgeInsets.fromLTRB(margin, Gaps.sm, margin, Gaps.xl + bottomInset),
+          padding: EdgeInsets.fromLTRB(
+            margin,
+            Gaps.sm,
+            margin,
+            Gaps.xl + bottomInset,
+          ),
           itemCount: models.length,
           itemBuilder: (context, index) => ModelRow(
             key: ValueKey<String>(models[index].url),

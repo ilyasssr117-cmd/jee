@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import '../app_theme.dart';
 import '../error_text.dart';
 import '../models.dart';
+import '../offline_listing_cache.dart';
 import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
@@ -262,6 +263,12 @@ class SearchOverlayState extends State<SearchOverlay> {
     if (_loading && !reset) return;
     final generation = reset ? ++_generation : _generation;
 
+    final searchText = _query;
+    final sort = _sort;
+    final pageIndex = reset ? 0 : _page;
+    final cacheKey =
+        'search|${searchText.toLowerCase()}|${sort.name}|$pageIndex';
+
     setState(() {
       _loading = true;
       _error = null;
@@ -273,19 +280,40 @@ class SearchOverlayState extends State<SearchOverlay> {
       }
     });
 
+    final offline = reset ? OfflineListingCache.read(cacheKey) : null;
+    if (offline != null) {
+      setState(() {
+        _videos
+          ..clear()
+          ..addAll(offline);
+        _page = 1;
+        _emptyPages = 0;
+        _hasMore = offline.isNotEmpty;
+        _loading = true;
+      });
+      unawaited(
+        _revalidateOfflineSearch(
+          key: cacheKey,
+          query: searchText,
+          sort: sort,
+          generation: generation,
+        ),
+      );
+      return;
+    }
+
     try {
-      final searchText = _query;
-      final pageIndex = _page;
       final result = await listingCache.fetch(
-        'search|${searchText.toLowerCase()}|${_sort.name}|$pageIndex',
+        cacheKey,
         () => videoRepository.searchVideos(
           query: searchText,
           page: pageIndex,
           pageSize: _pageSize,
-          sortBy: _sort.param,
+          sortBy: sort.param,
         ),
       );
       if (!mounted || generation != _generation) return;
+      OfflineListingCache.write(cacheKey, result);
 
       final seen = _videos.map((video) => video.id).toSet();
       final fresh = <Video>[];
@@ -314,6 +342,32 @@ class SearchOverlayState extends State<SearchOverlay> {
         _hasMore = false;
         _error = describeError(error, subject: 'search results');
       });
+    }
+  }
+
+  Future<void> _revalidateOfflineSearch({
+    required String key,
+    required String query,
+    required SearchSort sort,
+    required int generation,
+  }) async {
+    try {
+      final result = await listingCache.fetch(
+        key,
+        () => videoRepository.searchVideos(
+          query: query,
+          page: 0,
+          pageSize: _pageSize,
+          sortBy: sort.param,
+        ),
+        force: true,
+      );
+      OfflineListingCache.write(key, result);
+    } catch (_) {
+      // Keep the cached search results visible while offline.
+    } finally {
+      if (!mounted || generation != _generation) return;
+      setState(() => _loading = false);
     }
   }
 
@@ -416,8 +470,9 @@ class SearchOverlayState extends State<SearchOverlay> {
                             fontWeight: FontWeight.w400,
                             color: AppColors.textTertiary,
                           ),
-                          contentPadding:
-                              const EdgeInsets.symmetric(vertical: 10),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                          ),
                         ),
                       ),
                     ),
@@ -549,7 +604,8 @@ class SearchOverlayState extends State<SearchOverlay> {
       return const StatusView(
         icon: Icons.search_off_rounded,
         title: 'No models found',
-        message: 'Try the exact model name, for example \u201cPlaywithanny\u201d.',
+        message:
+            'Try the exact model name, for example \u201cPlaywithanny\u201d.',
       );
     }
 
@@ -609,13 +665,18 @@ class SearchOverlayState extends State<SearchOverlay> {
     final suggestions = typed.isEmpty
         ? const <String>[]
         : SearchHistory.instance.items
-            .where((term) => term.toLowerCase().startsWith(typed) &&
-                term.toLowerCase() != typed)
-            .take(5)
-            .toList();
+              .where(
+                (term) =>
+                    term.toLowerCase().startsWith(typed) &&
+                    term.toLowerCase() != typed,
+              )
+              .take(5)
+              .toList();
 
     final List<Widget> slivers;
-    if (waiting && _videos.isEmpty && (suggestions.isNotEmpty || typed.length < _minLength)) {
+    if (waiting &&
+        _videos.isEmpty &&
+        (suggestions.isNotEmpty || typed.length < _minLength)) {
       slivers = [
         SliverList(
           delegate: SliverChildListDelegate([
@@ -630,7 +691,10 @@ class SearchOverlayState extends State<SearchOverlay> {
               ),
             if (suggestions.isEmpty)
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: margin, vertical: Gaps.xl),
+                padding: EdgeInsets.symmetric(
+                  horizontal: margin,
+                  vertical: Gaps.xl,
+                ),
                 child: Text(
                   'Keep typing\u2026 (at least $_minLength letters)',
                   style: AppText.body,

@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:watch_tube/widgets/expandable_text.dart';
+import 'package:vxtube_final/widgets/expandable_text.dart';
 
 Widget _host(String text) => MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: SizedBox(
-            width: 200,
-            child: ExpandableText(
-              text,
-              collapsedLines: 2,
-              style: const TextStyle(fontSize: 16),
-            ),
-          ),
+  home: Scaffold(
+    body: Center(
+      child: SizedBox(
+        width: 200,
+        child: ExpandableText(
+          text,
+          collapsedLines: 2,
+          style: const TextStyle(fontSize: 16),
         ),
       ),
-    );
+    ),
+  ),
+);
 
 void main() {
   testWidgets('short title shows no more/less toggle', (tester) async {

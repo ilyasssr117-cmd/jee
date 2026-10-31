@@ -57,7 +57,8 @@ void showToast(BuildContext context, String message, {bool aboveBar = true}) {
       : context.safe.bottom + Gaps.lg;
 
   final entry = OverlayEntry(
-    builder: (_) => _ToastView(message: message, bottom: bottom, showFor: showFor),
+    builder: (_) =>
+        _ToastView(message: message, bottom: bottom, showFor: showFor),
   );
   overlay.insert(entry);
   _toastEntry = entry;

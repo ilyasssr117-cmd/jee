@@ -16,7 +16,7 @@ class GallerySaveResult {
 }
 
 abstract final class PhotoSaver {
-  static const String albumName = 'Flow';
+  static const String albumName = 'VXTUBEFinal';
 
   static Future<GallerySaveResult> saveToGallery(List<String> paths) =>
       _save(paths, video: false);

@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io' show HttpDate;
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart' as dom;
@@ -16,12 +18,10 @@ class ScraperConfig {
     this.pagePathTemplate = '/video/{page}/',
     this.searchPathTemplate = '/search/{query}/{page}/',
     this.categoryPathTemplate = '/categories/{slug}/{page}/',
-    this.cardSelector =
-        '.thumbs__list .item.thumb, .thumb-spot, article[data-video], .video-card, .video-item',
+    this.cardSelector = '.thumbs__list .item.thumb, .thumb-spot, article[data-video], .video-card, .video-item',
     this.anchorSelector = 'a[href]',
     this.imageSelector = 'img',
-    this.titleSelector =
-        '[itemprop="name"], .thumb-spot__title, .thumb__title, .video-title, .title, h2, h3',
+    this.titleSelector = '[itemprop="name"], .thumb-spot__title, .thumb__title, .video-title, .title, h2, h3',
     this.durationSelector = '.duration, [data-duration]',
     this.viewsSelector = '.views, [data-views]',
     this.durationIconSelector = '.icon-duration',
@@ -34,8 +34,7 @@ class ScraperConfig {
     this.videoPathPattern = r'/video/',
     this.excludePathPattern =
         r'/albums?/|/galleries/|/gallery/|/photos?/|/pictures?/',
-    this.relatedCardSelector =
-        '.related .item.thumb, .related-videos .item.thumb, .related .video-card, .related .video-item',
+    this.relatedCardSelector = '.related .item.thumb, .related-videos .item.thumb, .related .video-card, .related .video-item',
     this.streamUrlPattern =
         r'''(?:video_url|file|src)\s*[:=]\s*["']([^"']+)["']''',
     this.detailTitlePattern =
@@ -46,7 +45,7 @@ class ScraperConfig {
         'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
         'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
         'Mobile/15E148 Safari/604.1',
-    this.timeout = const Duration(seconds: 20),
+    this.timeout = const Duration(seconds: 28),
     this.categories = const <String>[],
   });
 
@@ -123,10 +122,17 @@ class ScraperConfig {
 }
 
 class ScraperException implements Exception {
-  const ScraperException(this.message, {this.statusCode});
+  const ScraperException(
+    this.message, {
+    this.statusCode,
+    this.retryable = false,
+    this.retryAfter,
+  });
 
   final String message;
   final int? statusCode;
+  final bool retryable;
+  final Duration? retryAfter;
 
   @override
   String toString() => message;
@@ -134,17 +140,17 @@ class ScraperException implements Exception {
 
 class Scraper {
   Scraper(this.config, {http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   final ScraperConfig config;
   final http.Client _client;
 
   Map<String, String> get _headers => {
-        'User-Agent': config.userAgent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': '${config.baseUri}/',
-      };
+    'User-Agent': config.userAgent,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': '${config.baseUri}/',
+  };
 
   final TtlCache<String> _detailPages = TtlCache<String>(
     ttl: const Duration(seconds: 90),
@@ -155,50 +161,173 @@ class Scraper {
       _detailPages.fetch(uri.toString(), () => _get(uri), force: fresh);
 
   Future<String> _get(Uri uri, {Map<String, String>? extraHeaders}) async {
+    if (!_isAllowedCatalogUri(uri)) {
+      throw const ScraperException('The source returned an unsafe page link.');
+    }
+
     ScraperException? lastError;
-    for (var attempt = 0; attempt < 2; attempt++) {
+    const maxAttempts = 3;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         return await _getOnce(uri, extraHeaders);
       } on ScraperException catch (error) {
         final status = error.statusCode;
-        if (status != null && status < 500) {
-          rethrow;
-        }
+        final transient =
+            error.retryable ||
+            status == 408 ||
+            status == 425 ||
+            status == 429 ||
+            (status != null && status >= 500 && status <= 599);
+        if (!transient || attempt == maxAttempts - 1) rethrow;
         lastError = error;
-      }
-      if (attempt == 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 700));
+        final requestedDelay = error.retryAfter;
+        final backoff = Duration(milliseconds: 450 * (1 << attempt));
+        final delay = requestedDelay == null
+            ? backoff
+            : (requestedDelay > const Duration(seconds: 6)
+                  ? const Duration(seconds: 6)
+                  : requestedDelay);
+        // Respect Retry-After while keeping a strict upper bound on waits.
+        await Future<void>.delayed(delay);
       }
     }
     throw lastError ?? const ScraperException('The source could not be read.');
   }
 
+  Duration? _retryAfter(String? value) {
+    if (value == null || value.trim().isEmpty) return null;
+    final seconds = int.tryParse(value.trim());
+    if (seconds != null && seconds >= 0) {
+      return Duration(seconds: seconds.clamp(0, 6).toInt());
+    }
+    final date =
+        DateTime.tryParse(value.trim()) ??
+        (() {
+          try {
+            return HttpDate.parse(value.trim());
+          } catch (_) {
+            return null;
+          }
+        })();
+    if (date == null) return null;
+    final remaining = date.difference(DateTime.now());
+    if (remaining.isNegative) return Duration.zero;
+    return remaining > const Duration(seconds: 6)
+        ? const Duration(seconds: 6)
+        : remaining;
+  }
+
+  bool _isAllowedCatalogUri(Uri uri) {
+    final base = config.baseUri;
+    if ((uri.scheme != 'http' && uri.scheme != 'https') ||
+        (base.scheme == 'https' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty) {
+      return false;
+    }
+    String normalize(String host) =>
+        host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final host = normalize(uri.host);
+    final source = normalize(base.host);
+    if (source.isEmpty) return false;
+    return host == source || host.endsWith('.$source');
+  }
+
   Future<String> _getOnce(Uri uri, Map<String, String>? extraHeaders) async {
     try {
-      final response = await _client
-          .get(uri, headers: <String, String>{..._headers, ...?extraHeaders})
-          .timeout(config.timeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw ScraperException(
-          'Source request failed with HTTP ${response.statusCode}.',
-          statusCode: response.statusCode,
-        );
+      var current = uri;
+      final requestHeaders = <String, String>{..._headers, ...?extraHeaders};
+      const redirectCodes = <int>{301, 302, 303, 307, 308};
+      const maxRedirects = 5;
+      const maxPageBytes = 8 * 1024 * 1024;
+
+      for (var hop = 0; hop <= maxRedirects; hop++) {
+        final request = http.Request('GET', current)
+          ..followRedirects = false
+          ..headers.addAll(requestHeaders);
+        final response = await _client.send(request).timeout(config.timeout);
+
+        final location = response.headers['location'];
+        if (redirectCodes.contains(response.statusCode) &&
+            location != null &&
+            location.isNotEmpty) {
+          await response.stream.drain<void>().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
+          final next = current.resolve(location);
+          if (!_isAllowedCatalogUri(next)) {
+            throw const ScraperException(
+              'The source redirected to an untrusted page.',
+            );
+          }
+          if (next.origin != current.origin) {
+            requestHeaders.removeWhere(
+              (name, _) => const <String>{
+                'cookie',
+                'authorization',
+                'proxy-authorization',
+                'referer',
+              }.contains(name.toLowerCase()),
+            );
+          }
+          current = next;
+          continue;
+        }
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          await response.stream.drain<void>().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
+          throw ScraperException(
+            'Source request failed with HTTP ${response.statusCode}.',
+            statusCode: response.statusCode,
+            retryAfter: _retryAfter(response.headers['retry-after']),
+          );
+        }
+        if (response.contentLength != null &&
+            response.contentLength! > maxPageBytes) {
+          await response.stream.drain<void>().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
+          throw const ScraperException('The source page is too large.');
+        }
+
+        final bodyBuilder = BytesBuilder(copy: false);
+        var received = 0;
+        await for (final chunk in response.stream.timeout(config.timeout)) {
+          received += chunk.length;
+          if (received > maxPageBytes) {
+            throw const ScraperException('The source page is too large.');
+          }
+          bodyBuilder.add(chunk);
+        }
+        final bodyBytes = bodyBuilder.takeBytes();
+        final contentType =
+            response.headers['content-type']?.toLowerCase() ?? '';
+        final declaresOther =
+            contentType.contains('charset') && !contentType.contains('utf-8');
+        final body = declaresOther
+            ? String.fromCharCodes(bodyBytes)
+            : utf8.decode(bodyBytes, allowMalformed: true);
+        if (body.trim().isEmpty) {
+          throw const ScraperException('The source returned an empty page.');
+        }
+        return body;
       }
-      final contentType = response.headers['content-type']?.toLowerCase() ?? '';
-      final declaresOther =
-          contentType.contains('charset') && !contentType.contains('utf-8');
-      final body = declaresOther
-          ? response.body
-          : utf8.decode(response.bodyBytes, allowMalformed: true);
-      if (body.trim().isEmpty) {
-        throw const ScraperException('The source returned an empty page.');
-      }
-      return body;
+      throw const ScraperException('The source redirected too many times.');
     } on ScraperException {
       rethrow;
     } on Exception catch (error) {
-      debugPrint('[SCRAPER] Request failed for ${uri.origin} (${error.runtimeType}).');
-      throw const ScraperException('Could not reach the video source.');
+      debugPrint(
+        '[SCRAPER] Request failed for ${uri.origin} (${error.runtimeType}).',
+      );
+      throw const ScraperException(
+        'Could not reach the video source.',
+        retryable: true,
+      );
     }
   }
 
@@ -210,10 +339,9 @@ class Scraper {
     if (query.trim().isEmpty) return Future.value(const <Video>[]);
     var uri = config.searchUri(query, page);
     if (sortBy != null && sortBy.isNotEmpty) {
-      uri = uri.replace(queryParameters: <String, String>{
-        ...uri.queryParameters,
-        'by': sortBy,
-      });
+      uri = uri.replace(
+        queryParameters: <String, String>{...uri.queryParameters, 'by': sortBy},
+      );
     }
     return list(uri);
   }
@@ -247,7 +375,9 @@ class Scraper {
         }
         videos.add(video);
       } catch (error) {
-        debugPrint('[SCRAPER] Skipped an invalid video card: $error');
+        debugPrint(
+          '[SCRAPER] Skipped an invalid video card (${error.runtimeType}).',
+        );
       }
     }
     return videos;
@@ -258,10 +388,14 @@ class Scraper {
     if (segments.length < 2 || segments.first.toLowerCase() != 'models') {
       return null;
     }
-    return uri.replace(
+    // Construct a fresh URI rather than replacing query/fragment with empty
+    // strings (which serializes as a spurious trailing ?#).
+    return Uri(
+      scheme: uri.scheme,
+      userInfo: uri.userInfo,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
       path: '/models/${segments[1]}/',
-      query: '',
-      fragment: '',
     );
   }
 
@@ -297,7 +431,9 @@ class Scraper {
 
   Future<ModelPageResult> modelPage(ModelRef model, {int page = 1}) async {
     final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
-    final uri = page <= 1 ? base.resolve('videos/') : base.resolve('videos/$page/');
+    final uri = page <= 1
+        ? base.resolve('videos/')
+        : base.resolve('videos/$page/');
 
     final String body;
     try {
@@ -330,7 +466,9 @@ class Scraper {
 
   Future<List<AlbumRef>> modelAlbums(ModelRef model, {int page = 1}) async {
     final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
-    final uri = page <= 1 ? base.resolve('albums/') : base.resolve('albums/$page/');
+    final uri = page <= 1
+        ? base.resolve('albums/')
+        : base.resolve('albums/$page/');
 
     final String body;
     try {
@@ -357,7 +495,11 @@ class Scraper {
     return _albumsFrom(html.parse(body), uri);
   }
 
-  List<AlbumRef> _albumsFrom(dom.Document document, Uri uri, {String? modelName}) {
+  List<AlbumRef> _albumsFrom(
+    dom.Document document,
+    Uri uri, {
+    String? modelName,
+  }) {
     var cards = document.querySelectorAll('.thumb--albums');
     if (cards.isEmpty) {
       cards = document
@@ -369,7 +511,9 @@ class Scraper {
     final albums = <AlbumRef>[];
     final seen = <String>{};
     for (final card in cards) {
-      final anchor = card.localName == 'a' ? card : card.querySelector('a[href]');
+      final anchor = card.localName == 'a'
+          ? card
+          : card.querySelector('a[href]');
       final target = _resolveHttp(anchor?.attributes['href'], uri);
       if (anchor == null || target == null) continue;
       final segments = target.pathSegments.where((s) => s.isNotEmpty).toList();
@@ -390,13 +534,15 @@ class Scraper {
       if (title.isEmpty) {
         title = segments.last.replaceAll(RegExp(r'[-_]+'), ' ').trim();
       }
-      albums.add(AlbumRef(
-        id: id,
-        title: title,
-        url: target.toString(),
-        thumbnailUrl: _absoluteUrl(_imageSource(image), uri),
-        modelName: modelName,
-      ));
+      albums.add(
+        AlbumRef(
+          id: id,
+          title: title,
+          url: target.toString(),
+          thumbnailUrl: _absoluteUrl(_imageSource(image), uri),
+          modelName: modelName,
+        ),
+      );
     }
     return albums;
   }
@@ -408,14 +554,16 @@ class Scraper {
     if (chunk <= 0) {
       uri = base;
     } else {
-      uri = base.replace(queryParameters: <String, String>{
-        ...base.queryParameters,
-        'mode': 'async',
-        'function': 'get_block',
-        'block_id': 'album_view_album_view',
-        'load': 'more',
-        'from': '$chunk',
-      });
+      uri = base.replace(
+        queryParameters: <String, String>{
+          ...base.queryParameters,
+          'mode': 'async',
+          'function': 'get_block',
+          'block_id': 'album_view_album_view',
+          'load': 'more',
+          'from': '$chunk',
+        },
+      );
       extra = <String, String>{
         'X-Requested-With': 'XMLHttpRequest',
         'Referer': album.url,
@@ -463,7 +611,11 @@ class Scraper {
     return match?.group(1) ?? path;
   }
 
-  ModelProfile _modelProfile(dom.Document document, Uri pageUri, ModelRef model) {
+  ModelProfile _modelProfile(
+    dom.Document document,
+    Uri pageUri,
+    ModelRef model,
+  ) {
     String? name;
     String? image;
 
@@ -472,7 +624,8 @@ class Scraper {
         node.forEach(walk);
       } else if (node is Map) {
         final type = node['@type'];
-        final isPerson = type == 'Person' || (type is List && type.contains('Person'));
+        final isPerson =
+            type == 'Person' || (type is List && type.contains('Person'));
         if (isPerson && name == null) {
           final rawName = node['name']?.toString().trim() ?? '';
           if (rawName.isNotEmpty) name = rawName;
@@ -482,7 +635,9 @@ class Scraper {
             candidate = raw;
           } else if (raw is List && raw.isNotEmpty) {
             final first = raw.first;
-            candidate = first is Map ? first['url']?.toString() : first?.toString();
+            candidate = first is Map
+                ? first['url']?.toString()
+                : first?.toString();
           } else if (raw is Map) {
             candidate = raw['url']?.toString();
           }
@@ -492,12 +647,13 @@ class Scraper {
       }
     }
 
-    final blocks = document.querySelectorAll('script[type="application/ld+json"]');
+    final blocks = document.querySelectorAll(
+      'script[type="application/ld+json"]',
+    );
     for (final script in blocks) {
       try {
         walk(jsonDecode(script.text));
-      } catch (_) {
-      }
+      } catch (_) {}
     }
 
     if (image == null) {
@@ -507,9 +663,11 @@ class Scraper {
         'link[rel="image_src"]',
       ]) {
         final element = document.querySelector(selector);
-        final value = element?.attributes['content'] ?? element?.attributes['href'];
+        final value =
+            element?.attributes['content'] ?? element?.attributes['href'];
         final url = _absoluteUrl(value, pageUri);
-        if (url != null && !RegExp(r'logo|/static/', caseSensitive: false).hasMatch(url)) {
+        if (url != null &&
+            !RegExp(r'logo|/static/', caseSensitive: false).hasMatch(url)) {
           image = url;
           break;
         }
@@ -517,8 +675,12 @@ class Scraper {
     }
     if (image == null) {
       for (final script in blocks) {
-        final match = RegExp(r'"image"\s*:\s*"([^"]+)"').firstMatch(script.text);
-        final url = _absoluteUrl(match?.group(1)?.replaceAll(r'\/', '/'), pageUri);
+        final match = RegExp(r'"image"\s*:\s*"([^"]+)"')
+            .firstMatch(script.text);
+        final url = _absoluteUrl(
+          match?.group(1)?.replaceAll(r'\/', '/'),
+          pageUri,
+        );
         if (url != null) {
           image = url;
           break;
@@ -548,10 +710,14 @@ class Scraper {
     if (q.isEmpty) return const PeopleSearchResult(models: [], albums: []);
 
     final models = <String, ModelRef>{};
+    final albums = <String, AlbumRef>{};
     final slugs = <String>{
       ScraperConfig._slugify(q),
       q.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
     }..removeWhere((s) => s.isEmpty);
+
+    // Resolve direct model pages first. This gives exact profile metadata and
+    // lets us fetch the matching model's album listing separately.
     await Future.wait<void>([
       for (final slug in slugs)
         () async {
@@ -562,16 +728,17 @@ class Scraper {
           try {
             final page = await modelPage(ref);
             final profile = page.profile;
+            final base = _modelBase(Uri.parse(ref.url)) ?? Uri.parse(ref.url);
             models.putIfAbsent(
-              ref.url,
+              base.toString(),
               () => ModelRef(
                 name: profile?.name ?? q,
-                url: ref.url,
+                url: base.toString(),
                 imageUrl: profile?.imageUrl,
               ),
             );
           } on ScraperException {
-            return;
+            // Search-page discovery below can still find the model.
           }
         }(),
     ]);
@@ -579,19 +746,34 @@ class Scraper {
     try {
       final uri = config.searchUri(q, 1);
       final document = html.parse(await _get(uri));
+
       for (final anchor in document.querySelectorAll('a[href*="/models/"]')) {
         final target = _resolveHttp(anchor.attributes['href'], uri);
         final base = target == null ? null : _modelBase(target);
         if (base == null || models.containsKey(base.toString())) continue;
         var name = _collapse(anchor.text);
         if (name.isEmpty) name = _collapse(anchor.attributes['title'] ?? '');
-        if (name.isEmpty) name = _collapse(anchor.querySelector('img')?.attributes['alt'] ?? '');
-        if (name.isEmpty) name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ');
+        if (name.isEmpty) {
+          name = _collapse(
+            anchor.querySelector('img')?.attributes['alt'] ?? '',
+          );
+        }
+        if (name.isEmpty) {
+          name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ');
+        }
         models[base.toString()] = ModelRef(
           name: name,
           url: base.toString(),
-          imageUrl: _absoluteUrl(_imageSource(anchor.querySelector('img')), uri),
+          imageUrl: _absoluteUrl(
+            _imageSource(anchor.querySelector('img')),
+            uri,
+          ),
         );
+      }
+
+      // Some source search pages mix model results and album cards. Keep both.
+      for (final album in _albumsFrom(document, uri)) {
+        albums.putIfAbsent(album.id, () => album);
       }
     } on ScraperException catch (error) {
       debugPrint('[SCRAPER] People search page failed: ${error.message}');
@@ -609,9 +791,42 @@ class Scraper {
     final sorted = models.values.toList()
       ..sort((a, b) => rank(a).compareTo(rank(b)));
 
+    // Only request album pages for exact slug matches, not every model returned
+    // by a broad search. This avoids unnecessary traffic on slow connections.
+    final matchingModels = sorted
+        .where((model) {
+          final uri = Uri.tryParse(model.url);
+          final base = uri == null ? null : _modelBase(uri);
+          if (base == null || base.pathSegments.length < 2) return false;
+          return slugs.contains(base.pathSegments[1].toLowerCase());
+        })
+        .take(2)
+        .toList();
+
+    await Future.wait<void>([
+      for (final model in matchingModels)
+        () async {
+          try {
+            final found = await modelAlbums(model);
+            for (final album in found) {
+              albums[album.id] = album;
+            }
+          } on ScraperException catch (error) {
+            debugPrint('[SCRAPER] Model albums unavailable: ${error.message}');
+          }
+        }(),
+    ]);
+
+    final orderedAlbums = albums.values.toList()
+      ..sort((a, b) {
+        final aModel = a.modelName == null ? 1 : 0;
+        final bModel = b.modelName == null ? 1 : 0;
+        return aModel.compareTo(bModel);
+      });
+
     return PeopleSearchResult(
       models: sorted.take(20).toList(),
-      albums: const <AlbumRef>[],
+      albums: orderedAlbums.take(40).toList(),
     );
   }
 
@@ -630,8 +845,10 @@ class Scraper {
   static final RegExp _leadingLikeRe = RegExp(r'^\s*(\d{1,3})\s*%');
   static final RegExp _percentRe = RegExp(r'(\d{1,3})\s*%');
   static final RegExp _durationRe = RegExp(r'\b(\d{1,2}:\d{2}(?::\d{2})?)\b');
-  static final RegExp _viewsRe =
-      RegExp(r'(\d[\d,.]*\s*[KkMm]?)\s*views?\b', caseSensitive: false);
+  static final RegExp _viewsRe = RegExp(
+    r'(\d[\d,.]*\s*[KkMm]?)\s*views?\b',
+    caseSensitive: false,
+  );
   static final RegExp _ageRe = RegExp(
     r'\b\d+\s+(?:second|minute|hour|day|week|month|year)s?(?:\s+ago)?\b',
     caseSensitive: false,
@@ -649,7 +866,11 @@ class Scraper {
     if (cleaned == null || cleaned.isEmpty) return null;
     try {
       final uri = base.resolve(cleaned);
-      return (uri.scheme == 'http' || uri.scheme == 'https') ? uri : null;
+      return (uri.scheme == 'http' || uri.scheme == 'https') &&
+              uri.host.isNotEmpty &&
+              uri.userInfo.isEmpty
+          ? uri
+          : null;
     } catch (_) {
       return null;
     }
@@ -694,8 +915,8 @@ class Scraper {
     );
     if (text.isEmpty) return '';
 
-    final match =
-        RegExp(r'^(\d[\d.,\s\u00a0]*?)\s*([KkMmBb])?$').firstMatch(text);
+    final match = RegExp(r'^(\d[\d.,\s\u00a0]*?)\s*([KkMmBb])?$')
+        .firstMatch(text);
     if (match == null) return '';
 
     final number = match.group(1)!.replaceAll(RegExp(r'[\s\u00a0]'), '');
@@ -754,22 +975,37 @@ class Scraper {
       }
     }
     if (likes.isEmpty) {
-      final raw = _text(element, config.likesSelector) ??
+      final raw =
+          _text(element, config.likesSelector) ??
           element.attributes['data-rating'] ??
           element.attributes['data-likes'];
       final match = raw == null ? null : _percentRe.firstMatch(raw);
       if (match != null) likes = '${match.group(1)}%';
     }
 
-    var duration = _durationRe
+    var duration =
+        _durationRe
             .firstMatch(_iconText(element, config.durationIconSelector) ?? '')
             ?.group(1) ??
         '';
     if (duration.isEmpty) {
-      duration = _durationRe
+      duration =
+          _durationRe
               .firstMatch(_text(element, config.durationSelector) ?? '')
               ?.group(1) ??
           '';
+    }
+    if (duration.isEmpty) {
+      for (final node in element.querySelectorAll(
+        'li, [class*="duration"], [data-duration]',
+      )) {
+        final value = _collapse(node.text);
+        final match = _durationRe.firstMatch(value);
+        if (match != null) {
+          duration = match.group(1)!;
+          break;
+        }
+      }
     }
     if (duration.isEmpty) {
       for (final text in texts) {
@@ -779,6 +1015,13 @@ class Scraper {
           break;
         }
       }
+    }
+    // Fall back to the markup itself for sites whose duration is inside an
+    // inline template or lazy-rendered data node with no text node yet.
+    if (duration.isEmpty) {
+      final markupDuration = RegExp(r'\d{1,2}:\d{2}(?::\d{2})?')
+          .firstMatch(element.innerHtml);
+      duration = markupDuration?.group(0) ?? '';
     }
     if (duration.isEmpty) duration = element.attributes['data-duration'] ?? '';
 
@@ -807,46 +1050,58 @@ class Scraper {
     final date = _collapse(_iconText(element, config.dateIconSelector) ?? '');
 
     final image = element.querySelector(config.imageSelector);
-    final thumbnailRaw = image?.attributes['data-src'] ??
+    final thumbnailRaw =
+        image?.attributes['data-src'] ??
         image?.attributes['data-original'] ??
         image?.attributes['data-lazy-src'] ??
         image?.attributes['src'] ??
         element.querySelector('video[poster]')?.attributes['poster'];
     final thumbnail = _absoluteUrl(thumbnailRaw, pageUri);
 
-    var title = (anchor?.attributes['title'] ??
-            element.attributes['data-title'] ??
-            element.querySelector(config.titleSelector)?.text ??
-            image?.attributes['alt'] ??
-            anchorText)
-        .trim();
+    var title =
+        (anchor?.attributes['title'] ??
+                element.attributes['data-title'] ??
+                element.querySelector(config.titleSelector)?.text ??
+                image?.attributes['alt'] ??
+                anchorText)
+            .trim();
     title = _isPolluted(title) ? _cleanTitle(title) : _collapse(title);
     if (title.isEmpty) title = _cleanTitle(anchorText);
     if (title.isEmpty) title = _cleanTitle(cardText);
     if (title.isEmpty) return null;
 
-    final id = element.attributes['data-id'] ??
-        '${videoPage.host}${videoPage.path}${videoPage.hasQuery ? '?${videoPage.query}' : ''}';
+    final rawId =
+        element.attributes['data-id'] ?? '${videoPage.host}${videoPage.path}';
+    final id = rawId.length <= 512 ? rawId : rawId.substring(0, 512);
     final directStream = _directStreamFromCard(element, pageUri);
-    final previewUrl = _absoluteUrl(
+    final previewUrl =
+        _absoluteUrl(
           image?.attributes['data-preview'] ??
-              element.querySelector('[data-preview]')?.attributes['data-preview'],
+              element
+                  .querySelector('[data-preview]')
+                  ?.attributes['data-preview'],
           pageUri,
         ) ??
         '';
 
     return Video(
       id: id,
-      title: title,
+      title: title.length <= 300 ? title : title.substring(0, 300),
       streamUrl: directStream ?? '',
       pageUrl: videoPage.toString(),
       previewUrl: previewUrl,
       thumbnailUrl: thumbnail,
-      duration: duration,
-      views: views,
-      likes: likes,
-      date: date,
-      category: element.attributes['data-category'] ?? 'Video',
+      duration: duration.length <= 64 ? duration : duration.substring(0, 64),
+      views: views.length <= 64 ? views : views.substring(0, 64),
+      likes: likes.length <= 64 ? likes : likes.substring(0, 64),
+      date: date.length <= 64 ? date : date.substring(0, 64),
+      category: _collapse(element.attributes['data-category'] ?? 'Video')
+          .substring(
+            0,
+            _collapse(element.attributes['data-category'] ?? 'Video').length
+                .clamp(0, 100)
+                .toInt(),
+          ),
     );
   }
 
@@ -856,7 +1111,8 @@ class Scraper {
   }
 
   String? _directStreamFromCard(dom.Element element, Uri pageUri) {
-    final raw = element.attributes['data-video-url'] ??
+    final raw =
+        element.attributes['data-video-url'] ??
         element.attributes['data-stream'] ??
         element.querySelector('video source[src]')?.attributes['src'] ??
         element.querySelector('video[src]')?.attributes['src'];
@@ -873,7 +1129,12 @@ class Scraper {
     }
     try {
       final uri = contextUri.resolve(cleaned);
-      if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+      if ((uri.scheme != 'http' && uri.scheme != 'https') ||
+          uri.host.isEmpty ||
+          uri.userInfo.isNotEmpty ||
+          uri.toString().length > 8192) {
+        return null;
+      }
       return uri.toString();
     } catch (_) {
       return null;
@@ -882,9 +1143,11 @@ class Scraper {
 
   String? _capture(String text, String pattern) {
     try {
-      return RegExp(pattern, caseSensitive: false, dotAll: true)
-          .firstMatch(text)
-          ?.group(1);
+      return RegExp(
+        pattern,
+        caseSensitive: false,
+        dotAll: true,
+      ).firstMatch(text)?.group(1);
     } catch (_) {
       return null;
     }
@@ -944,11 +1207,7 @@ class Scraper {
   }
 
   ({String? best, List<StreamQuality> options, bool needsDecoding})
-      _extractStreams(
-    String body,
-    dom.Document document,
-    Uri base,
-  ) {
+  _extractStreams(String body, dom.Document document, Uri base) {
     final candidates = <_StreamCandidate>[];
     var needsDecoding = false;
 
@@ -990,8 +1249,11 @@ class Scraper {
     }
     urls.forEach((key, value) => add(value, 0, label: labels[key] ?? ''));
 
-    for (final node in document.querySelectorAll('video source[src], video[src]')) {
-      final label = node.attributes['label'] ??
+    for (final node in document.querySelectorAll(
+      'video source[src], video[src]',
+    )) {
+      final label =
+          node.attributes['label'] ??
           node.attributes['title'] ??
           node.attributes['res'] ??
           node.attributes['size'] ??
@@ -1078,19 +1340,20 @@ class Scraper {
 
     final title =
         _capture(body, r"""video_title\s*[:=]\s*["']([^"']*)["']""") ??
-            document.querySelector('h1')?.text.trim() ??
-            document
-                .querySelector('meta[property="og:title"]')
-                ?.attributes['content']
-                ?.trim() ??
-            _capture(body, config.detailTitlePattern) ??
-            video.title;
+        document.querySelector('h1')?.text.trim() ??
+        document
+            .querySelector('meta[property="og:title"]')
+            ?.attributes['content']
+            ?.trim() ??
+        _capture(body, config.detailTitlePattern) ??
+        video.title;
     final descriptionNode = document.querySelector(config.descriptionSelector);
     final description =
         descriptionNode?.attributes['content']?.trim().isNotEmpty == true
-            ? descriptionNode!.attributes['content']!.trim()
-            : descriptionNode?.text.trim() ?? video.description;
-    final thumbnail = _absoluteUrl(
+        ? descriptionNode!.attributes['content']!.trim()
+        : descriptionNode?.text.trim() ?? video.description;
+    final thumbnail =
+        _absoluteUrl(
           _capture(body, r"""preview_url1?\s*[:=]\s*["']([^"']+)["']""") ??
               _capture(body, config.previewPattern) ??
               document.querySelector('video[poster]')?.attributes['poster'],
@@ -1099,9 +1362,15 @@ class Scraper {
         video.thumbnailUrl;
 
     return video.copyWith(
-      title: title.trim().isEmpty ? video.title : title.trim(),
-      streamUrl: streamUrl,
-      description: description,
+      title: title.trim().isEmpty
+          ? video.title
+          : (title.trim().length <= 300
+                ? title.trim()
+                : title.trim().substring(0, 300)),
+      streamUrl: streamUrl.length <= 8192 ? streamUrl : '',
+      description: description.length <= 1500
+          ? description
+          : description.substring(0, 1500),
       thumbnailUrl: thumbnail,
       pageUrl: uri.toString(),
       qualities: picked.options,
@@ -1110,7 +1379,9 @@ class Scraper {
 
   Future<List<Video>> related(Video video, {int limit = 6}) async {
     final pageUrl = video.pageUrl;
-    if (pageUrl == null || pageUrl.isEmpty || config.relatedCardSelector.isEmpty) {
+    if (pageUrl == null ||
+        pageUrl.isEmpty ||
+        config.relatedCardSelector.isEmpty) {
       return const <Video>[];
     }
     try {

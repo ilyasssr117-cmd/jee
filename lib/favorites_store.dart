@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'local_store.dart';
 import 'models.dart';
+import 'video_json.dart';
 
 class FavoritesStore extends ChangeNotifier {
   FavoritesStore._();
@@ -16,8 +17,9 @@ class FavoritesStore extends ChangeNotifier {
 
   final List<Video> _items = <Video>[];
   final Set<String> _ids = <String>{};
-  late final UnmodifiableListView<Video> _view =
-      UnmodifiableListView<Video>(_items);
+  late final UnmodifiableListView<Video> _view = UnmodifiableListView<Video>(
+    _items,
+  );
 
   List<Video> get items => _view;
 
@@ -26,14 +28,16 @@ class FavoritesStore extends ChangeNotifier {
   void load() {
     _items.clear();
     _ids.clear();
-    for (final raw in LocalStore.readList(_key)) {
+    for (final raw in LocalStore.readList(_key).take(_maxItems * 3)) {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is! Map<String, dynamic>) continue;
         final video = _decode(decoded);
         if (video != null && _ids.add(video.id)) _items.add(video);
-      } catch (_) {
-      }
+      } catch (_) {}
+    }
+    while (_items.length > _maxItems) {
+      _ids.remove(_items.removeLast().id);
     }
   }
 
@@ -64,44 +68,11 @@ class FavoritesStore extends ChangeNotifier {
   }
 
   void _persist() => LocalStore.writeList(
-        _key,
-        _items.map((video) => jsonEncode(_encode(video))).toList(),
-      );
+    _key,
+    _items.map((video) => jsonEncode(_encode(video))).toList(),
+  );
 
-  static Map<String, dynamic> _encode(Video video) => <String, dynamic>{
-        'id': video.id,
-        'title': video.title,
-        'thumb': video.thumbnailUrl,
-        'page': video.pageUrl,
-        'duration': video.duration,
-        'views': video.views,
-        'likes': video.likes,
-        'date': video.date,
-        'category': video.category,
-      };
+  static Map<String, dynamic> _encode(Video video) => videoToJson(video);
 
-  static Video? _decode(Map<String, dynamic> map) {
-    final id = map['id'];
-    final title = map['title'];
-    if (id is! String || id.isEmpty || title is! String || title.isEmpty) {
-      return null;
-    }
-    String text(String key) => map[key] is String ? map[key] as String : '';
-    String? optional(String key) {
-      final value = text(key);
-      return value.isEmpty ? null : value;
-    }
-
-    return Video(
-      id: id,
-      title: title,
-      thumbnailUrl: optional('thumb'),
-      pageUrl: optional('page'),
-      duration: text('duration'),
-      views: text('views'),
-      likes: text('likes'),
-      date: text('date'),
-      category: text('category').isEmpty ? 'Video' : text('category'),
-    );
-  }
+  static Video? _decode(Map<String, dynamic> map) => videoFromJson(map);
 }

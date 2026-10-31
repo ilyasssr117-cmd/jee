@@ -1,28 +1,32 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:watch_tube/request_cache.dart';
+import 'package:vxtube_final/request_cache.dart';
 
 void main() {
-  test('fetch completes (regression: it used to wait for itself forever)',
-      () async {
-    final cache = TtlCache<int>();
-    final value = await cache
-        .fetch('key', () async => 42)
-        .timeout(const Duration(seconds: 2));
-    expect(value, 42);
-  });
+  test(
+    'fetch completes (regression: it used to wait for itself forever)',
+    () async {
+      final cache = TtlCache<int>();
+      final value = await cache
+          .fetch('key', () async => 42)
+          .timeout(const Duration(seconds: 2));
+      expect(value, 42);
+    },
+  );
 
-  test('a fresh result is served from the cache without a second request',
-      () async {
-    final cache = TtlCache<int>();
-    var calls = 0;
-    Future<int> loader() async => ++calls;
+  test(
+    'a fresh result is served from the cache without a second request',
+    () async {
+      final cache = TtlCache<int>();
+      var calls = 0;
+      Future<int> loader() async => ++calls;
 
-    expect(await cache.fetch('key', loader), 1);
-    expect(await cache.fetch('key', loader), 1);
-    expect(calls, 1);
-  });
+      expect(await cache.fetch('key', loader), 1);
+      expect(await cache.fetch('key', loader), 1);
+      expect(calls, 1);
+    },
+  );
 
   test('force skips the cache', () async {
     final cache = TtlCache<int>();
@@ -76,18 +80,20 @@ void main() {
     expect(calls, 2);
   });
 
-  test('an older request finishing late does not overwrite a newer result',
-      () async {
-    final cache = TtlCache<int>();
-    final slow = Completer<int>();
-    final first = cache.fetch('key', () => slow.future);
-    final second = cache.fetch('key', () async => 2, force: true);
+  test(
+    'an older request finishing late does not overwrite a newer result',
+    () async {
+      final cache = TtlCache<int>();
+      final slow = Completer<int>();
+      final first = cache.fetch('key', () => slow.future);
+      final second = cache.fetch('key', () async => 2, force: true);
 
-    expect(await second, 2);
-    slow.complete(1);
-    expect(await first, 1);
-    expect(await cache.fetch('key', () async => 3), 2);
-  });
+      expect(await second, 2);
+      slow.complete(1);
+      expect(await first, 1);
+      expect(await cache.fetch('key', () async => 3), 2);
+    },
+  );
 
   test('an older request finishing late keeps the newer one shared', () async {
     final cache = TtlCache<int>();

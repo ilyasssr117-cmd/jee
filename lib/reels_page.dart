@@ -633,29 +633,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _showDetails(ReelItem item) async {
-    Haptics.play(Haptic.light);
-    final facts = <String>[
-      if (item.author.isNotEmpty) '@${item.author}',
-      if (item.views > 0) '${_compact(item.views)} views',
-      if (item.likes.isNotEmpty) '${item.likes} likes',
-      if (item.durationSec > 0)
-        _clock(Duration(seconds: item.durationSec)),
-      if (item.tags.isNotEmpty)
-        item.tags.take(8).map((tag) => '#$tag').join('  '),
-    ].join('  ·  ');
-    await showCupertinoModalPopup<void>(
-      context: context,
-      builder: (sheet) => CupertinoActionSheet(
-        title: Text(item.title.isEmpty ? 'Reel details' : item.title),
-        message: Text(facts.isEmpty ? 'No additional details.' : facts),
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(sheet).pop(),
-          child: const Text('Done'),
-        ),
-      ),
-    );
-  }
 
   void _setSaving(String id, double? value) {
     if (!mounted) return;
@@ -754,7 +731,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   onFavorite: () => _toggleFavorite(item),
                   onLike: () => _like(item),
                   onSaveMenu: () => _showSaveMenu(item),
-                  onDetails: () => _showDetails(item),
                   onRetry: () => _retry(i),
                 );
               },
@@ -979,7 +955,6 @@ class _ReelView extends StatefulWidget {
     required this.onFavorite,
     required this.onLike,
     required this.onSaveMenu,
-    required this.onDetails,
     required this.onRetry,
   });
 
@@ -995,7 +970,6 @@ class _ReelView extends StatefulWidget {
   final VoidCallback onFavorite;
   final VoidCallback onLike;
   final VoidCallback onSaveMenu;
-  final VoidCallback onDetails;
   final VoidCallback onRetry;
 
   @override
@@ -1150,8 +1124,6 @@ class _ReelViewState extends State<_ReelView> {
     final moved = _pointerMoved;
     final held = _longPressTriggered;
     final secondTap = _secondTapCandidate;
-    final start = _pointerStart;
-    final delta = start == null ? Offset.zero : event.localPosition - start;
 
     _activePointer = null;
     _pointerStart = null;
@@ -1164,11 +1136,8 @@ class _ReelViewState extends State<_ReelView> {
       _singleTapTimer = null;
       _lastTapTime = null;
       if (_fast) _setFast(false);
-      // A deliberate horizontal swipe opens the native details sheet. Vertical
-      // movement remains owned by the page view for natural reel paging.
-      if (delta.dx.abs() > 72 && delta.dx.abs() > delta.dy.abs() * 1.3) {
-        widget.onDetails();
-      }
+      // Drag gestures are left to the vertical PageView and native controls.
+      // Horizontal movement no longer opens an information sheet.
       return;
     }
 

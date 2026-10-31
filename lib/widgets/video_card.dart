@@ -70,6 +70,7 @@ class VideoCard extends StatelessWidget {
                   Hero(
                     tag: 'video-artwork-${video.id}',
                     transitionOnUserGestures: true,
+                    flightShuttleBuilder: videoArtworkHeroFlight,
                     child: VideoArtwork(video: video),
                   ),
                   PreviewSlot(video: video),

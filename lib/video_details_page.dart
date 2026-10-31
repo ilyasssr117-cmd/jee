@@ -183,6 +183,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 Hero(
                   tag: 'video-artwork-${video.id}',
                   transitionOnUserGestures: true,
+                  flightShuttleBuilder: videoArtworkHeroFlight,
                   child: VideoArtwork(video: video, showLabel: false),
                 ),
                 const DecoratedBox(

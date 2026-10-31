@@ -6,6 +6,61 @@ import '../app_theme.dart';
 import '../download_store.dart';
 import '../models.dart';
 
+
+/// Keeps the shared thumbnail clipped throughout its flight instead of
+/// allowing the image to become a sharp-edged rectangle between routes.
+/// The source and destination are briefly cross-faded so different decoded
+/// thumbnail sizes do not appear to pop at the end of the transition.
+Widget videoArtworkHeroFlight(
+  BuildContext flightContext,
+  Animation<double> animation,
+  HeroFlightDirection flightDirection,
+  BuildContext fromHeroContext,
+  BuildContext toHeroContext,
+) {
+  final fromHero = fromHeroContext.widget as Hero;
+  final toHero = toHeroContext.widget as Hero;
+  final destinationRadius = const BorderRadius.vertical(
+    bottom: Radius.circular(24),
+  );
+  final startRadius = flightDirection == HeroFlightDirection.push
+      ? BorderRadius.circular(Radii.card)
+      : destinationRadius;
+  final endRadius = flightDirection == HeroFlightDirection.push
+      ? destinationRadius
+      : BorderRadius.circular(Radii.card);
+
+  return AnimatedBuilder(
+    animation: animation,
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        fromHero.child,
+        IgnorePointer(
+          child: FadeTransition(
+            opacity: animation.drive(
+              CurveTween(curve: Curves.easeInOutCubic),
+            ),
+            child: toHero.child,
+          ),
+        ),
+      ],
+    ),
+    builder: (context, child) {
+      final t = Curves.easeInOutCubic.transform(animation.value);
+      final radius = BorderRadius.lerp(startRadius, endRadius, t)!;
+      return Material(
+        type: MaterialType.transparency,
+        child: ClipRRect(
+          borderRadius: radius,
+          clipBehavior: Clip.antiAlias,
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
 class VideoArtwork extends StatelessWidget {
   const VideoArtwork({
     super.key,

@@ -50,7 +50,7 @@ class HistoryStore extends ChangeNotifier {
 
   void record(Video video) {
     _items.removeWhere((entry) => entry.video.id == video.id);
-    _items.insert(0, HistoryEntry(video.copyWith(streamUrl: ''), DateTime.now()));
+    _items.insert(0, HistoryEntry(video.withoutStream(), DateTime.now()));
     while (_items.length > _maxItems) {
       _items.removeLast();
     }

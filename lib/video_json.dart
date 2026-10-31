@@ -10,6 +10,7 @@ Map<String, dynamic> videoToJson(Video video) => <String, dynamic>{
       'likes': video.likes,
       'date': video.date,
       'category': video.category,
+        if (video.isReel && video.streamUrl.isNotEmpty) 'stream': video.streamUrl,
     };
 
 Video? videoFromJson(Map<String, dynamic> map) {
@@ -34,5 +35,6 @@ Video? videoFromJson(Map<String, dynamic> map) {
     likes: text('likes'),
     date: text('date'),
     category: text('category').isEmpty ? 'Video' : text('category'),
+    streamUrl: id.startsWith('reel_') ? text('stream') : '',
   );
 }

@@ -1,3 +1,5 @@
+import 'package:flutter/cupertino.dart'
+    show CupertinoPageRoute, CupertinoSliverRefreshControl;
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -333,7 +335,7 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _openDetails(Video video, List<Video> queue) async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
+      CupertinoPageRoute<void>(
         builder: (_) => VideoDetailsPage(video: video, queue: queue),
       ),
     );
@@ -463,7 +465,7 @@ class _HomePageState extends State<HomePage>
       case AppTab.reels:
         if (_searchOpen) _closeSearch();
         Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(builder: (_) => const ReelsPage()),
+          BlurCupertinoPageRoute<void>(builder: (_) => const ReelsPage()),
         );
       case AppTab.library:
         if (_searchOpen) _closeSearch();
@@ -671,13 +673,7 @@ class _HomePageState extends State<HomePage>
     bool firstLoad,
     Duration? resume,
   ) {
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      color: AppColors.accent,
-      backgroundColor: AppColors.surface,
-      edgeOffset: context.safe.top + Gaps.sm,
-      displacement: 44,
-      child: CustomScrollView(
+    return CustomScrollView(
       key: const PageStorageKey<String>('home-scroll'),
       controller: _scroll,
       physics: const BouncingScrollPhysics(
@@ -687,6 +683,12 @@ class _HomePageState extends State<HomePage>
         MediaQuery.sizeOf(context).height,
       ),
       slivers: [
+        // UIRefreshControl: rubber-band pull, spinner, haptic on release.
+        CupertinoSliverRefreshControl(
+          refreshTriggerPullDistance: 90,
+          refreshIndicatorExtent: 56,
+          onRefresh: _refresh,
+        ),
         SliverToBoxAdapter(
           child: HomeHero(
             video: featured,
@@ -727,7 +729,6 @@ class _HomePageState extends State<HomePage>
         ..._contentSlivers(margin),
         SliverToBoxAdapter(child: SizedBox(height: Gaps.xl + bottomInset)),
       ],
-      ),
     );
   }
 

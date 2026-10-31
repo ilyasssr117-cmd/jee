@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'error_text.dart';
+import 'media_headers.dart';
 import 'mini_player.dart';
 import 'models.dart';
 import 'player_page.dart';
@@ -42,6 +43,10 @@ Future<String?> launchPlayer(
       return null;
     }
     final localPath = DownloadStore.instance.localPath(video.id);
+    final reelUrl = video.isReel ? video.streamUrl.trim() : '';
+    if (source == null && localPath == null && reelUrl.isNotEmpty) {
+      source = PlaybackSource(reelUrl, kReelMediaHeaders);
+    }
     final playable = localPath != null || source != null
         ? video
         : await videoRepository.resolveForPlayback(

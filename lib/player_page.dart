@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
+import 'package:flutter/cupertino.dart'
+    show CupertinoActivityIndicator, CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -9,6 +10,7 @@ import 'app_settings.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'history_store.dart';
+import 'media_headers.dart';
 import 'mini_player.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -17,6 +19,7 @@ import 'playback_progress.dart';
 import 'playback_source.dart';
 import 'touch.dart';
 import 'video_repository.dart';
+import 'widgets/ios_sheets.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
@@ -197,7 +200,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
 
     final lookAgain = refreshSource && !(_reconnecting && _autoRetries < 2);
-    if (lookAgain && _localPath == null) {
+    if (lookAgain && _localPath == null && !_video.isReel) {
       try {
         final fresh = await videoRepository.resolveForPlayback(
           _video.copyWith(streamUrl: ''),
@@ -346,6 +349,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       throw const FormatException('Invalid video stream URL.');
     }
 
+    if (_video.isReel) {
+      _activeUrl = rawUrl;
+      _activeHeaders = kReelMediaHeaders;
+      return VideoPlayerController.networkUrl(
+        streamUri,
+        httpHeaders: kReelMediaHeaders,
+      );
+    }
     final source = await resolvePlaybackSource(
       streamUri,
       _video.pageUrl,
@@ -401,7 +412,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final lookAgain = !keepSource && (!auto || _autoRetries >= 2);
     VideoPlayerController? fresh;
     try {
-      if (lookAgain && _localPath == null) {
+      if (lookAgain && _localPath == null && !_video.isReel) {
         try {
           final next = await videoRepository.resolveForPlayback(
             _video.copyWith(streamUrl: ''),
@@ -1103,80 +1114,53 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static String _speedLabel(double speed) =>
       '${speed == speed.roundToDouble() ? speed.toInt() : speed}x';
 
+  /// Native iOS wheels (UIPickerView) for quality + playback speed.
   Future<void> _pickSpeed() async {
     _hideTimer?.cancel();
-    final picked = await showModalBottomSheet<double>(
-      context: context,
-      backgroundColor: OnDark.surface,
-      isScrollControlled: true,
-      constraints: const BoxConstraints(maxWidth: 520),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_video.qualities.length >= 2 && _localPath == null) ...[
-                Text('Quality', style: darkText.title),
-                const SizedBox(height: Gaps.md),
-                Wrap(
-                  spacing: Gaps.sm,
-                  runSpacing: Gaps.sm,
-                  children: [
-                    AppChip(
-                      label: 'Auto',
-                      selected: AppSettings.instance.preferredQuality == 0,
-                      onDark: true,
-                      onPressed: () {
-                        Navigator.of(sheetContext).pop();
-                        _setQuality(0);
-                      },
-                    ),
-                    for (final option in _video.qualities)
-                      AppChip(
-                        label: '${option.height}p',
-                        selected:
-                            AppSettings.instance.preferredQuality != 0 &&
-                                option.url == _video.streamUrl,
-                        onDark: true,
-                        onPressed: () {
-                          Navigator.of(sheetContext).pop();
-                          _setQuality(option.height);
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: Gaps.lg),
-              ],
-              Text('Playback speed', style: darkText.title),
-              const SizedBox(height: Gaps.md),
-              Wrap(
-                spacing: Gaps.sm,
-                runSpacing: Gaps.sm,
-                children: [
-                  for (final speed in _speeds)
-                    AppChip(
-                      label: _speedLabel(speed),
-                      selected: speed == _speed,
-                      onDark: true,
-                      onPressed: () => Navigator.of(sheetContext).pop(speed),
-                    ),
-                ],
-              ),
+    final hasQuality = _video.qualities.length >= 2 && _localPath == null;
+    var qualityIndex = 0;
+    if (hasQuality && AppSettings.instance.preferredQuality != 0) {
+      final i = _video.qualities.indexWhere(
+        (option) => option.url == _video.streamUrl,
+      );
+      qualityIndex = i < 0 ? 0 : i + 1;
+    }
+    final speedIndex =
+        _speeds.indexOf(_speed).clamp(0, _speeds.length - 1).toInt();
+
+    final result = await showWheelPicker(
+      context,
+      title: hasQuality ? 'Quality & Speed' : 'Playback Speed',
+      dark: true,
+      columns: [
+        if (hasQuality)
+          WheelColumn(
+            title: 'Quality',
+            labels: <String>[
+              'Auto',
+              for (final option in _video.qualities) '${option.height}p',
             ],
+            initialIndex: qualityIndex,
           ),
+        WheelColumn(
+          title: 'Speed',
+          labels: <String>[for (final speed in _speeds) _speedLabel(speed)],
+          initialIndex: speedIndex,
         ),
-      ),
+      ],
     );
     if (!mounted) return;
-    final controller = _controller;
-    if (picked != null && controller != null && !_isLeaving) {
-      setState(() => _speed = picked);
-      await _safeControllerAction(() => controller.setPlaybackSpeed(picked));
+    if (result != null) {
+      final speed = _speeds[result.last];
+      if (hasQuality && result.first != qualityIndex) {
+        final choice = result.first;
+        _setQuality(choice == 0 ? 0 : _video.qualities[choice - 1].height);
+      }
+      final controller = _controller;
+      if (controller != null && !_isLeaving && speed != _speed) {
+        setState(() => _speed = speed);
+        await _safeControllerAction(() => controller.setPlaybackSpeed(speed));
+      }
     }
     _scheduleHide();
   }
@@ -1323,7 +1307,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 left: context.hMargin + context.safe.left,
                 top: context.safe.top + 10,
                 child: RoundIconButton(
-                  icon: Icons.arrow_back_ios_new_rounded,
+                  icon: CupertinoIcons.chevron_back,
                   iconSize: 20,
                   tapSize: kMinTapSize,
                   label: 'Back',
@@ -1680,7 +1664,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     return Row(
       children: [
         RoundIconButton(
-          icon: Icons.arrow_back_ios_new_rounded,
+          icon: CupertinoIcons.chevron_back,
           iconSize: 20,
           label: 'Back',
           tapSize: kMinTapSize,

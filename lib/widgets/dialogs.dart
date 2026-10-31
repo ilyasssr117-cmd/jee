@@ -1,13 +1,17 @@
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart'
-    show CupertinoAlertDialog, CupertinoDialogAction, showCupertinoDialog;
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../touch.dart';
 import 'bottom_bar.dart';
+import 'ios_sheets.dart';
 
+/// Destructive confirmations use the native iOS action sheet that slides up
+/// from the bottom (UIAlertController `.actionSheet`), with a separated
+/// Cancel button — exactly how Photos / Files / Mail confirm deletes.
 Future<bool> confirmDialog(
   BuildContext context, {
   required String title,
@@ -15,29 +19,18 @@ Future<bool> confirmDialog(
   required String confirmLabel,
   bool destructive = true,
 }) async {
-  Haptics.play(Haptic.light);
-  final result = await showCupertinoDialog<bool>(
-    context: context,
-    barrierDismissible: true,
-    builder: (dialogContext) => CupertinoAlertDialog(
-      title: Text(title),
-      content: message == null ? null : Text(message),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('Cancel'),
-        ),
-        CupertinoDialogAction(
-          isDestructiveAction: destructive,
-          isDefaultAction: !destructive,
-          onPressed: () {
-            Haptics.play(Haptic.medium);
-            Navigator.of(dialogContext).pop(true);
-          },
-          child: Text(confirmLabel),
-        ),
-      ],
-    ),
+  final result = await showActionSheet<bool>(
+    context,
+    title: title,
+    message: message,
+    actions: [
+      SheetAction<bool>(
+        label: confirmLabel,
+        value: true,
+        destructive: destructive,
+        isDefault: !destructive,
+      ),
+    ],
   );
   return result ?? false;
 }
@@ -124,13 +117,18 @@ class _ToastViewState extends State<_ToastView>
               ).animate(CurvedAnimation(parent: _fade, curve: Curves.easeOut)),
               child: Material(
                 color: Colors.transparent,
-                child: DecoratedBox(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                    child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: const Color(0xEB1C1F2A),
+                    color: const Color(0xB82C2C2E),
                     borderRadius: BorderRadius.circular(22),
-                    boxShadow: const [
-                      BoxShadow(color: Color(0x4D000000), blurRadius: 14),
-                    ],
+                    border: Border.all(
+                      color: const Color(0x1FFFFFFF),
+                      width: 0.5,
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
@@ -146,6 +144,8 @@ class _ToastViewState extends State<_ToastView>
                         color: Colors.white,
                       ),
                     ),
+                  ),
+                ),
                   ),
                 ),
               ),

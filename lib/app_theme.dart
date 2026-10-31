@@ -1,16 +1,28 @@
-import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'dart:ui' as ui show ImageFilter;
+
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoColors,
+        CupertinoPageRoute,
+        CupertinoPageTransitionsBuilder,
+        CupertinoScrollBehavior,
+        CupertinoTextThemeData,
+        CupertinoThemeData;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 
 abstract final class OnDark {
-  static const Color background = Color(0xFF0D0E12);
-  static const Color surface = Color(0xFF17181E);
-  static const Color surfaceHigh = Color(0xFF23242D);
-  static const Color outline = Color(0x1FFFFFFF);
+  // iOS dark system colors (systemBackground / secondarySystemGroupedBackground
+  // / tertiarySystemFill / separator / label tiers / systemRed).
+  static const Color background = Color(0xFF000000);
+  static const Color surface = Color(0xFF1C1C1E);
+  static const Color surfaceHigh = Color(0xFF2C2C2E);
+  static const Color outline = Color(0x54545458);
   static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFFB7BDCB);
-  static const Color textTertiary = Color(0xFF8E96A8);
+  static const Color textSecondary = Color(0xFF9E9EA3);
+  static const Color textTertiary = Color(0xFF76767B);
   static const Color accentSoft = Color(0xFF3B171B);
-  static const Color error = Color(0xFFFF8A80);
+  static const Color error = Color(0xFFFF453A);
 }
 
 class Palette {
@@ -53,15 +65,15 @@ class Palette {
 
   static const Palette light = Palette(
     brightness: Brightness.light,
-    background: Color(0xFFF4F5FA),
+    background: Color(0xFFF2F2F7),
     surface: Color(0xFFFFFFFF),
-    surfaceHigh: Color(0xFFE8EBF2),
-    outline: Color(0x1F000000),
-    textPrimary: Color(0xFF12141B),
-    textSecondary: Color(0xFF4B5265),
-    textTertiary: Color(0xFF7B8396),
+    surfaceHigh: Color(0xFFE5E5EA),
+    outline: Color(0x4A3C3C43),
+    textPrimary: Color(0xFF000000),
+    textSecondary: Color(0xFF6C6C70),
+    textTertiary: Color(0xFF8E8E93),
     accentSoft: Color(0xFFFCE4E6),
-    error: Color(0xFFD93025),
+    error: Color(0xFFFF3B30),
   );
 }
 
@@ -96,9 +108,10 @@ abstract final class Gaps {
 }
 
 abstract final class Radii {
-  static const double card = 18;
-  static const double button = 15;
-  static const double field = 16;
+  static const double card = 14;
+  static const double button = 14;
+  static const double field = 12;
+  static const double group = 12; // inset-grouped list corner
   static const double pill = 999;
 }
 
@@ -108,6 +121,7 @@ abstract final class Motion {
   static const Duration fade = Duration(milliseconds: 320);
   static const Duration scroll = Duration(milliseconds: 260);
   static const Curve curve = Curves.easeOutCubic;
+  static const Curve spring = Curves.easeOutBack;
 }
 
 extension UiScale on BuildContext {
@@ -138,18 +152,28 @@ class TextSet {
         color: palette.textPrimary,
       );
 
+  /// iOS Large Title (34pt bold).
+  TextStyle get largeTitle => TextStyle(
+        fontSize: 34,
+        height: 1.15,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.37,
+        color: palette.textPrimary,
+      );
+
   TextStyle get headline => TextStyle(
-        fontSize: 21,
+        fontSize: 22,
         height: 1.18,
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.2,
+        letterSpacing: 0.35,
         color: palette.textPrimary,
       );
 
   TextStyle get title => TextStyle(
-        fontSize: 16,
+        fontSize: 17,
         height: 1.25,
         fontWeight: FontWeight.w600,
+        letterSpacing: -0.41,
         color: palette.textPrimary,
       );
 
@@ -161,23 +185,26 @@ class TextSet {
       );
 
   TextStyle get body => TextStyle(
-        fontSize: 14,
-        height: 1.4,
+        fontSize: 15,
+        height: 1.35,
         fontWeight: FontWeight.w400,
+        letterSpacing: -0.24,
         color: palette.textSecondary,
       );
 
   TextStyle get label => TextStyle(
-        fontSize: 14,
+        fontSize: 15,
         height: 1.2,
         fontWeight: FontWeight.w600,
+        letterSpacing: -0.24,
         color: palette.textPrimary,
       );
 
   TextStyle get caption => TextStyle(
-        fontSize: 12,
+        fontSize: 13,
         height: 1.3,
-        fontWeight: FontWeight.w500,
+        fontWeight: FontWeight.w400,
+        letterSpacing: -0.08,
         color: palette.textTertiary,
       );
 
@@ -194,6 +221,7 @@ abstract final class AppText {
   static TextSet get _set => TextSet(AppColors.palette);
 
   static TextStyle get display => _set.display;
+  static TextStyle get largeTitle => _set.largeTitle;
   static TextStyle get headline => _set.headline;
   static TextStyle get title => _set.title;
   static TextStyle get cardTitle => _set.cardTitle;
@@ -217,8 +245,40 @@ ThemeData buildAppTheme(Brightness brightness) {
       surface: p.surface,
     ),
     splashFactory: NoSplash.splashFactory,
+    highlightColor: Colors.transparent,
     visualDensity: VisualDensity.standard,
     iconTheme: const IconThemeData(size: 20, opticalSize: 20),
+    // Every Cupertino widget (pickers, action sheets, alerts, search field,
+    // switches, refresh control) follows the same palette automatically.
+    cupertinoOverrideTheme: CupertinoThemeData(
+      brightness: brightness,
+      primaryColor: AppColors.accent,
+      primaryContrastingColor: CupertinoColors.white,
+      scaffoldBackgroundColor: p.background,
+      barBackgroundColor: p.surface.withValues(alpha: 0.78),
+      applyThemeToAll: true,
+      textTheme: CupertinoTextThemeData(
+        primaryColor: AppColors.accent,
+        textStyle: TextStyle(
+          inherit: false,
+          fontSize: 17,
+          letterSpacing: -0.41,
+          color: p.textPrimary,
+        ),
+        pickerTextStyle: TextStyle(
+          inherit: false,
+          fontSize: 21,
+          letterSpacing: -0.4,
+          color: p.textPrimary,
+        ),
+        actionTextStyle: const TextStyle(
+          inherit: false,
+          fontSize: 17,
+          letterSpacing: -0.41,
+          color: AppColors.accent,
+        ),
+      ),
+    ),
   );
 
   return base.copyWith(
@@ -231,12 +291,12 @@ ThemeData buildAppTheme(Brightness brightness) {
       foregroundColor: p.textPrimary,
       elevation: 0,
       scrolledUnderElevation: 0,
-      centerTitle: false,
+      centerTitle: true,
       titleTextStyle: TextStyle(
         color: p.textPrimary,
-        fontSize: 20,
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.3,
+        fontSize: 17,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.41,
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -261,15 +321,15 @@ ThemeData buildAppTheme(Brightness brightness) {
       labelStyle: TextStyle(color: p.textSecondary),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
-        borderSide: BorderSide(color: p.outline),
+        borderSide: BorderSide.none,
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
-        borderSide: BorderSide(color: p.outline),
+        borderSide: BorderSide.none,
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
-        borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
+        borderSide: BorderSide.none,
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.field),
@@ -284,7 +344,8 @@ ThemeData buildAppTheme(Brightness brightness) {
       backgroundColor: p.surface,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
-      dragHandleColor: p.textTertiary.withValues(alpha: 0.5),
+      dragHandleSize: const Size(36, 5),
+      dragHandleColor: p.textTertiary.withValues(alpha: 0.55),
       modalBackgroundColor: p.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -314,16 +375,13 @@ ThemeData buildAppTheme(Brightness brightness) {
       linearTrackColor: Color(0x263F3F46),
     ),
     switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith<Color?>(
-        (states) => states.contains(WidgetState.selected)
-            ? AppColors.accentStrong
-            : null,
-      ),
+      thumbColor: const WidgetStatePropertyAll<Color>(Colors.white),
       trackColor: WidgetStateProperty.resolveWith<Color?>(
         (states) => states.contains(WidgetState.selected)
-            ? AppColors.accent.withValues(alpha: 0.35)
+            ? CupertinoColors.systemGreen
             : null,
       ),
+      trackOutlineColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
     ),
     sliderTheme: SliderThemeData(
       activeTrackColor: AppColors.accent,
@@ -340,7 +398,7 @@ ThemeData buildAppTheme(Brightness brightness) {
         color: Colors.white,
       ),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.button),
+        borderRadius: BorderRadius.circular(Radii.pill),
       ),
     ),
     pageTransitionsTheme: PageTransitionsTheme(
@@ -369,8 +427,61 @@ class FadePageRoute<T> extends PageRouteBuilder<T> {
         );
 }
 
-class AppScrollBehavior extends MaterialScrollBehavior {
+/// iOS push/pop route that blurs the page progressively while it closes
+/// (button pop or interactive swipe-back). The blur is only applied while the
+/// page is leaving, in coarse steps, so it stays cheap on the GPU.
+class BlurCupertinoPageRoute<T> extends CupertinoPageRoute<T> {
+  BlurCupertinoPageRoute({
+    required super.builder,
+    this.maxSigma = 14,
+  });
+
+  final double maxSigma;
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final blurred = AnimatedBuilder(
+      animation: animation,
+      child: RepaintBoundary(child: child),
+      builder: (context, cached) {
+        final leaving = animation.status == AnimationStatus.reverse ||
+            (navigator?.userGestureInProgress ?? false);
+        final value = animation.value;
+        if (!leaving || value >= 1) return cached!;
+        // Quantised to 1.5px steps: smooth to the eye, no per-frame filter churn.
+        final raw = (1 - value) * maxSigma;
+        final sigma = (raw / 1.5).round() * 1.5;
+        if (sigma < 1.5) return cached!;
+        return ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(
+            sigmaX: sigma,
+            sigmaY: sigma,
+            tileMode: TileMode.clamp,
+          ),
+          child: cached,
+        );
+      },
+    );
+    return super.buildTransitions(context, animation, secondaryAnimation, blurred);
+  }
+}
+
+class AppScrollBehavior extends CupertinoScrollBehavior {
   const AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const <PointerDeviceKind>{
+        PointerDeviceKind.touch,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.mouse,
+      };
 
   @override
   Widget buildOverscrollIndicator(

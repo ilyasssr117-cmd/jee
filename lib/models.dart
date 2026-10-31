@@ -72,6 +72,12 @@ class Video {
     );
   }
 
+  bool get isReel => id.startsWith('reel_');
+
+  /// Reels have no page to re-resolve from, so their direct URL must survive
+  /// persistence. Everything else keeps the old behaviour (URL stripped).
+  Video withoutStream() => isReel ? this : copyWith(streamUrl: '');
+
   String streamForQuality(int preferred) {
     if (preferred <= 0 || qualities.length < 2) return streamUrl;
     for (final option in qualities) {

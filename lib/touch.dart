@@ -35,6 +35,7 @@ class Pressable extends StatefulWidget {
     this.haptic = Haptic.light,
     this.longPressHaptic = Haptic.medium,
     this.pressedScale = 0.95,
+    this.pressedOpacity = 1,
     this.longPressDuration = const Duration(milliseconds: 350),
     this.semanticLabel,
     this.behavior = HitTestBehavior.opaque,
@@ -46,6 +47,9 @@ class Pressable extends StatefulWidget {
   final Haptic haptic;
   final Haptic longPressHaptic;
   final double pressedScale;
+
+  /// iOS-style highlight: text buttons and list rows dim instead of shrinking.
+  final double pressedOpacity;
   final Duration longPressDuration;
   final String? semanticLabel;
   final HitTestBehavior behavior;
@@ -68,7 +72,13 @@ class _PressableState extends State<Pressable> {
       scale: _down ? widget.pressedScale : 1,
       duration: _down ? const Duration(milliseconds: 90) : Motion.normal,
       curve: Motion.curve,
-      child: widget.child,
+      child: widget.pressedOpacity >= 1
+          ? widget.child
+          : AnimatedOpacity(
+              opacity: _down ? widget.pressedOpacity : 1,
+              duration: _down ? const Duration(milliseconds: 60) : Motion.normal,
+              child: widget.child,
+            ),
     );
 
     if (widget.onTap == null && widget.onLongPress == null) return child;

@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -132,7 +133,7 @@ class _SavedAlbumCard extends StatelessWidget {
     return Pressable(
       semanticLabel: 'Album ${album.title}',
       onTap: () => Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
+        CupertinoPageRoute<void>(
           builder: (_) => SavedAlbumPage(albumId: album.id),
         ),
       ),

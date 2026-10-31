@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -74,7 +75,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   void _openModel(ModelRef model) {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => ModelPage(model: model)),
+      CupertinoPageRoute<void>(builder: (_) => ModelPage(model: model)),
     );
   }
 
@@ -108,7 +109,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   void _openRelated(Video video, List<Video> related) {
     Navigator.of(context).pushReplacement<void, void>(
-      MaterialPageRoute<void>(
+      CupertinoPageRoute<void>(
         builder: (_) => VideoDetailsPage(video: video, queue: related),
       ),
     );

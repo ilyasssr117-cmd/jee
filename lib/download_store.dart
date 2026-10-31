@@ -417,7 +417,7 @@ class DownloadStore extends ChangeNotifier {
       }
       return;
     }
-    _items.insert(0, DownloadItem(video: video.copyWith(streamUrl: '')));
+    _items.insert(0, DownloadItem(video: video.withoutStream()));
     _persist();
     notifyListeners();
     unawaited(_pump());
@@ -542,7 +542,8 @@ class DownloadStore extends ChangeNotifier {
         throw const _DownloadFailure('Storage isn\u2019t available.');
       }
 
-      final direct = _directUrls[id];
+      final stored = entry.video.isReel ? entry.video.streamUrl.trim() : '';
+      final direct = _directUrls[id] ?? (stored.isEmpty ? null : stored);
       final resolved = direct != null
           ? entry.video.copyWith(streamUrl: direct)
           : await videoRepository

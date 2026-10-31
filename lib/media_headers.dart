@@ -31,3 +31,14 @@ Map<String, String> streamHeaders(Uri streamUri, String? pageUrl) {
     'Accept': '*/*',
   };
 }
+
+const String kReelMediaOrigin = 'https://apiv2.tik.porn';
+
+const Map<String, String> kReelMediaHeaders = <String, String>{
+  'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7_1 like Mac OS X) '
+      'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7 '
+      'Mobile/15E148 Safari/604.1',
+  'Referer': '$kReelMediaOrigin/',
+  'Origin': kReelMediaOrigin,
+  'Accept': '*/*',
+};

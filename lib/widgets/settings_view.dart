@@ -189,6 +189,9 @@ class _SettingsViewState extends State<SettingsView> {
                   ),
                   _Group(
                     title: 'Storage',
+                    footer: downloads.doneCount == 0
+                        ? 'No videos are saved on this device.'
+                        : null,
                     children: [
                       _Row(
                         icon: CupertinoIcons.sparkles,
@@ -208,12 +211,11 @@ class _SettingsViewState extends State<SettingsView> {
                         onTap: downloads.items.isEmpty ? null : _deleteDownloads,
                       ),
                     ],
-                    footer: downloads.doneCount == 0
-                        ? 'No videos are saved on this device.'
-                        : null,
                   ),
                   _Group(
                     title: 'Privacy',
+                    footer:
+                        'Removes your History list and every saved resume point.',
                     children: [
                       _Row(
                         icon: CupertinoIcons.search,
@@ -229,8 +231,6 @@ class _SettingsViewState extends State<SettingsView> {
                         onTap: _clearWatched,
                       ),
                     ],
-                    footer:
-                        'Removes your History list and every saved resume point.',
                   ),
                 ]),
               ),

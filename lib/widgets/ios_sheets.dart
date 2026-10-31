@@ -116,7 +116,7 @@ class _WheelSheetState extends State<_WheelSheet> {
                           Haptics.play(Haptic.selection);
                           Navigator.of(context).pop();
                         },
-                        child: Text(
+                        child: const Text(
                           'Cancel',
                           style: TextStyle(
                             fontSize: 17,
@@ -147,7 +147,7 @@ class _WheelSheetState extends State<_WheelSheet> {
                           Haptics.play(Haptic.medium);
                           Navigator.of(context).pop(List<int>.of(_selected));
                         },
-                        child: Text(
+                        child: const Text(
                           'Done',
                           style: TextStyle(
                             fontSize: 17,

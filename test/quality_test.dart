@@ -17,11 +17,18 @@ void main() {
   );
 
   test('streamForQuality picks the best option not above the wish', () {
-    expect(video.streamForQuality(0), 'best');
+    expect(video.streamForQuality(0), 'u1080');
     expect(video.streamForQuality(1080), 'u1080');
     expect(video.streamForQuality(1000), 'u720');
     expect(video.streamForQuality(720), 'u720');
     expect(video.streamForQuality(240), 'u480');
+  });
+
+  test('Auto goes back to the best rendition after a manual pick', () {
+    final lowered = video.copyWith(streamUrl: 'u480');
+    expect(lowered.streamForQuality(0), 'u1080');
+    expect(lowered.qualityIndexFor(720), 1);
+    expect(lowered.qualityIndexFor(0), -1);
   });
 
   test('a single quality leaves the stream unchanged', () {

@@ -78,12 +78,32 @@ class Video {
   /// persistence. Everything else keeps the old behaviour (URL stripped).
   Video withoutStream() => isReel ? this : copyWith(streamUrl: '');
 
+  /// "Auto": the best rendition up to 1080p (what the scraper picks as the
+  /// default). Needed so choosing Auto again after a manual pick goes back
+  /// up instead of staying on the last chosen quality.
+  String get autoStreamUrl {
+    if (qualities.length < 2) return streamUrl;
+    for (final option in qualities) {
+      if (option.height <= 1080) return option.url;
+    }
+    return qualities.last.url;
+  }
+
   String streamForQuality(int preferred) {
-    if (preferred <= 0 || qualities.length < 2) return streamUrl;
+    if (qualities.length < 2) return streamUrl;
+    if (preferred <= 0) return autoStreamUrl;
     for (final option in qualities) {
       if (option.height <= preferred) return option.url;
     }
     return qualities.last.url;
+  }
+
+  /// Index in [qualities] of the rendition [streamForQuality] would pick,
+  /// or -1 for Auto / no choice.
+  int qualityIndexFor(int preferred) {
+    if (preferred <= 0 || qualities.length < 2) return -1;
+    final url = streamForQuality(preferred);
+    return qualities.indexWhere((option) => option.url == url);
   }
 }
 

@@ -558,7 +558,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            const Icon(
                               CupertinoIcons.arrow_up_arrow_down,
                               size: 13,
                               color: AppColors.accent,

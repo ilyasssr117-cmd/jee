@@ -77,6 +77,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Timer? _scrubTimer;
   final ValueNotifier<bool> _reloading = ValueNotifier<bool>(false);
   int _reloadToken = 0;
+  bool _reloadOk = false;
   Timer? _spinnerTimer;
   Duration _lastSeen = Duration.zero;
   bool _pipBusy = false;
@@ -138,7 +139,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     unawaited(applyPlayerOrientation());
     _resumeAt = widget.startAt;
-    _initialSource = widget.initialSource;
+    _initialSource =
+        _video.streamUrl == widget.video.streamUrl ? widget.initialSource : null;
     _adopted = widget.adopted;
     final adopted = _adopted;
     if (adopted != null) _speed = adopted.speed;
@@ -383,11 +385,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void _setQuality(int height) {
     AppSettings.instance.setPreferredQuality(height);
+    final previous = _video;
     final next = _preferred(_video);
     if (next.streamUrl == _video.streamUrl) return;
     _video = next;
     if (_localPath != null || _isLeaving) return;
-    unawaited(_reloadInPlace(keepSource: true));
+    _reloadOk = false;
+    unawaited(() async {
+      await _reloadInPlace(keepSource: true);
+      // Couldn't switch: keep state (and the wheel) in sync with what plays.
+      if (!_reloadOk && mounted && _video.streamUrl == next.streamUrl) {
+        _video = previous;
+      }
+    }());
   }
 
   Future<void> _reloadInPlace({bool auto = false, bool keepSource = false}) async {
@@ -457,6 +467,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       unawaited(_disposeController(old));
       _onControllerChanged();
       fresh = null;
+      _reloadOk = true;
     } catch (error) {
       debugPrint('[PLAYER] Reload in place failed: ${error.runtimeType}');
       if (fresh != null) await _disposeController(fresh);
@@ -1120,9 +1131,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final hasQuality = _video.qualities.length >= 2 && _localPath == null;
     var qualityIndex = 0;
     if (hasQuality && AppSettings.instance.preferredQuality != 0) {
-      final i = _video.qualities.indexWhere(
+      var i = _video.qualities.indexWhere(
         (option) => option.url == _video.streamUrl,
       );
+      // Refreshed links get new tokens, so fall back to the preferred height.
+      if (i < 0) {
+        i = _video.qualityIndexFor(AppSettings.instance.preferredQuality);
+      }
       qualityIndex = i < 0 ? 0 : i + 1;
     }
     final speedIndex =

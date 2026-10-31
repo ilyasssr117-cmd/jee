@@ -921,12 +921,24 @@ class Scraper {
 
   static int _qualityOf(String text) {
     final lower = text.toLowerCase();
-    final p = RegExp(r'(\d{3,4})\s*p').firstMatch(lower);
+    final p = RegExp(r'(?<![0-9a-z])(\d{3,4})\s*p(?![a-z])').firstMatch(lower);
     if (p != null) return int.parse(p.group(1)!);
-    if (lower.contains('4k') || lower.contains('2160')) return 2160;
-    if (lower.contains('fhd') || lower.contains('1080')) return 1080;
-    if (lower.contains('hd')) return 720;
-    if (lower.contains('sd')) return 360;
+    final wxh =
+        RegExp(r'(?<!\d)\d{3,4}\s*[x\u00d7]\s*(\d{3,4})(?!\d)').firstMatch(lower);
+    if (wxh != null) {
+      final h = int.parse(wxh.group(1)!);
+      if (h >= 144 && h <= 4320) return h;
+    }
+    if (RegExp(r'(?<![a-z0-9])(4k|uhd)(?![a-z0-9])').hasMatch(lower) ||
+        RegExp(r'(?<!\d)2160(?!\d)').hasMatch(lower)) {
+      return 2160;
+    }
+    if (RegExp(r'(?<![a-z0-9])fhd(?![a-z0-9])').hasMatch(lower) ||
+        RegExp(r'(?<!\d)1080(?!\d)').hasMatch(lower)) {
+      return 1080;
+    }
+    if (RegExp(r'(?<![a-z0-9])hd(?![a-z0-9])').hasMatch(lower)) return 720;
+    if (RegExp(r'(?<![a-z0-9])sd(?![a-z0-9])').hasMatch(lower)) return 360;
     return 0;
   }
 

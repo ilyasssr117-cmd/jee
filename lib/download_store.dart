@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'app_settings.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -549,7 +550,10 @@ class DownloadStore extends ChangeNotifier {
           : await videoRepository
               .resolveForPlayback(entry.video.copyWith(streamUrl: ''));
 
-      final url = resolved.streamUrl.trim();
+      final picked = direct != null
+          ? resolved.streamUrl
+          : resolved.streamForQuality(AppSettings.instance.preferredQuality);
+      final url = picked.trim();
       final uri = Uri.tryParse(url);
       if (uri == null ||
           (uri.scheme != 'http' && uri.scheme != 'https') ||

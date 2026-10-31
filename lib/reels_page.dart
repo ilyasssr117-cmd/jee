@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -12,9 +11,7 @@ import 'package:flutter/cupertino.dart'
         CupertinoActivityIndicator,
         showCupertinoModalPopup;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';

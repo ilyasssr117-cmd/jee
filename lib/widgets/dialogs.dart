@@ -5,7 +5,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
-import '../touch.dart';
 import 'bottom_bar.dart';
 import 'ios_sheets.dart';
 

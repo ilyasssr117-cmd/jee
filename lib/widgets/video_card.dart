@@ -148,8 +148,8 @@ class _FavoriteButton extends StatelessWidget {
             child: Center(
               child: AnimatedContainer(
                 duration: Motion.normal,
-                width: 26,
-                height: 26,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: active ? const Color(0xCC000000) : const Color(0x73000000),
@@ -160,10 +160,10 @@ class _FavoriteButton extends StatelessWidget {
                   transitionBuilder: (child, animation) =>
                       ScaleTransition(scale: animation, child: child),
                   child: Icon(
-                    active ? Icons.star_rounded : Icons.star_border_rounded,
+                    active ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                     key: ValueKey<bool>(active),
-                    size: 17,
-                    color: active ? AppColors.star : Colors.white,
+                    size: 20,
+                    color: active ? AppColors.accent : Colors.white,
                   ),
                 ),
               ),
@@ -193,7 +193,7 @@ class _Badge extends StatelessWidget {
       child: SizedBox(
         width: 20,
         height: 20,
-        child: Icon(icon, size: 14, color: color),
+        child: Icon(icon, size: 20, color: color),
       ),
     );
   }
@@ -209,7 +209,7 @@ class DurationBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xCC000000),
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(7),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),

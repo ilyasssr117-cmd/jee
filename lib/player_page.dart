@@ -1324,7 +1324,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 top: context.safe.top + 10,
                 child: RoundIconButton(
                   icon: Icons.arrow_back_ios_new_rounded,
-                  iconSize: 18,
+                  iconSize: 20,
                   tapSize: kMinTapSize,
                   label: 'Back',
                   onTap: () => unawaited(_leave()),
@@ -1480,7 +1480,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.fast_forward_rounded, size: 18, color: Colors.white),
+                    Icon(Icons.fast_forward_rounded, size: 20, color: Colors.white),
                     SizedBox(width: 6),
                     Text('2x', style: _pillText),
                   ],
@@ -1681,7 +1681,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       children: [
         RoundIconButton(
           icon: Icons.arrow_back_ios_new_rounded,
-          iconSize: 18,
+          iconSize: 20,
           label: 'Back',
           tapSize: kMinTapSize,
           onTap: () => unawaited(_leave()),

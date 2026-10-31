@@ -850,7 +850,7 @@ class _PhotoTile extends StatelessWidget {
                   ),
                   child: selected
                       ? const Icon(Icons.check_rounded,
-                          size: 15, color: Colors.white)
+                          size: 20, color: Colors.white)
                       : null,
                 ),
               )
@@ -880,7 +880,7 @@ class _SavedBadge extends StatelessWidget {
         color: Color(0xCC1FA971),
       ),
       child: const Icon(Icons.download_done_rounded,
-          size: 14, color: Colors.white),
+          size: 20, color: Colors.white),
     );
   }
 }

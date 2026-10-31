@@ -65,7 +65,7 @@ class SavedAlbumsView extends StatelessWidget {
                 sliver: SliverToBoxAdapter(
                   child: Row(
                     children: [
-                      const Icon(Icons.person_rounded, size: 18, color: AppColors.accent),
+                      const Icon(Icons.person_rounded, size: 20, color: AppColors.accent),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -525,7 +525,7 @@ class _LocalTile extends StatelessWidget {
                   ),
                   child: selected
                       ? const Icon(Icons.check_rounded,
-                          size: 15, color: Colors.white)
+                          size: 20, color: Colors.white)
                       : null,
                 ),
               ),

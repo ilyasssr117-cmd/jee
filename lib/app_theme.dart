@@ -2,9 +2,9 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 abstract final class OnDark {
-  static const Color background = Color(0xFF0B0D12);
-  static const Color surface = Color(0xFF151923);
-  static const Color surfaceHigh = Color(0xFF1E2333);
+  static const Color background = Color(0xFF0D0E12);
+  static const Color surface = Color(0xFF17181E);
+  static const Color surfaceHigh = Color(0xFF23242D);
   static const Color outline = Color(0x1FFFFFFF);
   static const Color textPrimary = Color(0xFFFFFFFF);
   static const Color textSecondary = Color(0xFFB7BDCB);
@@ -96,9 +96,9 @@ abstract final class Gaps {
 }
 
 abstract final class Radii {
-  static const double card = 12;
-  static const double button = 10;
-  static const double field = 12;
+  static const double card = 18;
+  static const double button = 15;
+  static const double field = 16;
   static const double pill = 999;
 }
 
@@ -131,16 +131,16 @@ class TextSet {
   final Palette palette;
 
   TextStyle get display => TextStyle(
-        fontSize: 26,
-        height: 1.15,
+        fontSize: 28,
+        height: 1.12,
         fontWeight: FontWeight.w800,
         letterSpacing: -0.4,
         color: palette.textPrimary,
       );
 
   TextStyle get headline => TextStyle(
-        fontSize: 20,
-        height: 1.2,
+        fontSize: 21,
+        height: 1.18,
         fontWeight: FontWeight.w700,
         letterSpacing: -0.2,
         color: palette.textPrimary,
@@ -218,12 +218,31 @@ ThemeData buildAppTheme(Brightness brightness) {
     ),
     splashFactory: NoSplash.splashFactory,
     visualDensity: VisualDensity.standard,
+    iconTheme: const IconThemeData(size: 20, opticalSize: 20),
   );
 
   return base.copyWith(
     textTheme: base.textTheme.apply(
       bodyColor: p.textPrimary,
       displayColor: p.textPrimary,
+    ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: p.background,
+      foregroundColor: p.textPrimary,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        color: p.textPrimary,
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.3,
+      ),
+    ),
+    dividerTheme: DividerThemeData(
+      color: p.outline,
+      thickness: 1,
+      space: 1,
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.accent,

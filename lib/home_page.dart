@@ -39,7 +39,14 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
+  static const List<_Section> _sectionOrder = <_Section>[
+    _Section.home,
+    _Section.library,
+    _Section.settings,
+  ];
+
   static const int _pageSize = 12;
 
   static const int _maxEmptyPages = 3;
@@ -66,6 +73,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget? _settingsPage;
   FriendlyError? _error;
 
+  double _dragOffset = 0;
+  _Section? _dragTarget;
+  final Map<_Section, GlobalKey> _sectionHostKeys = <_Section, GlobalKey>{
+    for (final section in _sectionOrder) section: GlobalKey(),
+  };
+  late final AnimationController _pageSettleController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  Animation<double>? _pageSettleAnimation;
+
   List<String> get _categories => <String>['All', ...videoRepository.categories];
 
   @override
@@ -73,6 +91,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
+    _pageSettleController.addListener(() {
+      final animation = _pageSettleAnimation;
+      if (!mounted || animation == null) return;
+      setState(() => _dragOffset = animation.value);
+    });
     _loadPage(reset: true);
   }
 
@@ -115,13 +138,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       segment: LibrarySegment.downloads,
       token: ++_requestToken,
     );
-    setState(() => _section = _Section.library);
+    _transitionToSection(_Section.library);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _offlineTimer?.cancel();
+    _pageSettleController.dispose();
     _search.dispose();
     _scroll
       ..removeListener(_onScroll)
@@ -291,7 +315,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _closeSearch();
     } else if (_section != _Section.home) {
       PreviewManager.instance.stopNow(fade: false);
-      setState(() => _section = _Section.home);
+      _transitionToSection(_Section.home);
     }
   }
 
@@ -317,21 +341,111 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _onSwipe(DragEndDetails details) {
-    if (_searchOpen) return;
-    final velocity = details.primaryVelocity ?? 0;
-    if (velocity.abs() < 400) return;
+  _Section? _targetForDrag(double physicalDelta) {
+    if (physicalDelta.abs() < 0.5) return null;
     final rtl = Directionality.of(context) == TextDirection.rtl;
-    final forward = (velocity < 0) != rtl;
-    const order = <_Section>[_Section.home, _Section.library, _Section.settings];
-    final next = order.indexOf(_section) + (forward ? 1 : -1);
-    if (next < 0 || next >= order.length) return;
-    Haptics.play(Haptic.selection);
-    _onTabSelect(switch (order[next]) {
-      _Section.home => AppTab.home,
-      _Section.library => AppTab.library,
-      _Section.settings => AppTab.settings,
+    final forward = (physicalDelta < 0) != rtl;
+    final next = _sectionOrder.indexOf(_section) + (forward ? 1 : -1);
+    if (next < 0 || next >= _sectionOrder.length) return null;
+    return _sectionOrder[next];
+  }
+
+  void _onHorizontalDragStart(DragStartDetails details) {
+    if (_searchOpen) return;
+    _pageSettleController.stop();
+    setState(() {
+      _dragOffset = 0;
+      _dragTarget = null;
     });
+  }
+
+  void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_searchOpen) return;
+    final width = MediaQuery.sizeOf(context).width;
+    final nextOffset = (_dragOffset + (details.primaryDelta ?? 0))
+        .clamp(-width, width)
+        .toDouble();
+    final nextTarget = _targetForDrag(nextOffset);
+    if (nextTarget != _dragTarget && nextTarget != null) {
+      Haptics.play(Haptic.selection);
+    }
+    setState(() {
+      _dragOffset = nextTarget == null ? nextOffset * 0.2 : nextOffset;
+      _dragTarget = nextTarget;
+    });
+  }
+
+  void _onHorizontalDragEnd(DragEndDetails details) {
+    if (_searchOpen) return;
+    final width = MediaQuery.sizeOf(context).width;
+    final velocity = details.velocity.pixelsPerSecond.dx;
+    var target = _dragTarget;
+
+    if (target == null && velocity.abs() > 650) {
+      final physicalDirection = velocity.isNegative ? -1.0 : 1.0;
+      target = _targetForDrag(physicalDirection);
+      if (target != null) {
+        setState(() {
+          _dragOffset = physicalDirection * width * 0.08;
+          _dragTarget = target;
+        });
+      }
+    }
+
+    final shouldCommit = target != null &&
+        (_dragOffset.abs() > width * 0.22 || velocity.abs() > 650);
+    _settlePageDrag(shouldCommit ? target : null);
+  }
+
+  void _onHorizontalDragCancel() => _settlePageDrag(null);
+
+  void _settlePageDrag(_Section? destination) {
+    final width = MediaQuery.sizeOf(context).width;
+    final start = _dragOffset;
+    final end = destination == null
+        ? 0.0
+        : (start < 0 ? -width : width);
+    _pageSettleController
+      ..stop()
+      ..duration = Duration(
+        milliseconds: (150 + (end - start).abs() / width * 100)
+            .round()
+            .clamp(150, 260)
+            .toInt(),
+      );
+    _pageSettleAnimation = Tween<double>(begin: start, end: end).animate(
+      CurvedAnimation(
+        parent: _pageSettleController,
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    _pageSettleController.forward(from: 0).whenComplete(() {
+      if (!mounted) return;
+      setState(() {
+        if (destination != null) _section = destination;
+        _dragOffset = 0;
+        _dragTarget = null;
+      });
+      if (destination != null) Haptics.play(Haptic.medium);
+    });
+  }
+
+
+  void _transitionToSection(_Section destination) {
+    if (destination == _section) return;
+    final width = MediaQuery.sizeOf(context).width;
+    final currentIndex = _sectionOrder.indexOf(_section);
+    final destinationIndex = _sectionOrder.indexOf(destination);
+    final forward = destinationIndex > currentIndex;
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final physicalDirection = (forward != rtl) ? -1.0 : 1.0;
+
+    _pageSettleController.stop();
+    setState(() {
+      _dragOffset = physicalDirection * width * 0.06;
+      _dragTarget = destination;
+    });
+    _settlePageDrag(destination);
   }
 
   void _onTabSelect(AppTab tab) {
@@ -342,7 +456,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (_section == _Section.home) {
           _scrollToTop();
         } else {
-          setState(() => _section = _Section.home);
+          _transitionToSection(_Section.home);
         }
       case AppTab.search:
         _openSearch();
@@ -354,12 +468,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       case AppTab.library:
         if (_searchOpen) _closeSearch();
         if (_section != _Section.library) {
-          setState(() => _section = _Section.library);
+          _transitionToSection(_Section.library);
         }
       case AppTab.settings:
         if (_searchOpen) _closeSearch();
         if (_section != _Section.settings) {
-          setState(() => _section = _Section.settings);
+          _transitionToSection(_Section.settings);
         }
     }
   }
@@ -407,55 +521,81 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ? null
         : PlaybackProgress.instance.resumePosition(featured.id);
     final screen = MediaQuery.sizeOf(context);
-    _heroLimit = math.min(screen.height * 0.42, 380.0) - context.safe.top - 30;
+    _heroLimit = math.min(screen.height * 0.48, 450.0).toDouble() + context.safe.top + Gaps.sm - 30;
     final darkMode = AppColors.palette.brightness == Brightness.dark;
 
     final libraryActive = _section == _Section.library;
     final settingsActive = _section == _Section.settings;
-    if (libraryActive) {
+    final libraryVisible = libraryActive || _dragTarget == _Section.library;
+    final settingsVisible = settingsActive || _dragTarget == _Section.settings;
+    if (libraryVisible || _libraryPage != null) {
       _libraryPage = LibraryView(
         key: const ValueKey<String>('library'),
         bottomInset: bottomInset,
         onOpen: _openDetails,
-        onBrowse: () => setState(() => _section = _Section.home),
+        onBrowse: () => _transitionToSection(_Section.home),
         segmentRequest: _libraryRequest,
       );
     }
-    if (settingsActive) {
+    if (settingsVisible || _settingsPage != null) {
       _settingsPage = SettingsView(
         key: const ValueKey<String>('settings'),
         bottomInset: bottomInset,
       );
     }
-    final content = RepaintBoundary(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _SectionHost(
-            key: const ValueKey<String>('home'),
-            active: _section == _Section.home,
-            child: _buildHome(
-              margin,
-              bottomInset,
-              featured,
-              showCategories,
-              firstLoad,
-              resume,
+
+    final pageWidth = screen.width;
+    final previewOffset = _dragOffset + (_dragOffset < 0 ? pageWidth : -pageWidth);
+    Widget sectionWidget(_Section section) {
+      switch (section) {
+        case _Section.home:
+          return _buildHome(
+            margin,
+            bottomInset,
+            featured,
+            showCategories,
+            firstLoad,
+            resume,
+          );
+        case _Section.library:
+          return _libraryPage ?? const SizedBox.shrink();
+        case _Section.settings:
+          return _settingsPage ?? const SizedBox.shrink();
+      }
+    }
+
+    Widget positionedSection(_Section section) {
+      final isCurrent = section == _section;
+      final isPreview = section == _dragTarget;
+      final visible = isCurrent || isPreview;
+      final offset = isCurrent
+          ? _dragOffset
+          : (isPreview ? previewOffset : 0.0);
+      return Positioned.fill(
+        child: Transform.translate(
+          offset: Offset(offset, 0),
+          child: _SectionHost(
+            key: _sectionHostKeys[section],
+            active: visible,
+            child: IgnorePointer(
+              ignoring: !isCurrent || _dragOffset.abs() > 1,
+              child: RepaintBoundary(child: sectionWidget(section)),
             ),
           ),
-          if (_libraryPage != null)
-            _SectionHost(
-              key: const ValueKey<String>('library-host'),
-              active: libraryActive,
-              child: _libraryPage!,
-            ),
-          if (_settingsPage != null)
-            _SectionHost(
-              key: const ValueKey<String>('settings-host'),
-              active: settingsActive,
-              child: _settingsPage!,
-            ),
-        ],
+        ),
+      );
+    }
+
+    final orderedLayers = <Widget>[
+      for (final section in _sectionOrder)
+        if (section != _section && section != _dragTarget)
+          positionedSection(section),
+      positionedSection(_section),
+      if (_dragTarget != null) positionedSection(_dragTarget!),
+    ];
+    final content = RepaintBoundary(
+      child: ClipRect(
+        child: Stack(fit: StackFit.expand, children: orderedLayers),
       ),
     );
 
@@ -463,7 +603,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       valueListenable: _search,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragEnd: _onSwipe,
+        onHorizontalDragStart: _onHorizontalDragStart,
+        onHorizontalDragUpdate: _onHorizontalDragUpdate,
+        onHorizontalDragEnd: _onHorizontalDragEnd,
+        onHorizontalDragCancel: _onHorizontalDragCancel,
         child: content,
       ),
       builder: (context, searchOpen, page) {
@@ -504,7 +647,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       child: _RidingTabBar(
                         selected: searchOpen
                             ? AppTab.search
-                            : switch (_section) {
+                            : switch (_dragTarget ?? _section) {
                                 _Section.home => AppTab.home,
                                 _Section.library => AppTab.library,
                                 _Section.settings => AppTab.settings,
@@ -539,7 +682,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: CustomScrollView(
       key: const PageStorageKey<String>('home-scroll'),
       controller: _scroll,
-      physics: const ClampingScrollPhysics(
+      physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
       scrollCacheExtent: ScrollCacheExtent.pixels(
@@ -669,49 +812,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 }
 
-class _SectionHost extends StatefulWidget {
+class _SectionHost extends StatelessWidget {
   const _SectionHost({super.key, required this.active, required this.child});
 
   final bool active;
   final Widget child;
 
   @override
-  State<_SectionHost> createState() => _SectionHostState();
-}
-
-class _SectionHostState extends State<_SectionHost>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _fade = AnimationController(
-    vsync: this,
-    duration: Motion.normal,
-    value: widget.active ? 1 : 0,
-  );
-
-  @override
-  void didUpdateWidget(_SectionHost oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.active == oldWidget.active) return;
-    if (widget.active) {
-      _fade.forward(from: 0);
-    } else {
-      _fade.value = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _fade.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Offstage(
-      offstage: !widget.active,
-      child: TickerMode(
-        enabled: widget.active,
-        child: FadeTransition(opacity: _fade, child: widget.child),
-      ),
+      offstage: !active,
+      child: TickerMode(enabled: active, child: child),
     );
   }
 }
@@ -726,7 +837,7 @@ class _RidingTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final restingGap = math.max(context.safe.bottom - 4, 10.0);
-    final gap = math.max(10.0, restingGap - keyboard);
+    final gap = math.max(10.0, restingGap - keyboard).toDouble();
     return Padding(
       padding: EdgeInsets.only(bottom: keyboard),
       child: AppBottomBar(

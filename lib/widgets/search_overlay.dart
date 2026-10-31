@@ -428,7 +428,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                                   ),
                                   child: Icon(
                                     Icons.cancel_rounded,
-                                    size: 18,
+                                    size: 20,
                                     color: AppColors.textTertiary,
                                   ),
                                 ),
@@ -802,7 +802,7 @@ class _RecentRow extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.history_rounded,
-                    size: 18,
+                    size: 20,
                     color: AppColors.textTertiary,
                   ),
                   const SizedBox(width: Gaps.md),
@@ -830,7 +830,7 @@ class _RecentRow extends StatelessWidget {
             padding: const EdgeInsets.all(10),
             child: Icon(
               Icons.close_rounded,
-              size: 18,
+              size: 20,
               color: AppColors.textTertiary,
             ),
           ),

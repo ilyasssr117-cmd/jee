@@ -670,7 +670,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   opacity: _clear ? 0.55 : 1,
                   child: RoundIconButton(
                     icon: Icons.arrow_back_ios_new_rounded,
-                    iconSize: 18,
+                    iconSize: 20,
                     tapSize: kMinTapSize,
                     label: 'Back',
                     onTap: () => Navigator.of(context).maybePop(),
@@ -684,7 +684,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                     icon: _clear
                         ? Icons.visibility_off_rounded
                         : Icons.visibility_rounded,
-                    iconSize: 18,
+                    iconSize: 20,
                     tapSize: kMinTapSize,
                     label: _clear ? 'Show controls' : 'Clear mode',
                     onTap: _toggleClear,
@@ -1009,7 +1009,7 @@ class _ReelViewState extends State<_ReelView> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.fast_forward_rounded,
-                          color: Colors.white, size: 18),
+                          color: Colors.white, size: 20),
                       const SizedBox(width: 6),
                       Text('2x',
                           style: AppText.label.copyWith(color: Colors.white)),
@@ -1094,7 +1094,7 @@ class _InfoBlock extends StatelessWidget {
                 ),
                 child: item.avatarUrl == null
                     ? const Icon(Icons.person_rounded,
-                        size: 18, color: Colors.white70)
+                        size: 20, color: Colors.white70)
                     : Image.network(
                         item.avatarUrl!,
                         fit: BoxFit.cover,
@@ -1102,7 +1102,7 @@ class _InfoBlock extends StatelessWidget {
                         headers: _kMediaHeaders,
                         errorBuilder: (_, __, ___) => const Icon(
                             Icons.person_rounded,
-                            size: 18,
+                            size: 20,
                             color: Colors.white70),
                       ),
               ),
@@ -1167,14 +1167,14 @@ class _InfoBlock extends StatelessWidget {
           child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.favorite_rounded, size: 14, color: Colors.white70),
+            const Icon(Icons.favorite_rounded, size: 20, color: Colors.white70),
             const SizedBox(width: 4),
             Text(
               item.likes.isEmpty ? '0' : item.likes,
               style: AppText.caption.copyWith(color: Colors.white70),
             ),
             const SizedBox(width: Gaps.md),
-            const Icon(Icons.play_arrow_rounded, size: 16, color: Colors.white70),
+            const Icon(Icons.play_arrow_rounded, size: 20, color: Colors.white70),
             const SizedBox(width: 2),
             Text(
               _compact(item.views),
@@ -1182,7 +1182,7 @@ class _InfoBlock extends StatelessWidget {
             ),
             if (item.durationSec > 0) ...[
               const SizedBox(width: Gaps.md),
-              const Icon(Icons.schedule_rounded, size: 14, color: Colors.white70),
+              const Icon(Icons.schedule_rounded, size: 20, color: Colors.white70),
               const SizedBox(width: 4),
               Text(
                 _clock(Duration(seconds: item.durationSec)),
@@ -1443,7 +1443,7 @@ class _RailButton extends StatelessWidget {
                         backgroundColor: const Color(0x33FFFFFF),
                       ),
                     ),
-                  Icon(icon, color: iconColor, size: 22),
+                  Icon(icon, color: iconColor, size: 20),
                 ],
               ),
             ),

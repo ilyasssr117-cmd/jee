@@ -229,7 +229,10 @@ class _FlowAppState extends State<FlowApp>
                       }
                       return false;
                     },
-                    child: child ?? const SizedBox.shrink(),
+                    child: IconTheme.merge(
+                      data: const IconThemeData(size: 20, opticalSize: 20),
+                      child: child ?? const SizedBox.shrink(),
+                    ),
                   ),
                 ),
               ),

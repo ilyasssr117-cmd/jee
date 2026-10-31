@@ -19,10 +19,10 @@ class CategoryBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final margin = context.hMargin;
     return SizedBox(
-      height: 32 + 12,
+      height: 36 + 14,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.fromLTRB(margin, 6, margin, 6),
+        padding: EdgeInsets.fromLTRB(margin, 7, margin, 7),
         itemCount: categories.length,
         separatorBuilder: (_, __) => const SizedBox(width: Gaps.sm),
         itemBuilder: (context, index) {

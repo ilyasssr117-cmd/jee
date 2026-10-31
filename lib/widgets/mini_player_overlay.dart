@@ -45,9 +45,13 @@ class MiniPlayerOverlay extends StatelessWidget {
             direction: DismissDirection.horizontal,
             onDismissed: (_) => unawaited(MiniPlayer.instance.close()),
             child: Material(
-              color: AppColors.surfaceHigh,
-              elevation: 8,
-              borderRadius: BorderRadius.circular(14),
+              color: AppColors.surface,
+              elevation: 10,
+              shadowColor: Colors.black.withValues(alpha: 0.28),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: AppColors.outline),
+              ),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: _expand,

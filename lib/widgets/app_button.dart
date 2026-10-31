@@ -50,12 +50,21 @@ class AppButton extends StatelessWidget {
       onTap: loading ? null : onPressed,
       child: AnimatedContainer(
         duration: Motion.quick,
-        height: 40,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(Radii.button),
           border: Border.all(color: border),
+          boxShadow: primary
+              ? [
+                  BoxShadow(
+                    color: AppColors.accent.withValues(alpha: 0.24),
+                    blurRadius: 14,
+                    offset: const Offset(0, 5),
+                  ),
+                ]
+              : const [],
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
@@ -66,7 +75,7 @@ class AppButton extends StatelessWidget {
             else if (icon != null)
               Icon(
                 icon,
-                size: 18,
+                size: 20,
                 color: iconColor ?? foreground,
               ),
             if (loading || icon != null) const SizedBox(width: 6),
@@ -110,8 +119,8 @@ class AppChip extends StatelessWidget {
       child: AnimatedContainer(
         duration: Motion.normal,
         curve: Motion.curve,
-        height: 32,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        height: 36,
+        padding: const EdgeInsets.symmetric(horizontal: 15),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected
@@ -186,7 +195,7 @@ class RoundIconButton extends StatelessWidget {
               color: background,
               border: Border.all(color: const Color(0x26FFFFFF)),
             ),
-            child: Icon(icon, size: iconSize ?? size * 0.55, color: color),
+            child: Icon(icon, size: iconSize ?? 22, color: color),
           ),
         ),
       ),
@@ -205,7 +214,7 @@ class PageBackButton extends StatelessWidget {
       offset: const Offset(-3, -3),
       child: RoundIconButton(
         icon: Icons.arrow_back_ios_new_rounded,
-        iconSize: 18,
+        iconSize: 20,
         tapSize: kMinTapSize,
         label: 'Back',
         onTap: onPressed ?? () => Navigator.of(context).maybePop(),

@@ -465,7 +465,7 @@ class _VideoRow extends StatelessWidget {
               child: AspectRatio(
                 aspectRatio: 16 / 9,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(Radii.card),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -655,7 +655,7 @@ class _IconAction extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.all(8),
-        child: Icon(icon, size: 22, color: AppColors.textSecondary),
+        child: Icon(icon, size: 20, color: AppColors.textSecondary),
       ),
     );
   }

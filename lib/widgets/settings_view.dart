@@ -253,11 +253,11 @@ class _Group extends StatelessWidget {
           DecoratedBox(
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(Radii.card),
               border: Border.all(color: AppColors.outline),
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(Radii.card),
               child: Column(children: rows),
             ),
           ),
@@ -309,13 +309,13 @@ class _Row extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 30,
-                height: 30,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: color,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(icon, size: 18, color: Colors.white),
+                child: Icon(icon, size: 20, color: Colors.white),
               ),
               const SizedBox(width: Gaps.md),
               Expanded(

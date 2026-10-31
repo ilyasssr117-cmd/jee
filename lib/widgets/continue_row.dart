@@ -102,7 +102,7 @@ class _ContinueCard extends StatelessWidget {
                           height: 34,
                           child: Icon(
                             Icons.play_arrow_rounded,
-                            size: 24,
+                            size: 20,
                             color: Colors.white,
                           ),
                         ),

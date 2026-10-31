@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -31,78 +32,91 @@ class HomeHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final margin = context.hMargin;
     final topPad = context.safe.top + Gaps.sm;
-    const topBar = _TopBar();
-
     if (video == null && !loading) {
       return Padding(
-        padding: EdgeInsets.fromLTRB(margin, topPad, margin, 0),
-        child: topBar,
+        padding: EdgeInsets.fromLTRB(margin, topPad, margin, Gaps.md),
+        child: const _TopBar(),
       );
     }
 
     final size = MediaQuery.sizeOf(context);
-    final height = math.min(size.height * 0.42, 380.0);
+    final height = math.min(size.height * 0.48, 450.0).toDouble();
     final featured = video;
 
-    return SizedBox(
-      height: height,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
-        child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (featured != null)
-            VideoArtwork(video: featured, showLabel: false)
-          else
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF1B2033), OnDark.background],
-                ),
-              ),
-            ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0x330B0D12), Color(0xE60B0D12)],
-              ),
-            ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xB30B0D12), Color(0x000B0D12)],
-                stops: [0, 0.3],
-              ),
-            ),
-          ),
-          Positioned(left: margin, right: margin, top: topPad, child: topBar),
-          Positioned(
-            left: margin,
-            right: margin,
-            bottom: Gaps.lg,
-            child: AnimatedSwitcher(
-              duration: Motion.fade,
-              child: featured == null
-                  ? const _HeroSkeleton(key: ValueKey<String>('skeleton'))
-                  : _HeroDetails(
-                      key: ValueKey<String>(featured.id),
-                      video: featured,
-                      playLabel: playLabel,
-                      playBusy: playBusy,
-                      onPlay: onPlay,
-                      onDetails: onDetails,
+    return Padding(
+      padding: EdgeInsets.fromLTRB(margin, topPad, margin, Gaps.sm),
+      child: SizedBox(
+        height: height,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(30),
+          child: DecoratedBox(
+            decoration: const BoxDecoration(color: OnDark.surface),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (featured != null)
+                  VideoArtwork(video: featured, showLabel: false)
+                else
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF401D27), OnDark.background],
+                      ),
                     ),
+                  ),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color(0x4D080A0F),
+                        Color(0x08080A0F),
+                        Color(0xF2080A0F),
+                      ],
+                      stops: [0, 0.35, 1],
+                    ),
+                  ),
+                ),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [Color(0x32080A0F), Colors.transparent],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 16,
+                  top: 16,
+                  child: const _TopBar(),
+                ),
+                Positioned(
+                  left: 18,
+                  right: 18,
+                  bottom: 18,
+                  child: AnimatedSwitcher(
+                    duration: Motion.fade,
+                    switchInCurve: Curves.easeOutCubic,
+                    child: featured == null
+                        ? const _HeroSkeleton(key: ValueKey<String>('skeleton'))
+                        : _HeroDetails(
+                            key: ValueKey<String>(featured.id),
+                            video: featured,
+                            playLabel: playLabel,
+                            playBusy: playBusy,
+                            onPlay: onPlay,
+                            onDetails: onDetails,
+                          ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -113,30 +127,64 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 30,
-          height: 30,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(17),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
           decoration: BoxDecoration(
-            color: AppColors.accentStrong,
-            borderRadius: BorderRadius.circular(9),
+            color: const Color(0x6B101319),
+            borderRadius: BorderRadius.circular(17),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
           ),
-          child: const Icon(
-            Icons.play_arrow_rounded,
-            size: 22,
-            color: Colors.white,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [AppColors.accent, AppColors.accentStrong],
+                  ),
+                  borderRadius: BorderRadius.circular(11),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.35),
+                      blurRadius: 14,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(Icons.play_arrow_rounded, size: 20, color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 9),
+              Text(
+                'FLOW',
+                style: darkText.label.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.8,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Container(
+                width: 5,
+                height: 5,
+                decoration: const BoxDecoration(
+                  color: AppColors.accent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: Gaps.sm),
-        Text(
-          'FLOW',
-          style: darkText.label.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.6,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -163,22 +211,53 @@ class _HeroDetails extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('FEATURED', style: darkText.overline),
-        const SizedBox(height: 6),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: const BoxDecoration(
+                color: AppColors.accent,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              'FEATURED FOR YOU',
+              style: darkText.overline.copyWith(
+                color: const Color(0xFFFF929A),
+                letterSpacing: 1.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Text(
           video.title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: darkText.display.copyWith(fontSize: 22),
+          style: darkText.display.copyWith(
+            fontSize: 25,
+            height: 1.08,
+            letterSpacing: -0.7,
+            color: Colors.white,
+            shadows: const [
+              Shadow(color: Color(0x88000000), blurRadius: 18, offset: Offset(0, 3)),
+            ],
+          ),
         ),
         const SizedBox(height: Gaps.sm),
         VideoMetaLine(
           video: video,
-          style: darkText.caption.copyWith(color: OnDark.textSecondary),
+          style: darkText.caption.copyWith(
+            color: const Color(0xFFD6D8DE),
+            fontWeight: FontWeight.w600,
+          ),
           showDuration: true,
           showCategory: true,
         ),
-        const SizedBox(height: Gaps.md),
+        const SizedBox(height: Gaps.lg),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -214,15 +293,15 @@ class _HeroSkeleton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SkeletonBlock(width: 70, height: 11, color: OnDark.surfaceHigh),
-          SizedBox(height: 10),
-          SkeletonBlock(width: 260, height: 22, color: OnDark.surfaceHigh),
+          SkeletonBlock(width: 104, height: 11, color: OnDark.surfaceHigh),
+          SizedBox(height: 12),
+          SkeletonBlock(width: 260, height: 25, color: OnDark.surfaceHigh),
           SizedBox(height: 8),
-          SkeletonBlock(width: 180, height: 22, color: OnDark.surfaceHigh),
-          SizedBox(height: Gaps.md),
+          SkeletonBlock(width: 190, height: 25, color: OnDark.surfaceHigh),
+          SizedBox(height: Gaps.lg),
           SkeletonBlock(
-            width: 150,
-            height: 40,
+            width: 156,
+            height: 44,
             radius: Radii.button,
             color: OnDark.surfaceHigh,
           ),

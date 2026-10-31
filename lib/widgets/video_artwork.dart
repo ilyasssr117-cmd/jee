@@ -123,7 +123,7 @@ class _Placeholder extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF232A40), Color(0xFF151923)],
+          colors: [Color(0xFF3A2028), Color(0xFF17181E)],
         ),
       ),
       child: Center(

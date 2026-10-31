@@ -44,7 +44,7 @@ class FavoritesView extends StatelessWidget {
                   children: [
                     const Icon(
                       Icons.star_rounded,
-                      size: 24,
+                      size: 20,
                       color: AppColors.star,
                     ),
                     const SizedBox(width: Gaps.sm),

@@ -273,7 +273,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     children: [
                       const Icon(
                         Icons.error_outline_rounded,
-                        size: 18,
+                        size: 20,
                         color: OnDark.error,
                       ),
                       const SizedBox(width: Gaps.sm),
@@ -562,7 +562,7 @@ class _ModelChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.person_rounded, size: 18, color: AppColors.accent),
+            const Icon(Icons.person_rounded, size: 20, color: AppColors.accent),
             const SizedBox(width: 6),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 220),
@@ -580,7 +580,7 @@ class _ModelChip extends StatelessWidget {
             const SizedBox(width: 2),
             Icon(
               Icons.chevron_right_rounded,
-              size: 18,
+              size: 20,
               color: AppColors.textTertiary,
             ),
           ],

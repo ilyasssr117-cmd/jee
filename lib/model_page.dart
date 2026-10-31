@@ -574,7 +574,7 @@ class _ModeSwitch extends StatelessWidget {
               children: [
                 Icon(
                   icon,
-                  size: 18,
+                  size: 20,
                   color: selected ? Colors.white : AppColors.textSecondary,
                 ),
                 const SizedBox(width: 6),

@@ -130,7 +130,7 @@ class _TopBar extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(17),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: Container(
           padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
           decoration: BoxDecoration(

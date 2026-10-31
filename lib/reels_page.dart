@@ -48,9 +48,9 @@ const Map<String, String> _kMediaHeaders = {
   'Accept': '*/*',
 };
 
-const int _kFirstBatch = 20;
-const int _kNextBatch = 20;
-const int _kPreloadAhead = 4;
+const int _kFirstBatch = 12;
+const int _kNextBatch = 12;
+const int _kPreloadAhead = 2;
 const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
 const Duration _kSeekStep = Duration(seconds: 10);
@@ -382,14 +382,16 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 
   void _ensureNeighbors() {
-    for (final i in <int>[_current - 1, _current, _current + 1]) {
+    // iPhone XS has limited GPU/video decode headroom. Keep only the current
+    // reel and the next reel warm instead of decoding three videos at once.
+    for (final i in <int>[_current, _current + 1]) {
       if (i >= 0 && i < _items.length) _controllerFor(i);
     }
     if (mounted) setState(() {});
   }
 
   void _syncControllers(int index) {
-    final keep = <int>{index - 1, index, index + 1}
+    final keep = <int>{index, index + 1}
         .where((i) => i >= 0 && i < _items.length)
         .toSet();
     for (final i in _controllers.keys.toList()) {
@@ -397,8 +399,16 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         _controllers.remove(i)?.dispose();
       }
     }
-    for (final i in keep) {
-      _controllerFor(i);
+    // Start the current video first. The next video is warmed separately so
+    // two AVPlayer instances do not initialize/decode simultaneously during a
+    // swipe on older iPhones.
+    if (keep.contains(index)) _controllerFor(index);
+    final next = index + 1;
+    if (keep.contains(next)) {
+      Future<void>.delayed(const Duration(milliseconds: 120), () {
+        if (!mounted || _current != index || !_controllers.containsKey(index)) return;
+        _controllerFor(next);
+      });
     }
     for (final entry in _controllers.entries) {
       final c = entry.value;
@@ -408,7 +418,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       } else {
         c.pause();
         c.setPlaybackSpeed(1);
-        c.seekTo(Duration.zero);
       }
     }
     if (mounted) setState(() {});
@@ -1080,7 +1089,7 @@ class _ReelViewState extends State<_ReelView> {
             child: Image.network(
               item.thumbUrl!,
               fit: BoxFit.cover,
-              cacheWidth: 40,
+              cacheWidth: 360,
               filterQuality: FilterQuality.medium,
               gaplessPlayback: true,
               headers: _kMediaHeaders,
@@ -1088,24 +1097,6 @@ class _ReelViewState extends State<_ReelView> {
             ),
           ),
         const ColoredBox(color: Color(0xB3000000)),
-        if (item.thumbUrl != null)
-          IgnorePointer(
-            child: AnimatedOpacity(
-              duration: Motion.fade,
-              curve: Motion.curve,
-              opacity: ready ? 0 : 1,
-              child: Image.network(
-                item.thumbUrl!,
-                fit: BoxFit.contain,
-                cacheWidth: (MediaQuery.sizeOf(context).width *
-                        MediaQuery.devicePixelRatioOf(context))
-                    .round(),
-                gaplessPlayback: true,
-                headers: _kMediaHeaders,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-              ),
-            ),
-          ),
 
         Semantics(
           button: true,
@@ -1123,16 +1114,7 @@ class _ReelViewState extends State<_ReelView> {
               fit: StackFit.expand,
               children: [
                 if (ready && c != null)
-                  RepaintBoundary(
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0, end: 1),
-                      duration: Motion.fade,
-                      curve: Motion.curve,
-                      builder: (_, value, child) =>
-                          Opacity(opacity: value, child: child),
-                      child: _video(context, c),
-                    ),
-                  )
+                  RepaintBoundary(child: _video(context, c))
                 else if (c != null && c.value.hasError)
                   Center(
                     child: Column(
@@ -1169,9 +1151,7 @@ class _ReelViewState extends State<_ReelView> {
                           duration: Motion.normal,
                           opacity: v.isPlaying ? 0 : 1,
                           child: ClipOval(
-                            child: BackdropFilter(
-                              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                              child: Container(
+                            child: Container(
                                 width: 64,
                                 height: 64,
                                 decoration: BoxDecoration(
@@ -1201,7 +1181,6 @@ class _ReelViewState extends State<_ReelView> {
                                   size: 36,
                                 ),
                               ),
-                            ),
                           ),
                         ),
                       ),
@@ -1272,9 +1251,7 @@ class _ReelViewState extends State<_ReelView> {
                 opacity: _fast ? 1 : 0,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(Radii.pill),
-                  child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: Container(
+                  child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
                         vertical: 7,
@@ -1663,7 +1640,7 @@ class _StallSpinnerState extends State<_StallSpinner> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onValue);
-    _timer = Timer.periodic(const Duration(milliseconds: 250), (_) => _tick());
+    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) => _tick());
   }
 
   @override
@@ -1685,6 +1662,10 @@ class _StallSpinnerState extends State<_StallSpinner> {
   void _tick() {
     if (!mounted) return;
     final v = widget.controller.value;
+    if (!v.isBuffering) {
+      if (_show) setState(() => _show = false);
+      return;
+    }
     final stalled = v.isInitialized &&
         v.isPlaying &&
         v.isBuffering &&
@@ -1737,9 +1718,7 @@ class _RailButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             ClipOval(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                child: AnimatedContainer(
+              child: AnimatedContainer(
                   duration: Motion.quick,
                   width: 44,
                   height: 44,

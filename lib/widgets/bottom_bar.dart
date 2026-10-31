@@ -120,7 +120,7 @@ class _AppBottomBarState extends State<AppBottomBar> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(30),
             child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 28, sigmaY: 28),
+              filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
               child: Container(
                 width: width,
                 height: 70,
@@ -233,9 +233,7 @@ class _GlassIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: DecoratedBox(
+      child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,

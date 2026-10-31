@@ -74,7 +74,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   void _openModel(ModelRef model) {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => ModelPage(model: model)),
+      adaptivePageRoute<void>(context, builder: (_) => ModelPage(model: model)),
     );
   }
 
@@ -108,7 +108,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   void _openRelated(Video video, List<Video> related) {
     Navigator.of(context).pushReplacement<void, void>(
-      MaterialPageRoute<void>(
+      adaptivePageRoute<void>(
+        context,
         builder: (_) => VideoDetailsPage(video: video, queue: related),
       ),
     );
@@ -179,7 +180,11 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                VideoArtwork(video: video, showLabel: false),
+                Hero(
+                  tag: 'video-artwork-${video.id}',
+                  transitionOnUserGestures: true,
+                  child: VideoArtwork(video: video, showLabel: false),
+                ),
                 const DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(

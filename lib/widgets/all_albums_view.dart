@@ -157,7 +157,8 @@ class _AllAlbumsViewState extends State<AllAlbumsView> {
                   album: album,
                   subtitle: album.modelName,
                   onTap: () => Navigator.of(context).push<void>(
-                    MaterialPageRoute<void>(
+                    adaptivePageRoute<void>(
+                      context,
                       builder: (_) => AlbumPage(
                         album: album,
                         modelName: album.modelName,

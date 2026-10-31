@@ -132,7 +132,8 @@ class _SavedAlbumCard extends StatelessWidget {
     return Pressable(
       semanticLabel: 'Album ${album.title}',
       onTap: () => Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
+        adaptivePageRoute<void>(
+          context,
           builder: (_) => SavedAlbumPage(albumId: album.id),
         ),
       ),

@@ -33,6 +33,17 @@ void main() {
     expect(await cache.fetch('key', loader, force: true), 2);
   });
 
+  test('expired entries are pruned and fetched again', () async {
+    final cache = TtlCache<int>(ttl: const Duration(milliseconds: 1));
+    var calls = 0;
+    Future<int> loader() async => ++calls;
+
+    expect(await cache.fetch('key', loader), 1);
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    expect(await cache.fetch('key', loader), 2);
+    expect(calls, 2);
+  });
+
   test('callers asking at the same time share one running request', () async {
     final cache = TtlCache<int>();
     var calls = 0;

@@ -25,7 +25,7 @@ class ModelPage extends StatefulWidget {
 
 void openModelPage(BuildContext context, ModelRef model) {
   Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(builder: (_) => ModelPage(model: model)),
+    adaptivePageRoute<void>(context, builder: (_) => ModelPage(model: model)),
   );
 }
 
@@ -143,7 +143,8 @@ class _ModelPageState extends State<ModelPage> {
 
   void _openAlbum(AlbumRef album) {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
+      adaptivePageRoute<void>(
+        context,
         builder: (_) => AlbumPage(album: album, modelName: widget.model.name),
       ),
     );
@@ -201,7 +202,8 @@ class _ModelPageState extends State<ModelPage> {
 
   void _openVideo(Video video) {
     Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
+      adaptivePageRoute<void>(
+        context,
         builder: (_) => VideoDetailsPage(video: video, queue: _videos),
       ),
     );

@@ -1,4 +1,5 @@
-import 'package:flutter/cupertino.dart' show CupertinoSlidingSegmentedControl;
+import 'package:flutter/cupertino.dart'
+    show CupertinoIcons, CupertinoSlidingSegmentedControl;
 import 'package:flutter/material.dart';
 
 import '../app_settings.dart';
@@ -226,9 +227,22 @@ class _Group extends StatelessWidget {
           ),
           DecoratedBox(
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: AppColors.palette.brightness == Brightness.dark
+                    ? const [Color(0xE5222630), Color(0xD9161922)]
+                    : const [Color(0xF8FFFFFF), Color(0xEAF0F2F8)],
+              ),
               borderRadius: BorderRadius.circular(Radii.card),
               border: Border.all(color: AppColors.outline),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 18,
+                  offset: const Offset(0, 7),
+                ),
+              ],
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(Radii.card),
@@ -304,7 +318,14 @@ class _Row extends StatelessWidget {
                   ],
                 ),
               ),
-              if (trailing != null) trailing!,
+              if (trailing != null)
+                trailing!
+              else if (onTap != null)
+                Icon(
+                  CupertinoIcons.chevron_right,
+                  size: 15,
+                  color: AppColors.textTertiary,
+                ),
             ],
           ),
         ),

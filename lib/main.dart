@@ -68,8 +68,10 @@ Future<void> _bootstrap() async {
   };
 
   final imageCache = PaintingBinding.instance.imageCache;
-  imageCache.maximumSize = 200;
-  imageCache.maximumSizeBytes = 80 << 20;
+  // Keep the decoded-image cache bounded for older iPhones. Large image
+  // caches compete with AVPlayer's video buffers and can cause long FPS drops.
+  imageCache.maximumSize = 120;
+  imageCache.maximumSizeBytes = 48 << 20;
 
   await applyBrowseOrientation();
 
@@ -149,6 +151,14 @@ class _FlowAppState extends State<FlowApp>
 
   @override
   void didChangePlatformBrightness() => _onSettings();
+
+  @override
+  void didHaveMemoryPressure() {
+    final cache = PaintingBinding.instance.imageCache;
+    cache.clear();
+    cache.clearLiveImages();
+    PreviewManager.instance.stopNow(fade: false);
+  }
 
   void _applyPalette() {
     AppColors.palette =

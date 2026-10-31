@@ -1,4 +1,5 @@
-import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/cupertino.dart'
+    show CupertinoPageRoute, CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 abstract final class OnDark {
@@ -354,6 +355,21 @@ ThemeData buildAppTheme(Brightness brightness) {
       ),
     ),
   );
+}
+
+
+/// Uses the interactive iOS edge-swipe route on Apple platforms while keeping
+/// the standard Material route on Android and desktop platforms.
+Route<T> adaptivePageRoute<T>(
+  BuildContext context, {
+  required WidgetBuilder builder,
+  RouteSettings? settings,
+}) {
+  final platform = Theme.of(context).platform;
+  if (platform == TargetPlatform.iOS || platform == TargetPlatform.macOS) {
+    return CupertinoPageRoute<T>(builder: builder, settings: settings);
+  }
+  return MaterialPageRoute<T>(builder: builder, settings: settings);
 }
 
 class FadePageRoute<T> extends PageRouteBuilder<T> {

@@ -19,9 +19,19 @@ class TtlCache<V> {
   final Map<String, Future<V>> _running = <String, Future<V>>{};
 
   V? peek(String key) {
+    _pruneExpired();
     final hit = _entries[key];
-    if (hit != null && DateTime.now().isBefore(hit.expires)) return hit.value;
+    if (hit != null) {
+      _entries.remove(key);
+      _entries[key] = hit;
+      return hit.value;
+    }
     return null;
+  }
+
+  void _pruneExpired() {
+    final now = DateTime.now();
+    _entries.removeWhere((_, entry) => !now.isBefore(entry.expires));
   }
 
   Future<V> fetch(
@@ -29,6 +39,7 @@ class TtlCache<V> {
     Future<V> Function() loader, {
     bool force = false,
   }) {
+    _pruneExpired();
     if (!force) {
       final hit = _entries[key];
       if (hit != null && DateTime.now().isBefore(hit.expires)) {

@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'app_settings.dart';
 import 'models.dart';
 import 'media_headers.dart';
+import 'mini_player.dart';
 import 'playback_source.dart';
 import 'video_repository.dart';
 
@@ -46,6 +47,9 @@ class PreviewManager {
   _LifecycleObserver? _observer;
 
   void requestPreview(Video video) {
+    // Do not start another decoder while the floating player is already active.
+    // On older iPhones this avoids competing AVPlayer instances during browsing.
+    if (MiniPlayer.instance.active) return;
     _observer ??= _LifecycleObserver(this);
     if (active.value == video.id) return;
     final generation = ++_generation;

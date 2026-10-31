@@ -120,7 +120,7 @@ class _AppBottomBarState extends State<AppBottomBar> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(30),
             child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
               child: Container(
                 width: width,
                 height: 70,
@@ -143,8 +143,8 @@ class _AppBottomBarState extends State<AppBottomBar> {
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.26),
-                      blurRadius: 32,
-                      offset: const Offset(0, 12),
+                      blurRadius: 24,
+                      offset: const Offset(0, 9),
                     ),
                     BoxShadow(
                       color: AppColors.accent.withValues(alpha: 0.08),

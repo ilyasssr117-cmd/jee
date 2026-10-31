@@ -49,9 +49,10 @@ const Map<String, String> _kMediaHeaders = {
 const int _kFirstBatch = 12;
 const int _kNextBatch = 12;
 const int _kPreloadAhead = 2;
+const Duration _kNeighborPreloadDelay = Duration(milliseconds: 240);
+const Duration _kControlsHideDelay = Duration(seconds: 4);
 const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
-const Duration _kSeekStep = Duration(seconds: 10);
 const Duration _kReelDoubleTapWindow = Duration(milliseconds: 280);
 const Duration _kReelLongPressDelay = Duration(milliseconds: 210);
 const double _kReelMoveSlop = 14;
@@ -262,6 +263,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   final PageController _pager = PageController();
   final List<ReelItem> _items = <ReelItem>[];
   final Map<int, VideoPlayerController> _controllers = {};
+  final Map<VideoPlayerController, Future<void>> _initializations = {};
+  Future<void> _disposeTail = Future<void>.value();
 
   final ValueNotifier<Map<String, double>> _saving =
       ValueNotifier<Map<String, double>>(const {});
@@ -288,8 +291,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    for (final c in _controllers.values) {
-      c.dispose();
+    for (final controller in _controllers.values) {
+      unawaited(_disposeReelController(controller));
     }
     _controllers.clear();
     _pager.dispose();
@@ -302,13 +305,36 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final c = _controllers[_current];
-    if (c == null || !c.value.isInitialized) return;
     if (state == AppLifecycleState.resumed) {
-      if (_resumeOnForeground) c.play();
+      if (c != null && c.value.isInitialized && _resumeOnForeground) {
+        unawaited(c.play());
+      }
       _resumeOnForeground = false;
-    } else if (c.value.isPlaying) {
-      _resumeOnForeground = true;
-      c.pause();
+      _ensureNeighbors();
+      return;
+    }
+
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      if (c != null && c.value.isInitialized && c.value.isPlaying) {
+        _resumeOnForeground = true;
+        unawaited(c.pause());
+      }
+      // Release the speculative decoder while the app is in the background.
+      for (final index in _controllers.keys.toList()) {
+        if (index != _current) _evictController(index);
+      }
+    }
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    // Keep only the visible decoder alive. The next reel can be prepared again
+    // when the user returns to active browsing.
+    for (final index in _controllers.keys.toList()) {
+      if (index != _current) _evictController(index);
     }
   }
 
@@ -342,27 +368,74 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
   }
 
+  bool _ownsController(int index, VideoPlayerController controller) =>
+      mounted && identical(_controllers[index], controller);
+
+  Future<void> _disposeReelController(VideoPlayerController controller) {
+    // Serialize native AVPlayer teardown. Rapid swipes otherwise let old
+    // players overlap their disposal with initialization of several new ones.
+    final disposal = _disposeTail.then((_) async {
+      // Never tear down AVPlayer while initialize() is still configuring it.
+      // Wait for that operation first, then release the native decoder.
+      final initialization = _initializations[controller];
+      if (initialization != null) {
+        try {
+          await initialization.timeout(const Duration(seconds: 30));
+        } catch (_) {}
+      }
+      try {
+        await controller.pause();
+      } catch (_) {}
+      try {
+        await controller.dispose().timeout(const Duration(seconds: 4));
+      } catch (_) {}
+    });
+    _disposeTail = disposal;
+    return disposal;
+  }
+
+  void _evictController(int index) {
+    final controller = _controllers.remove(index);
+    if (controller != null) unawaited(_disposeReelController(controller));
+  }
+
   VideoPlayerController _build(String url, int index, {String? fallback}) {
-    final c = VideoPlayerController.networkUrl(
+    final controller = VideoPlayerController.networkUrl(
       Uri.parse(url),
       httpHeaders: _kMediaHeaders,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
-    c.setLooping(true);
-    c.initialize().then((_) {
-      if (!mounted || _controllers[index] != c) return;
-      c.setVolume(_muted ? 0 : 1);
-      if (index == _current) c.play();
-      setState(() {});
-    }).catchError((_) {
-      if (!mounted || _controllers[index] != c) return;
-      if (fallback != null) {
-        c.dispose();
-        _controllers[index] = _build(fallback, index);
+
+    final initialization = () async {
+      try {
+        // Let evicted native players finish teardown before allocating another
+        // decoder. This is especially important on the iPhone XS memory budget.
+        await _disposeTail;
+        if (!_ownsController(index, controller)) return;
+        await controller.setLooping(true);
+        await controller.initialize().timeout(const Duration(seconds: 28));
+        if (!_ownsController(index, controller)) return;
+        await controller.setVolume(index == _current && !_muted ? 1 : 0);
+        if (index == _current) await controller.play();
+        if (mounted) setState(() {});
+      } catch (error) {
+        if (!_ownsController(index, controller)) return;
+        // Remove failed controllers even when no alternate URL exists, so a
+        // later rebuild can retry rather than retaining a broken decoder.
+        _controllers.remove(index);
+        unawaited(_disposeReelController(controller));
+        if (fallback != null) _controllers[index] = _build(fallback, index);
+        if (mounted) setState(() {});
+        if (kDebugMode) debugPrint('[REELS] controller init failed: $error');
       }
-      setState(() {});
-    });
-    return c;
+    }();
+    _initializations[controller] = initialization;
+    unawaited(initialization.whenComplete(() {
+      if (identical(_initializations[controller], initialization)) {
+        _initializations.remove(controller);
+      }
+    }));
+    return controller;
   }
 
   VideoPlayerController _controllerFor(int index) {
@@ -374,18 +447,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   void _retry(int index) {
     if (index < 0 || index >= _items.length) return;
-    _controllers.remove(index)?.dispose();
+    _evictController(index);
     _controllerFor(index);
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   void _ensureNeighbors() {
-    // iPhone XS has limited GPU/video decode headroom. Keep only the current
-    // reel and the next reel warm instead of decoding three videos at once.
-    for (final i in <int>[_current, _current + 1]) {
-      if (i >= 0 && i < _items.length) _controllerFor(i);
-    }
-    if (mounted) setState(() {});
+    _syncControllers(_current);
   }
 
   void _syncControllers(int index) {
@@ -393,30 +461,33 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         .where((i) => i >= 0 && i < _items.length)
         .toSet();
     for (final i in _controllers.keys.toList()) {
-      if (!keep.contains(i)) {
-        _controllers.remove(i)?.dispose();
+      if (!keep.contains(i)) _evictController(i);
+    }
+
+    // Keep at most two AVPlayer instances: the visible reel and one neighbor.
+    // Initialize the next item after the current one has had a head start.
+    if (keep.contains(index)) _controllerFor(index);
+    for (final entry in _controllers.entries) {
+      final controller = entry.value;
+      if (!controller.value.isInitialized) continue;
+      if (entry.key == index) {
+        unawaited(controller.setVolume(_muted ? 0 : 1));
+        unawaited(controller.play());
+      } else {
+        unawaited(controller.pause());
+        unawaited(controller.setVolume(0));
+        unawaited(controller.setPlaybackSpeed(1));
       }
     }
-    // Start the current video first. The next video is warmed separately so
-    // two AVPlayer instances do not initialize/decode simultaneously during a
-    // swipe on older iPhones.
-    if (keep.contains(index)) _controllerFor(index);
+
     final next = index + 1;
     if (keep.contains(next)) {
-      Future<void>.delayed(const Duration(milliseconds: 120), () {
-        if (!mounted || _current != index || !_controllers.containsKey(index)) return;
-        _controllerFor(next);
+      Future<void>.delayed(_kNeighborPreloadDelay, () {
+        if (!mounted || _current != index || !_controllers.containsKey(index)) {
+          return;
+        }
+        if (_controllers.length < 2) _controllerFor(next);
       });
-    }
-    for (final entry in _controllers.entries) {
-      final c = entry.value;
-      if (!c.value.isInitialized) continue;
-      if (entry.key == index) {
-        c.play();
-      } else {
-        c.pause();
-        c.setPlaybackSpeed(1);
-      }
     }
     if (mounted) setState(() {});
   }
@@ -424,15 +495,24 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void _onPageChanged(int index) {
     _current = index;
     _syncPending = true;
+
+    // Evict the reel that just left the screen immediately instead of waiting
+    // for scroll-end. This prevents a third decoder living through long swipes.
+    final keep = <int>{index, index + 1};
+    for (final oldIndex in _controllers.keys.toList()) {
+      if (!keep.contains(oldIndex)) _evictController(oldIndex);
+    }
+
+    final current = _controllerFor(index);
+    if (current.value.isInitialized) {
+      unawaited(current.setVolume(_muted ? 0 : 1));
+      unawaited(current.play());
+    }
     for (final entry in _controllers.entries) {
-      final c = entry.value;
-      if (!c.value.isInitialized) continue;
-      if (entry.key == index) {
-        c.play();
-      } else {
-        c.pause();
-        c.setPlaybackSpeed(1);
-      }
+      if (entry.key == index || !entry.value.value.isInitialized) continue;
+      unawaited(entry.value.pause());
+      unawaited(entry.value.setVolume(0));
+      unawaited(entry.value.setPlaybackSpeed(1));
     }
     if (index >= _items.length - _kPreloadAhead) _loadMore();
   }
@@ -501,6 +581,15 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     if (_enqueue(item)) _toast('Downloading\u2026');
   }
 
+  void _like(ReelItem item) {
+    final id = 'reel_${item.id}';
+    if (!FavoritesStore.instance.isFavorite(id)) {
+      _toggleFavorite(item);
+    } else {
+      Haptics.play(Haptic.light);
+    }
+  }
+
   void _toggleFavorite(ReelItem item) {
     final favorites = FavoritesStore.instance;
     final id = 'reel_${item.id}';
@@ -539,6 +628,30 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         cancelButton: CupertinoActionSheetAction(
           onPressed: () => Navigator.of(sheet).pop(),
           child: const Text('Cancel'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDetails(ReelItem item) async {
+    Haptics.play(Haptic.light);
+    final facts = <String>[
+      if (item.author.isNotEmpty) '@${item.author}',
+      if (item.views > 0) '${_compact(item.views)} views',
+      if (item.likes.isNotEmpty) '${item.likes} likes',
+      if (item.durationSec > 0)
+        _clock(Duration(seconds: item.durationSec)),
+      if (item.tags.isNotEmpty)
+        item.tags.take(8).map((tag) => '#$tag').join('  '),
+    ].join('  ·  ');
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (sheet) => CupertinoActionSheet(
+        title: Text(item.title.isEmpty ? 'Reel details' : item.title),
+        message: Text(facts.isEmpty ? 'No additional details.' : facts),
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(sheet).pop(),
+          child: const Text('Done'),
         ),
       ),
     );
@@ -631,6 +744,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   key: ValueKey(item.id),
                   item: item,
                   controller: _controllers[i],
+                  isActive: i == _current,
                   muted: _muted,
                   saving: _saving,
                   isLast: i == _items.length - 1 && _exhausted,
@@ -638,14 +752,21 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   onMute: _toggleMute,
                   clear: _clear,
                   onFavorite: () => _toggleFavorite(item),
+                  onLike: () => _like(item),
                   onSaveMenu: () => _showSaveMenu(item),
+                  onDetails: () => _showDetails(item),
                   onRetry: () => _retry(i),
                 );
               },
               ),
             )
           else if (_loading)
-            const Center(child: CircularProgressIndicator())
+            const Center(
+              child: CupertinoActivityIndicator(
+                radius: 14,
+                color: Colors.white70,
+              ),
+            )
           else if (_error != null)
             _ErrorView(message: _error!, onRetry: () => _loadMore(first: true))
           else
@@ -728,7 +849,7 @@ class _ForYouPill extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        filter: ui.ImageFilter.blur(sigmaX: 7, sigmaY: 7),
         child: Container(
           constraints: BoxConstraints(maxWidth: compact ? 106 : 124),
           padding: EdgeInsets.symmetric(
@@ -812,9 +933,7 @@ class _ReelsTopButton extends StatelessWidget {
             width: 44,
             height: 44,
             child: ClipOval(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-                child: DecoratedBox(
+              child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       begin: Alignment.topLeft,
@@ -827,9 +946,9 @@ class _ReelsTopButton extends StatelessWidget {
                     ),
                     boxShadow: const [
                       BoxShadow(
-                        color: Color(0x44000000),
-                        blurRadius: 20,
-                        offset: Offset(0, 7),
+                        color: Color(0x3D000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 4),
                       ),
                     ],
                   ),
@@ -841,8 +960,7 @@ class _ReelsTopButton extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
@@ -851,6 +969,7 @@ class _ReelView extends StatefulWidget {
     super.key,
     required this.item,
     required this.controller,
+    required this.isActive,
     required this.muted,
     required this.saving,
     required this.isLast,
@@ -858,12 +977,15 @@ class _ReelView extends StatefulWidget {
     required this.onMute,
     required this.clear,
     required this.onFavorite,
+    required this.onLike,
     required this.onSaveMenu,
+    required this.onDetails,
     required this.onRetry,
   });
 
   final ReelItem item;
   final VideoPlayerController? controller;
+  final bool isActive;
   final bool muted;
   final ValueListenable<Map<String, double>> saving;
   final bool isLast;
@@ -871,7 +993,9 @@ class _ReelView extends StatefulWidget {
   final VoidCallback onMute;
   final bool clear;
   final VoidCallback onFavorite;
+  final VoidCallback onLike;
   final VoidCallback onSaveMenu;
+  final VoidCallback onDetails;
   final VoidCallback onRetry;
 
   @override
@@ -880,6 +1004,8 @@ class _ReelView extends StatefulWidget {
 
 class _ReelViewState extends State<_ReelView> {
   bool _fast = false;
+  bool _controlsVisible = true;
+  bool _likePulse = false;
   bool _longPressTriggered = false;
   bool _pointerMoved = false;
   bool _secondTapCandidate = false;
@@ -888,25 +1014,77 @@ class _ReelViewState extends State<_ReelView> {
   DateTime? _lastTapTime;
   Timer? _longPressTimer;
   Timer? _singleTapTimer;
-  int _seekTotal = 0;
-  Timer? _seekTimer;
+  Timer? _controlsTimer;
+  Timer? _likeTimer;
 
   VideoPlayerController? get _c => widget.controller;
   bool get _ready => _c != null && _c!.value.isInitialized;
 
   @override
+  void initState() {
+    super.initState();
+    _scheduleControlsHide();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReelView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller ||
+        oldWidget.isActive != widget.isActive ||
+        oldWidget.clear != widget.clear) {
+      _scheduleControlsHide();
+    }
+  }
+
+  @override
   void dispose() {
     _longPressTimer?.cancel();
     _singleTapTimer?.cancel();
-    _seekTimer?.cancel();
+    _controlsTimer?.cancel();
+    _likeTimer?.cancel();
     super.dispose();
+  }
+
+  void _scheduleControlsHide() {
+    _controlsTimer?.cancel();
+    if (!mounted || widget.clear || !widget.isActive || _c?.value.isPlaying != true) {
+      if (!_controlsVisible && mounted) setState(() => _controlsVisible = true);
+      return;
+    }
+    _controlsTimer = Timer(_kControlsHideDelay, () {
+      if (!mounted || !widget.isActive || widget.clear || _c?.value.isPlaying != true) {
+        return;
+      }
+      if (_controlsVisible) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _revealControls() {
+    if (!_controlsVisible && mounted) setState(() => _controlsVisible = true);
+    _scheduleControlsHide();
   }
 
   void _togglePlay() {
     final c = _c;
     if (!_ready || c == null) return;
     Haptics.play(Haptic.selection);
-    c.value.isPlaying ? c.pause() : c.play();
+    if (c.value.isPlaying) {
+      unawaited(c.pause());
+      _controlsTimer?.cancel();
+      if (!_controlsVisible && mounted) setState(() => _controlsVisible = true);
+    } else {
+      unawaited(c.play());
+      _scheduleControlsHide();
+    }
+  }
+
+  void _showLikePulse() {
+    if (!mounted) return;
+    setState(() => _likePulse = true);
+    _likeTimer?.cancel();
+    _likeTimer = Timer(const Duration(milliseconds: 620), () {
+      if (mounted) setState(() => _likePulse = false);
+    });
   }
 
   void _setFast(bool on) {
@@ -921,7 +1099,8 @@ class _ReelViewState extends State<_ReelView> {
   // Handle the gestures at pointer level so a double tap is recognised before
   // a single-tap pause is dispatched. This avoids the old pause -> play flash.
   void _onPointerDown(PointerDownEvent event) {
-    if (!_ready || _activePointer != null) return;
+    if (!_ready || !widget.isActive || _activePointer != null) return;
+    _revealControls();
 
     final now = DateTime.now();
     final previousTap = _lastTapTime;
@@ -971,8 +1150,8 @@ class _ReelViewState extends State<_ReelView> {
     final moved = _pointerMoved;
     final held = _longPressTriggered;
     final secondTap = _secondTapCandidate;
-    final width = context.size?.width ?? 1;
-    final x = (event.localPosition.dx / width).clamp(0.0, 1.0).toDouble();
+    final start = _pointerStart;
+    final delta = start == null ? Offset.zero : event.localPosition - start;
 
     _activePointer = null;
     _pointerStart = null;
@@ -985,6 +1164,11 @@ class _ReelViewState extends State<_ReelView> {
       _singleTapTimer = null;
       _lastTapTime = null;
       if (_fast) _setFast(false);
+      // A deliberate horizontal swipe opens the native details sheet. Vertical
+      // movement remains owned by the page view for natural reel paging.
+      if (delta.dx.abs() > 72 && delta.dx.abs() > delta.dy.abs() * 1.3) {
+        widget.onDetails();
+      }
       return;
     }
 
@@ -1000,9 +1184,8 @@ class _ReelViewState extends State<_ReelView> {
       _lastTapTime = null;
       _singleTapTimer?.cancel();
       _singleTapTimer = null;
-      // Left side rewinds, right side advances. Neither action changes the
-      // playing state, so the video never pauses during a skip gesture.
-      _seekBy(forward: x >= 0.5);
+      widget.onLike();
+      _showLikePulse();
       return;
     }
 
@@ -1027,25 +1210,6 @@ class _ReelViewState extends State<_ReelView> {
     _singleTapTimer?.cancel();
     _singleTapTimer = null;
     if (_fast) _setFast(false);
-  }
-
-  void _seekBy({required bool forward}) {
-    final c = _c;
-    if (!_ready || c == null) return;
-    final dur = c.value.duration;
-    var target = c.value.position + (forward ? _kSeekStep : -_kSeekStep);
-    if (target < Duration.zero) target = Duration.zero;
-    if (target > dur) target = dur;
-    c.seekTo(target);
-    Haptics.play(Haptic.light);
-    setState(() {
-      _seekTotal = (_seekTotal.sign == (forward ? 1 : -1) ? _seekTotal : 0) +
-          (forward ? 10 : -10);
-    });
-    _seekTimer?.cancel();
-    _seekTimer = Timer(const Duration(milliseconds: 700), () {
-      if (mounted) setState(() => _seekTotal = 0);
-    });
   }
 
   Widget _video(BuildContext context, VideoPlayerController c) {
@@ -1087,8 +1251,8 @@ class _ReelViewState extends State<_ReelView> {
             child: Image.network(
               item.thumbUrl!,
               fit: BoxFit.cover,
-              cacheWidth: 360,
-              filterQuality: FilterQuality.medium,
+              cacheWidth: 540,
+              filterQuality: FilterQuality.low,
               gaplessPlayback: true,
               headers: _kMediaHeaders,
               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
@@ -1099,8 +1263,8 @@ class _ReelViewState extends State<_ReelView> {
         Semantics(
           button: true,
           label: 'Video player',
-          hint: 'Double-tap the left or right side to skip 10 seconds. '
-              'Press and hold for 2x speed.',
+          hint: 'Tap to pause or play. Double-tap to favorite. '
+              'Press and hold for 2x speed. Drag the progress bar to seek.',
           onTap: _togglePlay,
           child: Listener(
             behavior: HitTestBehavior.opaque,
@@ -1138,7 +1302,7 @@ class _ReelViewState extends State<_ReelView> {
                       color: Colors.white,
                     ),
                   ),
-                if (ready && c != null)
+                if (ready && c != null && widget.isActive)
                   _StallSpinner(key: ObjectKey(c), controller: c),
                 if (ready && c != null)
                   IgnorePointer(
@@ -1190,7 +1354,7 @@ class _ReelViewState extends State<_ReelView> {
         ),
 
         _UiFade(
-          hidden: widget.clear,
+          hidden: widget.clear || !_controlsVisible,
           child: const IgnorePointer(
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -1215,7 +1379,7 @@ class _ReelViewState extends State<_ReelView> {
           right: 78,
           bottom: bottomPad + 44,
           child: _UiFade(
-            hidden: widget.clear,
+            hidden: widget.clear || !_controlsVisible,
             child: _InfoBlock(item: item),
           ),
         ),
@@ -1224,7 +1388,7 @@ class _ReelViewState extends State<_ReelView> {
           right: 10,
           bottom: bottomPad + 40,
           child: _UiFade(
-            hidden: widget.clear,
+            hidden: widget.clear || !_controlsVisible,
             child: _ActionRail(
               item: item,
               muted: widget.muted,
@@ -1234,6 +1398,26 @@ class _ReelViewState extends State<_ReelView> {
               onMute: widget.onMute,
               onFavorite: widget.onFavorite,
               onSaveMenu: widget.onSaveMenu,
+            ),
+          ),
+        ),
+
+        IgnorePointer(
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 120),
+            opacity: _likePulse ? 1 : 0,
+            child: AnimatedScale(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutBack,
+              scale: _likePulse ? 1 : 0.55,
+              child: const Center(
+                child: Icon(
+                  CupertinoIcons.heart_fill,
+                  color: Colors.white,
+                  size: 104,
+                  shadows: [Shadow(color: Color(0x66000000), blurRadius: 24)],
+                ),
+              ),
             ),
           ),
         ),
@@ -1283,48 +1467,13 @@ class _ReelViewState extends State<_ReelView> {
             ),
           ),
 
-        IgnorePointer(
-          child: AnimatedOpacity(
-            duration: Motion.quick,
-            opacity: _seekTotal == 0 ? 0 : 1,
-            child: AnimatedScale(
-              duration: Motion.quick,
-              scale: _seekTotal == 0 ? 0.86 : 1,
-              curve: Motion.curve,
-              child: Align(
-                alignment:
-                    _seekTotal >= 0 ? Alignment.centerRight : Alignment.centerLeft,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 36),
-                  child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _seekTotal >= 0
-                          ? Icons.forward_10_rounded
-                          : Icons.replay_10_rounded,
-                      color: Colors.white,
-                      size: 44,
-                    ),
-                    Text(
-                      '${_seekTotal >= 0 ? '+' : '\u2212'}${_seekTotal.abs()}s',
-                      style: AppText.label.copyWith(color: Colors.white),
-                    ),
-                  ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-
         if (ready && c != null)
           Positioned(
             left: 0,
             right: 0,
             bottom: bottomPad + 6,
             child: _UiFade(
-              hidden: widget.clear,
+              hidden: widget.clear || !_controlsVisible,
               child: _ReelProgressBar(key: ObjectKey(c), controller: c),
             ),
           ),
@@ -1737,14 +1886,9 @@ class _RailButton extends StatelessWidget {
                     ),
                     boxShadow: const [
                       BoxShadow(
-                        color: Color(0x55000000),
-                        blurRadius: 20,
-                        offset: Offset(0, 7),
-                      ),
-                      BoxShadow(
-                        color: Color(0x18FFFFFF),
-                        blurRadius: 7,
-                        offset: Offset(0, -1),
+                        color: Color(0x44000000),
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
                       ),
                     ],
                   ),
@@ -1808,28 +1952,37 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
 
   void _start(double dx, double width) {
     _wasPlaying = _c.value.isPlaying;
-    _c.pause();
+    unawaited(_c.pause());
     Haptics.play(Haptic.selection);
     setState(() {
       _dragging = true;
       _frac = _fracAt(dx, width);
     });
-    _seek();
   }
 
   void _update(double dx, double width) {
+    // Keep scrubbing local while the finger moves. Sending a native seek for
+    // every pointer event can overwhelm AVPlayer on older devices.
     setState(() => _frac = _fracAt(dx, width));
-    _seek();
   }
 
-  void _seek() {
+  Future<void> _seekToFraction(double fraction, {bool resume = false}) async {
     final ms = _c.value.duration.inMilliseconds;
-    _c.seekTo(Duration(milliseconds: (ms * _frac).round()));
+    if (ms <= 0) return;
+    try {
+      await _c.seekTo(
+        Duration(milliseconds: (ms * fraction.clamp(0.0, 1.0)).round()),
+      );
+      if (resume && mounted) await _c.play();
+    } catch (_) {}
   }
 
   void _end() {
-    if (_wasPlaying) _c.play();
+    if (!_dragging) return;
+    final fraction = _frac;
+    final resume = _wasPlaying;
     setState(() => _dragging = false);
+    unawaited(_seekToFraction(fraction, resume: resume));
   }
 
   @override
@@ -1843,8 +1996,9 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
         onHorizontalDragEnd: (_) => _end(),
         onHorizontalDragCancel: _end,
         onTapUp: (d) {
-          _frac = _fracAt(d.localPosition.dx, width);
-          _seek();
+          final fraction = _fracAt(d.localPosition.dx, width);
+          setState(() => _frac = fraction);
+          unawaited(_seekToFraction(fraction));
         },
         child: SizedBox(
           height: 34,

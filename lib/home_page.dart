@@ -334,7 +334,8 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _openDetails(Video video, List<Video> queue) async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
+      adaptivePageRoute<void>(
+        context,
         builder: (_) => VideoDetailsPage(video: video, queue: queue),
       ),
     );

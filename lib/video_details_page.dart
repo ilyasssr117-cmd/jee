@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -18,6 +16,7 @@ import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/expandable_text.dart';
+import 'widgets/model_avatar.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_artwork.dart';
 import 'widgets/video_grid.dart';
@@ -153,38 +152,24 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           ),
       child: Scaffold(
         backgroundColor: AppColors.background,
-        body: Stack(
-          children: [
-            // Keep the artwork behind the scroll view at all times. It is
-            // normally covered by the hero, but fills the temporary iOS
-            // rubber-band / route-transition gap immediately instead of
-            // flashing the flat Scaffold background while the scroll listener
-            // catches up.
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 520,
-              child: _PullBackdrop(video: widget.video),
+        body: ColoredBox(
+          color: AppColors.background,
+          child: CustomScrollView(
+            key: PageStorageKey<String>('video-details-${widget.video.id}'),
+            controller: _scroll,
+            physics: nativeScrollPhysics(context, alwaysScrollable: true),
+            scrollCacheExtent: ScrollCacheExtent.pixels(
+              MediaQuery.sizeOf(context).height,
             ),
-            Positioned.fill(
-              child: CustomScrollView(
-                controller: _scroll,
-                physics: nativeScrollPhysics(context, alwaysScrollable: true),
-                scrollCacheExtent: ScrollCacheExtent.pixels(
-                  MediaQuery.sizeOf(context).height,
-                ),
-                slivers: [
-                  SliverToBoxAdapter(child: _buildHeader(margin)),
-                  SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
-                  _buildRelated(margin),
-                  SliverToBoxAdapter(
-                    child: SizedBox(height: Gaps.xl + context.safe.bottom),
-                  ),
-                ],
+            slivers: [
+              SliverToBoxAdapter(child: _buildHeader(margin)),
+              SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
+              _buildRelated(margin),
+              SliverToBoxAdapter(
+                child: SizedBox(height: Gaps.xl + context.safe.bottom),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -228,30 +213,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     video: video,
                     showLabel: false,
                     fit: BoxFit.cover,
-                  ),
-                  // Frosted glass behind the title and buttons: a blurred copy
-                  // of the artwork that fades in from the middle downward.
-                  RepaintBoundary(
-                    child: ShaderMask(
-                      blendMode: BlendMode.dstIn,
-                      shaderCallback: (rect) => const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: [0.26, 0.6],
-                        colors: [Color(0x00FFFFFF), Color(0xFFFFFFFF)],
-                      ).createShader(rect),
-                      child: ImageFiltered(
-                        imageFilter: ui.ImageFilter.blur(
-                          sigmaX: 18,
-                          sigmaY: 18,
-                        ),
-                        child: VideoArtwork(
-                          video: video,
-                          showLabel: false,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
                   ),
                   const DecoratedBox(
                     decoration: BoxDecoration(
@@ -575,6 +536,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   for (final model in models)
                     _ModelChip(
                       name: model.name,
+                      imageUrl: model.imageUrl,
+                      pageUrl: model.url,
                       onDark: onDark,
                       onPressed: () => _openModel(model),
                     ),
@@ -661,11 +624,15 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 class _ModelChip extends StatelessWidget {
   const _ModelChip({
     required this.name,
+    required this.imageUrl,
+    required this.pageUrl,
     required this.onPressed,
     this.onDark = false,
   });
 
   final String name;
+  final String? imageUrl;
+  final String pageUrl;
   final VoidCallback onPressed;
   final bool onDark;
 
@@ -693,8 +660,13 @@ class _ModelChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.person_rounded, size: 20, color: AppColors.accent),
-            const SizedBox(width: 6),
+            ModelAvatar(
+              name: name,
+              imageUrl: imageUrl,
+              pageUrl: pageUrl,
+              size: 25,
+            ),
+            const SizedBox(width: 8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 220),
               child: Text(
@@ -718,28 +690,6 @@ class _ModelChip extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _PullBackdrop extends StatelessWidget {
-  const _PullBackdrop({required this.video});
-
-  final Video video;
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ImageFiltered(
-            imageFilter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
-            child: VideoArtwork(video: video, showLabel: false),
-          ),
-          const ColoredBox(color: Color(0x8C000000)),
-        ],
       ),
     );
   }

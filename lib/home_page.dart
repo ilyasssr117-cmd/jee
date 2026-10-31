@@ -629,7 +629,7 @@ class _HomePageState extends State<HomePage>
         // Playback runs only while the section is on screen and no search
         // overlay or other full-screen route covers it.
         active: reelsActive && !_searchOpen,
-        bottomInset: bottomInset,
+        bottomInset: context.safe.bottom + 4,
       );
     }
     if (libraryVisible || _libraryPage != null) {
@@ -752,16 +752,23 @@ class _HomePageState extends State<HomePage>
                   ),
                 ],
               ),
-              bottomNavigationBar: _RidingTabBar(
-                selected: searchOpen
-                    ? AppTab.search
-                    : switch (_dragTarget ?? _section) {
-                        _Section.home => AppTab.home,
-                        _Section.reels => AppTab.reels,
-                        _Section.library => AppTab.library,
-                        _Section.settings => AppTab.settings,
-                      },
-                onSelect: _onTabSelect,
+              bottomNavigationBar: AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.bottomCenter,
+                child: searchOpen || _section != _Section.reels
+                    ? _RidingTabBar(
+                        selected: searchOpen
+                            ? AppTab.search
+                            : switch (_dragTarget ?? _section) {
+                                _Section.home => AppTab.home,
+                                _Section.reels => AppTab.reels,
+                                _Section.library => AppTab.library,
+                                _Section.settings => AppTab.settings,
+                              },
+                        onSelect: _onTabSelect,
+                      )
+                    : const SizedBox.shrink(),
               ),
             ),
           ),

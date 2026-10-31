@@ -48,7 +48,7 @@ const Duration _kNeighborPreloadDelay = Duration(milliseconds: 240);
 const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
 const Duration _kReelDoubleTapWindow = Duration(milliseconds: 260);
-const Duration _kReelLongPressDelay = Duration(milliseconds: 210);
+const Duration _kReelLongPressDelay = Duration(milliseconds: 140);
 const double _kReelMoveSlop = 14;
 
 String? _str(dynamic v) =>
@@ -77,8 +77,81 @@ String _titleOf(Map video) {
   return _clipText(_str(video['action_name']) ?? '', 240);
 }
 
-int _countOf(dynamic v) =>
-    v is num ? v.clamp(0, 2147483647).toInt() : 0;
+int _countOf(dynamic value) {
+  if (value is num) {
+    return value.clamp(0, 2147483647).toInt();
+  }
+  if (value is Map) {
+    for (final key in const [
+      'count',
+      'total',
+      'value',
+      'like_count',
+      'likes_count',
+      'formatted',
+      'display',
+    ]) {
+      if (!value.containsKey(key)) continue;
+      final parsed = _countOf(value[key]);
+      if (parsed > 0) return parsed;
+    }
+    return 0;
+  }
+  if (value is! String) return 0;
+  final text = value.trim().toLowerCase().replaceAll(',', '');
+  if (text.isEmpty) return 0;
+  final match = RegExp(
+    r'^(\d+(?:\.\d+)?)\s*([kmb])?\s*(?:likes?)?$',
+  ).firstMatch(text);
+  if (match == null) return 0;
+  final number = double.tryParse(match.group(1) ?? '');
+  if (number == null || !number.isFinite || number < 0) return 0;
+  final multiplier = switch (match.group(2)) {
+    'k' => 1000.0,
+    'm' => 1000000.0,
+    'b' => 1000000000.0,
+    _ => 1.0,
+  };
+  return (number * multiplier).clamp(0, 2147483647).round();
+}
+
+int _likesOf(Map video) {
+  const keys = [
+    'like_count',
+    'likes_count',
+    'likeCount',
+    'likesCount',
+    'likes',
+    'like',
+    'total_likes',
+    'totalLikes',
+    'favorite_count',
+    'favorites_count',
+    'favourite_count',
+    'upvote_count',
+    'thumbs_up_count',
+  ];
+  for (final source in [
+    video,
+    video['statistics'],
+    video['stats'],
+    video['engagement'],
+    video['counts'],
+    video['video_statistics'],
+    video['video_stats'],
+    video['engagement_stats'],
+    video['metadata'],
+    video['meta'],
+  ]) {
+    if (source is! Map) continue;
+    for (final key in keys) {
+      if (!source.containsKey(key) || source[key] == null) continue;
+      final parsed = _countOf(source[key]);
+      if (parsed > 0) return parsed;
+    }
+  }
+  return 0;
+}
 
 List<String> _tagsOf(Map video) {
   final raw = video['tags'];
@@ -112,7 +185,7 @@ List<ReelItem> parseReels(dynamic body) {
         views: raw['view_count'] is num
             ? (raw['view_count'] as num).clamp(0, 2147483647).toInt()
             : 0,
-        likes: _countOf(raw['like_count'] ?? raw['likes_count'] ?? raw['likes']),
+        likes: _likesOf(raw),
         durationSec: raw['duration'] is num
             ? (raw['duration'] as num).clamp(0, 86400).toInt()
             : 0,
@@ -332,7 +405,7 @@ class ReelsPage extends StatefulWidget {
   /// page keeps its state but pauses playback and releases spare decoders.
   final bool active;
 
-  /// Space occupied by the floating tab bar at the bottom of the screen.
+  /// Safe-area spacing below controls; the tab bar is hidden while Reels is active.
   final double bottomInset;
 
   @override
@@ -1209,7 +1282,7 @@ class _ReelViewState extends State<_ReelView>
     final c = _c;
     if (!_ready || c == null || _fast == on) return;
     if (on && !c.value.isPlaying) return;
-    c.setPlaybackSpeed(on ? 2 : 1);
+    unawaited(c.setPlaybackSpeed(on ? 2 : 1).catchError((_) {}));
     if (on) Haptics.play(Haptic.medium);
     if (mounted) setState(() => _fast = on);
   }
@@ -1316,24 +1389,18 @@ class _ReelViewState extends State<_ReelView>
   Widget _video(BuildContext context, VideoPlayerController c) {
     final size = c.value.size;
     if (size.isEmpty) return const SizedBox.shrink();
-    final screen = MediaQuery.sizeOf(context);
-    final videoRatio = size.width / size.height;
-    final screenRatio = screen.width / screen.height;
-    final nearlySame = (videoRatio / screenRatio - 1).abs() < 0.06;
-    return Center(
-      child: nearlySame
-          ? SizedBox.expand(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: size.width,
-                  height: size.height,
-                  child: VideoPlayer(c),
-                ),
-              ),
-            )
-          : AspectRatio(aspectRatio: videoRatio, child: VideoPlayer(c)),
+    return SizedBox.expand(
+      child: ClipRect(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: VideoPlayer(c),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1394,7 +1461,7 @@ class _ReelViewState extends State<_ReelView>
                         const SizedBox(height: Gaps.md),
                         AppButton(
                           label: 'Try again',
-                          icon: Icons.refresh_rounded,
+                          icon: CupertinoIcons.refresh,
                           style: AppButtonStyle.secondary,
                           onDark: true,
                           onPressed: widget.onRetry,
@@ -1431,7 +1498,7 @@ class _ReelViewState extends State<_ReelView>
                                 color: Color(0x59000000),
                               ),
                               child: const Icon(
-                                Icons.play_arrow_rounded,
+                                CupertinoIcons.play_fill,
                                 color: Colors.white,
                                 size: 42,
                               ),
@@ -1508,13 +1575,13 @@ class _ReelViewState extends State<_ReelView>
         Positioned(
           left: 16,
           right: 84,
-          bottom: bottom + 46,
+          bottom: bottom + 52,
           child: _UiFade(hidden: hideUi, child: _InfoBlock(item: item)),
         ),
 
         Positioned(
           right: 6,
-          bottom: bottom + 46,
+          bottom: bottom + 52,
           child: _UiFade(
             hidden: hideUi,
             child: _ActionRail(
@@ -1855,14 +1922,14 @@ class _ActionRail extends StatelessWidget {
           listenable: FavoritesStore.instance,
           builder: (_, __) {
             final liked = ReelFavorites.instance.isLiked(item.id);
-            final count = item.likes + (liked ? 1 : 0);
+            final count = item.likes;
             return _RailButton(
               icon: liked
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
+                  ? CupertinoIcons.heart_fill
+                  : CupertinoIcons.heart,
               iconColor: liked ? AppColors.accent : Colors.white,
               size: 33,
-              label: count > 0 ? _compact(count) : 'Like',
+              label: _compact(count),
               pop: liked,
               haptic: Haptic.none,
               onTap: onToggleLike,
@@ -1876,7 +1943,7 @@ class _ActionRail extends StatelessWidget {
             final saved = map[item.id];
             if (saved != null) {
               return _RailButton(
-                icon: Icons.arrow_downward_rounded,
+                icon: CupertinoIcons.arrow_down_to_line,
                 label: 'Saving',
                 progress: saved,
                 onTap: onSaveMenu,
@@ -1888,14 +1955,14 @@ class _ActionRail extends StatelessWidget {
                 final entry = DownloadStore.instance.item(downloadId);
                 if (entry == null) {
                   return _RailButton(
-                    icon: Icons.file_download_outlined,
+                    icon: CupertinoIcons.arrow_down_to_line,
                     label: 'Save',
                     onTap: onSaveMenu,
                   );
                 }
                 if (entry.status == DownloadStatus.done) {
                   return _RailButton(
-                    icon: Icons.download_done_rounded,
+                    icon: CupertinoIcons.check_mark_circled,
                     iconColor: AppColors.accent,
                     label: 'Saved',
                     onTap: onSaveMenu,
@@ -1904,7 +1971,7 @@ class _ActionRail extends StatelessWidget {
                 if (entry.status == DownloadStatus.failed ||
                     entry.status == DownloadStatus.paused) {
                   return _RailButton(
-                    icon: Icons.refresh_rounded,
+                    icon: CupertinoIcons.refresh,
                     label: 'Retry',
                     onTap: onSaveMenu,
                   );
@@ -1914,7 +1981,7 @@ class _ActionRail extends StatelessWidget {
                   builder: (_, __, ___) {
                     final p = entry.progress;
                     return _RailButton(
-                      icon: Icons.arrow_downward_rounded,
+                      icon: CupertinoIcons.arrow_down_to_line,
                       label: p == null ? 'Queued' : '${(p * 100).round()}%',
                       progress: p ?? -1,
                       onTap: onSaveMenu,
@@ -2161,8 +2228,7 @@ class _PopIconState extends State<_PopIcon>
   }
 }
 
-/// Slim, modern scrubber that sits just above the tab bar. It grows while
-/// dragging and shows a floating time bubble.
+/// iOS-style scrubber with always-visible elapsed and total time labels.
 class _ReelProgressBar extends StatefulWidget {
   const _ReelProgressBar({
     super.key,
@@ -2200,8 +2266,6 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
   }
 
   void _update(double dx, double width) {
-    // Keep scrubbing local while the finger moves. Sending a native seek for
-    // every pointer event can overwhelm AVPlayer on older devices.
     setState(() => _frac = _fracAt(dx, width));
   }
 
@@ -2250,66 +2314,87 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                 final played = total <= 0
                     ? 0.0
                     : (v.position.inMilliseconds / total)
-                          .clamp(0.0, 1.0)
-                          .toDouble();
+                        .clamp(0.0, 1.0)
+                        .toDouble();
                 final buffered = total <= 0 || v.buffered.isEmpty
                     ? 0.0
                     : (v.buffered.last.end.inMilliseconds / total)
-                          .clamp(0.0, 1.0)
-                          .toDouble();
+                        .clamp(0.0, 1.0)
+                        .toDouble();
                 final shown = _dragging ? _frac : played;
-                // Position updates arrive in coarse steps; glide between them,
-                // but snap when a looping video jumps back to the start.
                 final snap = _dragging || shown < _lastShown - 0.2;
                 _lastShown = shown;
-                final barH = _dragging ? 8.0 : 3.0;
-                final thumb = _dragging ? 16.0 : 0.0;
+                final position = _dragging
+                    ? Duration(milliseconds: (total * _frac).round())
+                    : v.position;
+                final barHeight = _dragging ? 7.0 : 4.0;
+                final thumb = _dragging ? 15.0 : 0.0;
                 final thumbLeft = (width * shown - thumb / 2)
                     .clamp(0.0, width - thumb)
                     .toDouble();
+                final timeStyle = const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  height: 1,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.15,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                  shadows: [Shadow(blurRadius: 8, color: Color(0xAA000000))],
+                );
+
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
                     Positioned(
                       left: 0,
                       right: 0,
-                      bottom: 14,
+                      top: 1,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(_clock(position), style: timeStyle),
+                          Text(_clock(v.duration), style: timeStyle),
+                        ],
+                      ),
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 7,
                       child: AnimatedContainer(
                         duration: Motion.quick,
                         curve: Motion.curve,
-                        height: barH,
+                        height: barHeight,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(Radii.pill),
+                          color: const Color(0x66FFFFFF),
+                        ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(Radii.pill),
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              const ColoredBox(color: Color(0x40FFFFFF)),
                               FractionallySizedBox(
                                 alignment: Alignment.centerLeft,
                                 widthFactor: buffered,
                                 child: const ColoredBox(
-                                  color: Color(0x4DFFFFFF),
+                                  color: Color(0x99FFFFFF),
                                 ),
                               ),
                               TweenAnimationBuilder<double>(
                                 tween: Tween<double>(end: shown),
                                 duration: snap
                                     ? Duration.zero
-                                    : const Duration(milliseconds: 480),
+                                    : const Duration(milliseconds: 280),
                                 curve: Curves.linear,
                                 builder: (_, value, __) =>
                                     FractionallySizedBox(
                                       alignment: Alignment.centerLeft,
-                                      widthFactor: value.clamp(0.0, 1.0).toDouble(),
-                                      child: const DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [
-                                              Colors.white,
-                                              Color(0xFFFFD6D9),
-                                            ],
-                                          ),
-                                        ),
+                                      widthFactor: value
+                                          .clamp(0.0, 1.0)
+                                          .toDouble(),
+                                      child: ColoredBox(
+                                        color: AppColors.accent,
                                       ),
                                     ),
                               ),
@@ -2318,55 +2403,23 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                         ),
                       ),
                     ),
-                    Positioned(
-                      left: thumbLeft,
-                      bottom: 14 + barH / 2 - thumb / 2,
-                      child: AnimatedContainer(
-                        duration: Motion.quick,
-                        curve: Motion.curve,
-                        width: thumb,
-                        height: thumb,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: _dragging
-                              ? [
-                                  BoxShadow(
-                                    color: AppColors.accent.withValues(
-                                      alpha: 0.55,
-                                    ),
-                                    blurRadius: 12,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                      ),
-                    ),
                     if (_dragging)
                       Positioned(
-                        bottom: 40,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 7,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xB3000000),
-                              borderRadius: BorderRadius.circular(Radii.pill),
-                            ),
-                            child: Text(
-                              '${_clock(Duration(milliseconds: (total * _frac).round()))}'
-                              '  /  ${_clock(v.duration)}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                fontFeatures: [FontFeature.tabularFigures()],
+                        left: thumbLeft,
+                        bottom: 1.5,
+                        child: Container(
+                          width: thumb,
+                          height: thumb,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.accent.withValues(alpha: 0.65),
+                                blurRadius: 12,
+                                spreadRadius: 1,
                               ),
-                            ),
+                            ],
                           ),
                         ),
                       ),
@@ -2410,7 +2463,7 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: Gaps.md),
             AppButton(
               label: 'Try again',
-              icon: Icons.refresh_rounded,
+              icon: CupertinoIcons.refresh,
               onPressed: onRetry,
             ),
           ],

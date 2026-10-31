@@ -366,7 +366,14 @@ class _ModelPageState extends State<ModelPage> {
           body: Stack(
             children: [
               CustomScrollView(
+                key: PageStorageKey<String>(
+                  'model-scroll-${widget.model.url}',
+                ),
                 controller: _scrollController,
+                physics: nativeScrollPhysics(context, alwaysScrollable: true),
+                scrollCacheExtent: ScrollCacheExtent.pixels(
+                  MediaQuery.sizeOf(context).height * 0.7,
+                ),
                 slivers: [
                   SliverToBoxAdapter(child: _buildHeader(margin, name)),
                   if (_mode == _Mode.photos)

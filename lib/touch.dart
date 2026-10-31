@@ -61,8 +61,9 @@ class _PressableState extends State<Pressable> {
 
   @override
   Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     Widget child = AnimatedScale(
-      scale: _down ? widget.pressedScale : 1,
+      scale: _down && !reduceMotion ? widget.pressedScale : 1,
       duration: _down ? const Duration(milliseconds: 90) : Motion.normal,
       curve: Motion.curve,
       child: widget.child,

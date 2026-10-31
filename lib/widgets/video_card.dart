@@ -145,8 +145,8 @@ class _FavoriteButton extends StatelessWidget {
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
           },
           child: SizedBox(
-            width: 40,
-            height: 40,
+            width: 44,
+            height: 44,
             child: Center(
               child: AnimatedContainer(
                 duration: Motion.normal,
@@ -160,7 +160,7 @@ class _FavoriteButton extends StatelessWidget {
                 ),
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 260),
-                  switchInCurve: Curves.elasticOut,
+                  switchInCurve: Curves.easeOutBack,
                   transitionBuilder: (child, animation) =>
                       ScaleTransition(scale: animation, child: child),
                   child: Icon(

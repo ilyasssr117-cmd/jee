@@ -752,17 +752,20 @@ class _HomePageState extends State<HomePage>
         ),
         slivers: [
           SliverToBoxAdapter(
-            child: HomeHero(
-              video: featured,
-              loading: firstLoad,
-              playLabel: resume != null ? 'Resume' : 'Play',
-              playBusy: _playingFeatured,
-              onPlay: _playFeatured,
-              onDetails: () {
-                if (featured != null) {
-                  _openDetails(featured, List<Video>.of(_videos));
-                }
-              },
+            child: _HeroStretch(
+              controller: _scroll,
+              child: HomeHero(
+                video: featured,
+                loading: firstLoad,
+                playLabel: resume != null ? 'Resume' : 'Play',
+                playBusy: _playingFeatured,
+                onPlay: _playFeatured,
+                onDetails: () {
+                  if (featured != null) {
+                    _openDetails(featured, List<Video>.of(_videos));
+                  }
+                },
+              ),
             ),
           ),
           SliverToBoxAdapter(child: ContinueRow(onPlay: _resume)),
@@ -872,6 +875,38 @@ class _HomePageState extends State<HomePage>
           ),
         ),
     ];
+  }
+}
+
+/// Grows the Featured card slightly while the page is pulled past the top, so
+/// the card keeps its rounded hierarchy and fills part of the rubber-band gap
+/// instead of sliding away from a flat background. Only this transform
+/// rebuilds on scroll; the hero itself is passed in as a stable child.
+class _HeroStretch extends StatelessWidget {
+  const _HeroStretch({required this.controller, required this.child});
+
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      child: child,
+      builder: (context, child) {
+        final pulled = controller.hasClients
+            ? math.max(0.0, -controller.position.pixels)
+            : 0.0;
+        // Always wrap, even at scale 1, so the hero keeps the same element
+        // depth and is never remounted when the pull starts or ends.
+        final scale = 1 + math.min(pulled, 120.0) / 2000;
+        return Transform.scale(
+          scale: scale,
+          alignment: Alignment.bottomCenter,
+          child: child,
+        );
+      },
+    );
   }
 }
 

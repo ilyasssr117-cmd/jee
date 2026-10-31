@@ -1732,6 +1732,8 @@ class _InfoBlock extends StatelessWidget {
                 for (final tag in item.tags.take(3))
                   Text(
                     '#$tag',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppText.caption.copyWith(
                       color: Colors.white.withValues(alpha: 0.88),
                       fontWeight: FontWeight.w600,

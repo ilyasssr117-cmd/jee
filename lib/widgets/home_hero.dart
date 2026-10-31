@@ -48,7 +48,7 @@ class HomeHero extends StatelessWidget {
       child: SizedBox(
         height: height,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(30),
+          borderRadius: BorderRadius.circular(Radii.hero),
           child: DecoratedBox(
             decoration: const BoxDecoration(color: OnDark.surface),
             child: Stack(

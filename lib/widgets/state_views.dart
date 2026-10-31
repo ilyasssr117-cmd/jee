@@ -35,7 +35,9 @@ class StatusView extends StatelessWidget {
     final text = dark ? darkText : TextSet(AppColors.palette);
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(Gaps.xl),
+        // Extra bottom padding lifts the content to the optical centre, clear of
+        // the floating tab bar.
+        padding: const EdgeInsets.fromLTRB(Gaps.xl, Gaps.xl, Gaps.xl, 72),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 360),
           child: Column(
@@ -181,10 +183,12 @@ class SkeletonCard extends StatelessWidget {
             aspectRatio: 16 / 9,
             child: SkeletonBlock(radius: Radii.card, width: double.infinity),
           ),
-          SizedBox(height: 10),
+          SizedBox(height: VideoCardMetrics.gapAfterThumb + 2),
           SkeletonBlock(height: 12, width: double.infinity),
           SizedBox(height: 6),
-          SkeletonBlock(height: 12, width: 90),
+          SkeletonBlock(height: 12, width: 120),
+          SizedBox(height: VideoCardMetrics.gapAfterTitle + 4),
+          SkeletonBlock(height: 9, width: 72),
         ],
       ),
     );

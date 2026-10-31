@@ -307,6 +307,8 @@ class _Row extends StatelessWidget {
                   children: [
                     Text(
                       title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: AppText.title.copyWith(
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
@@ -317,7 +319,12 @@ class _Row extends StatelessWidget {
                     ),
                     if (subtitle != null) ...[
                       const SizedBox(height: 2),
-                      Text(subtitle!, style: AppText.caption),
+                      Text(
+                        subtitle!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.caption,
+                      ),
                     ],
                   ],
                 ),
@@ -394,6 +401,8 @@ class _Segmented<T extends Object> extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 7),
                 child: Text(
                   label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppText.label.copyWith(
                     fontSize: 13,
                     color: option == value

@@ -61,6 +61,8 @@ class SavedAlbumsView extends StatelessWidget {
                 child: Text(
                   '${albums.length} album${albums.length == 1 ? '' : 's'}'
                   ' \u00b7 ${store.totalPhotos} photos',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppText.caption,
                 ),
               ),
@@ -406,6 +408,8 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
           const SizedBox(height: 4),
           Text(
             subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: AppText.body.copyWith(color: AppColors.textSecondary),
           ),
           const SizedBox(height: Gaps.lg),

@@ -323,6 +323,8 @@ class _LibraryViewState extends State<LibraryView> {
             padding: const EdgeInsets.only(bottom: Gaps.sm),
             child: Text(
               '${store.doneCount} saved \u00b7 ${formatBytes(store.totalBytes)}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: AppText.caption,
             ),
           ),
@@ -388,6 +390,8 @@ class _TextAction extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w500,
@@ -410,6 +414,8 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.only(top: Gaps.md, bottom: Gaps.sm),
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: AppText.label.copyWith(color: AppColors.textSecondary),
       ),
     );

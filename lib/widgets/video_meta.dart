@@ -38,7 +38,12 @@ class VideoMetaLine extends StatelessWidget {
       parts.add(
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Text('\u2022', style: style),
+          child: Text(
+            '\u2022',
+            style: style.copyWith(
+              color: style.color?.withValues(alpha: 0.5),
+            ),
+          ),
         ),
       );
     }

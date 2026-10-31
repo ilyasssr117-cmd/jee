@@ -22,8 +22,8 @@ FriendlyError describeError(Object error, {String subject = 'videos'}) {
   debugPrint('[ERROR] $subject: ${error.runtimeType}');
 
   const offline = FriendlyError(
-    title: 'No connection',
-    message: 'Check your internet connection, then try again.',
+    title: 'You\u2019re offline',
+    message: 'Check your connection and try again.',
     icon: Icons.wifi_off_rounded,
     offline: true,
   );

@@ -513,6 +513,8 @@ class _HomePageState extends State<HomePage>
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
+    // The body extends behind the translucent tab bar; keep a scroll inset so
+    // the last card can still be brought fully above the glass surface.
     final bottomInset = kBottomBarHeight + context.safe.bottom;
     final featured = _featured;
     final showCategories = _categories.length > 1;
@@ -623,6 +625,7 @@ class _HomePageState extends State<HomePage>
             },
             child: Scaffold(
               backgroundColor: AppColors.background,
+              extendBody: true,
               resizeToAvoidBottomInset: false,
               body: Stack(
                 fit: StackFit.expand,
@@ -641,22 +644,17 @@ class _HomePageState extends State<HomePage>
                             key: ValueKey<String>('no-search'),
                           ),
                   ),
-                  Positioned.fill(
-                    child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: _RidingTabBar(
-                        selected: searchOpen
-                            ? AppTab.search
-                            : switch (_dragTarget ?? _section) {
-                                _Section.home => AppTab.home,
-                                _Section.library => AppTab.library,
-                                _Section.settings => AppTab.settings,
-                              },
-                        onSelect: _onTabSelect,
-                      ),
-                    ),
-                  ),
                 ],
+              ),
+              bottomNavigationBar: _RidingTabBar(
+                selected: searchOpen
+                    ? AppTab.search
+                    : switch (_dragTarget ?? _section) {
+                        _Section.home => AppTab.home,
+                        _Section.library => AppTab.library,
+                        _Section.settings => AppTab.settings,
+                      },
+                onSelect: _onTabSelect,
               ),
             ),
           ),
@@ -836,14 +834,18 @@ class _RidingTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
-    final restingGap = math.max(context.safe.bottom - 4, 10.0);
-    final gap = math.max(10.0, restingGap - keyboard).toDouble();
-    return Padding(
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
       padding: EdgeInsets.only(bottom: keyboard),
-      child: AppBottomBar(
-        selected: selected,
-        onSelect: onSelect,
-        bottomGap: gap,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(top: 6, bottom: 7),
+        child: AppBottomBar(
+          selected: selected,
+          onSelect: onSelect,
+          bottomGap: 0,
+        ),
       ),
     );
   }

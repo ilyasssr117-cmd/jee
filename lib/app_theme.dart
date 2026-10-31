@@ -239,6 +239,71 @@ ThemeData buildAppTheme(Brightness brightness) {
         letterSpacing: -0.3,
       ),
     ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(44, 44)),
+        iconSize: const WidgetStatePropertyAll(20),
+        shape: const WidgetStatePropertyAll(CircleBorder()),
+        overlayColor: WidgetStatePropertyAll(
+          AppColors.accent.withValues(alpha: 0.10),
+        ),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      isDense: true,
+      fillColor: p.surfaceHigh,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 14,
+      ),
+      hintStyle: TextStyle(color: p.textTertiary),
+      labelStyle: TextStyle(color: p.textSecondary),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.outline),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.outline),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.error),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.error, width: 1.4),
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: p.surface,
+      surfaceTintColor: Colors.transparent,
+      showDragHandle: true,
+      dragHandleColor: p.textTertiary.withValues(alpha: 0.5),
+      modalBackgroundColor: p.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: p.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 14,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: p.outline),
+      ),
+    ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: AppColors.accent,
+      selectionColor: AppColors.accent.withValues(alpha: 0.24),
+      selectionHandleColor: AppColors.accentStrong,
+    ),
     dividerTheme: DividerThemeData(
       color: p.outline,
       thickness: 1,

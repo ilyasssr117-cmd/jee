@@ -834,17 +834,23 @@ class _RidingTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
+    // Reserve only the dock's real height plus the iPhone home-indicator area.
+    // Never let a loose Center claim the full Scaffold height.
     return AnimatedPadding(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       padding: EdgeInsets.only(bottom: keyboard),
-      child: SafeArea(
-        top: false,
-        minimum: const EdgeInsets.only(top: 6, bottom: 7),
-        child: AppBottomBar(
-          selected: selected,
-          onSelect: onSelect,
-          bottomGap: 0,
+      child: SizedBox(
+        height: kBottomBarHeight + safeBottom,
+        width: double.infinity,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: safeBottom),
+          child: AppBottomBar(
+            selected: selected,
+            onSelect: onSelect,
+            bottomGap: 0,
+          ),
         ),
       ),
     );

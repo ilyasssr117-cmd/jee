@@ -396,7 +396,17 @@ class SearchOverlayState extends State<SearchOverlay> {
                         ),
                         decoration: InputDecoration(
                           isDense: true,
+                          // The outer AnimatedContainer owns the single visible
+                          // focus outline. Explicitly disable every themed
+                          // TextField border to prevent a second red rectangle.
+                          filled: false,
+                          fillColor: Colors.transparent,
                           border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          errorBorder: InputBorder.none,
+                          focusedErrorBorder: InputBorder.none,
                           hintText: switch (_scope) {
                             SearchScope.people => 'Search models',
                             SearchScope.albums => 'All albums',

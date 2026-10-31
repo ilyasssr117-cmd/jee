@@ -666,9 +666,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               child: _ErrorView(message: _error!, onRetry: _loadMore),
             ),
           Positioned(
-            top: context.safe.top + 8,
-            left: 14,
-            right: 14,
+            top: context.safe.top + 6,
+            left: 12,
+            right: 12,
             child: _ReelsTopBar(
               clear: _clear,
               onBack: () => Navigator.of(context).maybePop(),
@@ -695,61 +695,78 @@ class _ReelsTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isCompact = MediaQuery.sizeOf(context).width < 360;
+    return SizedBox(
+      height: 46,
+      child: Row(
+        children: [
+          _ReelsTopButton(
+            icon: CupertinoIcons.back,
+            label: 'Back',
+            onTap: onBack,
+          ),
+          Expanded(
+            child: Center(
+              child: _ForYouPill(compact: isCompact),
+            ),
+          ),
+          _ReelsTopButton(
+            icon: clear ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
+            label: clear ? 'Show controls' : 'Hide controls',
+            onTap: onToggleClear,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ForYouPill extends StatelessWidget {
+  const _ForYouPill({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(26),
+      borderRadius: BorderRadius.circular(22),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Container(
-          height: 58,
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 6),
+          constraints: BoxConstraints(maxWidth: compact ? 106 : 124),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 13 : 16,
+            vertical: 9,
+          ),
           decoration: BoxDecoration(
-            color: const Color(0x7A171A22),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 18,
-                offset: Offset(0, 7),
-              ),
-            ],
+            color: const Color(0x75171A22),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _ReelsTopButton(
-                icon: CupertinoIcons.back,
-                label: 'Back',
-                onTap: onBack,
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color(0xFFE5E7EB),
+                ),
               ),
-              const Spacer(),
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'REELS',
-                    style: AppText.label.copyWith(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.7,
-                    ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'For You',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.label.copyWith(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.1,
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    'For You',
-                    style: AppText.caption.copyWith(
-                      color: Colors.white.withValues(alpha: 0.68),
-                      fontSize: 9.5,
-                      letterSpacing: 0.15,
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              _ReelsTopButton(
-                icon: clear ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
-                label: clear ? 'Show controls' : 'Hide controls',
-                onTap: onToggleClear,
+                ),
               ),
             ],
           ),
@@ -786,8 +803,22 @@ class _ReelsTopButton extends StatelessWidget {
           child: SizedBox(
             width: 44,
             height: 44,
-            child: Center(
-              child: Icon(icon, color: Colors.white, size: 19),
+            child: ClipOval(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0x75171A22),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Center(
+                    child: Icon(icon, color: Colors.white, size: 19),
+                  ),
+                ),
+              ),
             ),
           ),
         ),

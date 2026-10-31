@@ -107,102 +107,111 @@ class _AppBottomBarState extends State<AppBottomBar> {
     final bottom = widget.bottomGap ?? math.max(context.safe.bottom - 4, 10.0).toDouble();
     final width = math.min(MediaQuery.sizeOf(context).width - 28, 420.0).toDouble();
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottom),
-      child: Center(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(30),
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-            child: Container(
-              width: width,
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppColors.palette.brightness == Brightness.dark
-                    ? const Color(0xD91A1D26)
-                    : const Color(0xDDFBFCFF),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(
+    // Scaffold gives bottomNavigationBar a loose height constraint. A bare
+    // Center expands to that maximum and makes the dock appear mid-screen.
+    // Keep this slot explicitly bounded and pin the glass dock to its bottom.
+    return SizedBox(
+      height: kBottomBarHeight + bottom,
+      width: double.infinity,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: bottom),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(30),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+              child: Container(
+                width: width,
+                height: 70,
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
                   color: AppColors.palette.brightness == Brightness.dark
-                      ? const Color(0x33FFFFFF)
-                      : const Color(0x66FFFFFF),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    blurRadius: 28,
-                    offset: const Offset(0, 10),
+                      ? const Color(0xD91A1D26)
+                      : const Color(0xDDFBFCFF),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(
+                    color: AppColors.palette.brightness == Brightness.dark
+                        ? const Color(0x33FFFFFF)
+                        : const Color(0x66FFFFFF),
                   ),
-                  BoxShadow(
-                    color: AppColors.accent.withValues(alpha: 0.08),
-                    blurRadius: 24,
-                    spreadRadius: -8,
-                  ),
-                ],
-              ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final itemWidth = constraints.maxWidth / _tabs.length;
-                  final selectedLeft =
-                      _tabs.indexWhere((item) => item.tab == _indicatorTab) * itemWidth;
-                  final indicatorLeft = _dragging
-                      ? (_dragIndicatorLeft ?? selectedLeft)
-                      : selectedLeft;
-                  return SizedBox(
-                    key: _barKey,
-                    height: 58,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        if (_dragging)
-                          Positioned(
-                            left: indicatorLeft,
-                            top: 0,
-                            bottom: 0,
-                            width: itemWidth,
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 2),
-                              child: _GlassIndicator(),
-                            ),
-                          )
-                        else
-                          AnimatedPositioned(
-                            duration: const Duration(milliseconds: 230),
-                            curve: Curves.easeOutCubic,
-                            left: indicatorLeft,
-                            top: 0,
-                            bottom: 0,
-                            width: itemWidth,
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 2),
-                              child: _GlassIndicator(),
-                            ),
-                          ),
-                        Row(
-                          children: [
-                            for (final item in _tabs)
-                              SizedBox(
-                                key: _tabKeys[item.tab],
-                                width: itemWidth,
-                                child: _TabItem(
-                                  icon: item.icon,
-                                  label: item.label,
-                                  active: _indicatorTab == item.tab,
-                                  onTap: () {
-                                    Haptics.play(Haptic.selection);
-                                    widget.onSelect(item.tab);
-                                  },
-                                  onLongPressStart: () => _beginDrag(item.tab),
-                                  onLongPressMove: _updateDrag,
-                                  onLongPressEnd: _finishDrag,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 28,
+                      offset: const Offset(0, 10),
                     ),
-                  );
-                },
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.08),
+                      blurRadius: 24,
+                      spreadRadius: -8,
+                    ),
+                  ],
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final itemWidth = constraints.maxWidth / _tabs.length;
+                    final selectedLeft =
+                        _tabs.indexWhere((item) => item.tab == _indicatorTab) * itemWidth;
+                    final indicatorLeft = _dragging
+                        ? (_dragIndicatorLeft ?? selectedLeft)
+                        : selectedLeft;
+                    return SizedBox(
+                      key: _barKey,
+                      height: 58,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          if (_dragging)
+                            Positioned(
+                              left: indicatorLeft,
+                              top: 0,
+                              bottom: 0,
+                              width: itemWidth,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 2),
+                                child: _GlassIndicator(),
+                              ),
+                            )
+                          else
+                            AnimatedPositioned(
+                              duration: const Duration(milliseconds: 230),
+                              curve: Curves.easeOutCubic,
+                              left: indicatorLeft,
+                              top: 0,
+                              bottom: 0,
+                              width: itemWidth,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 2),
+                                child: _GlassIndicator(),
+                              ),
+                            ),
+                          Row(
+                            children: [
+                              for (final item in _tabs)
+                                SizedBox(
+                                  key: _tabKeys[item.tab],
+                                  width: itemWidth,
+                                  child: _TabItem(
+                                    icon: item.icon,
+                                    label: item.label,
+                                    active: _indicatorTab == item.tab,
+                                    onTap: () {
+                                      Haptics.play(Haptic.selection);
+                                      widget.onSelect(item.tab);
+                                    },
+                                    onLongPressStart: () => _beginDrag(item.tab),
+                                    onLongPressMove: _updateDrag,
+                                    onLongPressEnd: _finishDrag,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ),

@@ -27,8 +27,9 @@ abstract final class OfflineListingCache {
     _initialized = true;
 
     final raw = LocalStore.readString(_storageKey);
-    if (raw == null || raw.isEmpty || utf8.encode(raw).length > _maxStoredBytes)
+    if (raw == null || raw.isEmpty || utf8.encode(raw).length > _maxStoredBytes) {
       return;
+    }
 
     try {
       final decoded = jsonDecode(raw);

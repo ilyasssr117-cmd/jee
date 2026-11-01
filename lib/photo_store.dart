@@ -302,9 +302,7 @@ class PhotoStore extends ChangeNotifier {
       title: album.title.substring(0, math.min(album.title.length, 300)),
       url: album.url,
       dir: '${_safeName(album.id, fallback: 'album')}_${_stableHash(album.id)}',
-      modelName: modelName == null
-          ? null
-          : modelName.substring(0, math.min(modelName.length, 256)),
+      modelName: modelName?.substring(0, math.min(modelName.length, 256)),
     );
     final dir = Directory('${root.path}/${saved.dir}');
     await dir.create(recursive: true);

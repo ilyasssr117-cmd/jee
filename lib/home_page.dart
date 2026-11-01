@@ -312,9 +312,10 @@ class _HomePageState extends State<HomePage>
     } catch (_) {
       // Keep the last successful page visible when the connection is weak.
     } finally {
-      if (!mounted || generation != _generation) return;
-      setState(() => _loading = false);
-      if (_hasMore) _scheduleFillViewport();
+      if (mounted && generation == _generation) {
+        setState(() => _loading = false);
+        if (_hasMore) _scheduleFillViewport();
+      }
     }
   }
 

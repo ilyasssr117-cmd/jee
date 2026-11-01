@@ -366,8 +366,9 @@ class SearchOverlayState extends State<SearchOverlay> {
     } catch (_) {
       // Keep the cached search results visible while offline.
     } finally {
-      if (!mounted || generation != _generation) return;
-      setState(() => _loading = false);
+      if (mounted && generation == _generation) {
+        setState(() => _loading = false);
+      }
     }
   }
 

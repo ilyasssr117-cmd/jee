@@ -36,14 +36,16 @@ Future<void> _bootstrap() async {
 
   FlutterError.onError = (details) {
     if (kDebugMode) FlutterError.presentError(details);
-    if (kDebugMode)
+    if (kDebugMode) {
       debugPrint(
         '[FATAL][flutter] ${details.exception.runtimeType}\n${details.stack}',
       );
+    }
   };
   ui.PlatformDispatcher.instance.onError = (error, stack) {
-    if (kDebugMode)
+    if (kDebugMode) {
       debugPrint('[FATAL][platform] ${error.runtimeType}\n$stack');
+    }
     return true;
   };
 
@@ -99,8 +101,9 @@ Future<void> _bootstrap() async {
       NativeBridge.instance.init(),
     ]);
   } catch (error) {
-    if (kDebugMode)
+    if (kDebugMode) {
       debugPrint('[STARTUP] Local data failed: ${error.runtimeType}');
+    }
   }
 
   runApp(const VXTUBEFinalApp());

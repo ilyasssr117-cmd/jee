@@ -617,8 +617,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         unawaited(_disposeReelController(controller));
         if (fallback != null) _controllers[index] = _build(fallback, index);
         if (mounted) setState(() {});
-        if (kDebugMode)
+        if (kDebugMode) {
           debugPrint('[REELS] controller init failed: ${error.runtimeType}');
+        }
       }
     }();
     _initializations[controller] = initialization;
@@ -813,8 +814,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _enqueue(ReelItem item, {bool silent = false}) {
     final url = item.downloadUrl ?? item.videoUrl;
     if (url.toLowerCase().contains('.m3u8')) {
-      if (!silent)
+      if (!silent) {
         _toast('This video is a stream and can\u2019t be downloaded.');
+      }
       return false;
     }
     final store = DownloadStore.instance;
@@ -2326,7 +2328,7 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                 final thumbLeft = (width * shown - thumb / 2)
                     .clamp(0.0, width - thumb)
                     .toDouble();
-                final timeStyle = const TextStyle(
+                const timeStyle = TextStyle(
                   color: Colors.white,
                   fontSize: 11,
                   height: 1,
@@ -2387,7 +2389,7 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                                       widthFactor: value
                                           .clamp(0.0, 1.0)
                                           .toDouble(),
-                                      child: ColoredBox(
+                                      child: const ColoredBox(
                                         color: AppColors.accent,
                                       ),
                                     ),

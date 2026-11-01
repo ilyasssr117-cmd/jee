@@ -118,8 +118,9 @@ class MiniPlayer extends ChangeNotifier with WidgetsBindingObserver {
     final value = session.controller.value;
     if (!value.isInitialized) return;
     final now = DateTime.now();
-    if (!force && now.difference(_lastSave) < const Duration(seconds: 5))
+    if (!force && now.difference(_lastSave) < const Duration(seconds: 5)) {
       return;
+    }
     _lastSave = now;
     PlaybackProgress.instance.save(
       session.video.id,

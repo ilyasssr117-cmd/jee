@@ -752,42 +752,25 @@ class _HomePageState extends State<HomePage>
                   ),
                 ],
               ),
-              bottomNavigationBar: AnimatedSize(
-                duration: const Duration(milliseconds: 320),
-                curve: Curves.easeInOutCubic,
-                alignment: Alignment.bottomCenter,
-                child: ClipRect(
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    heightFactor:
-                        searchOpen || _section != _Section.reels ? 1 : 0,
-                    child: IgnorePointer(
-                      ignoring: !searchOpen && _section == _Section.reels,
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 280),
-                        curve: Curves.easeInOutCubic,
-                        opacity:
-                            searchOpen || _section != _Section.reels ? 1 : 0,
-                        child: AnimatedSlide(
-                          offset: searchOpen || _section != _Section.reels
-                              ? Offset.zero
-                              : const Offset(0, 0.07),
-                          duration: const Duration(milliseconds: 280),
-                          curve: Curves.easeOutCubic,
-                          child: _RidingTabBar(
-                            selected: searchOpen
-                                ? AppTab.search
-                                : switch (_dragTarget ?? _section) {
-                                    _Section.home => AppTab.home,
-                                    _Section.reels => AppTab.reels,
-                                    _Section.library => AppTab.library,
-                                    _Section.settings => AppTab.settings,
-                                  },
-                            onSelect: _onTabSelect,
-                          ),
-                        ),
-                      ),
-                    ),
+              // Keep the navigation dock in a stable layout slot and animate
+              // opacity only. Collapsing its height or translating it vertically
+              // makes it appear to rise from the bottom when leaving Reels.
+              bottomNavigationBar: IgnorePointer(
+                ignoring: !searchOpen && _section == _Section.reels,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 280),
+                  curve: Curves.easeInOutCubic,
+                  opacity: searchOpen || _section != _Section.reels ? 1 : 0,
+                  child: _RidingTabBar(
+                    selected: searchOpen
+                        ? AppTab.search
+                        : switch (_dragTarget ?? _section) {
+                            _Section.home => AppTab.home,
+                            _Section.reels => AppTab.reels,
+                            _Section.library => AppTab.library,
+                            _Section.settings => AppTab.settings,
+                          },
+                    onSelect: _onTabSelect,
                   ),
                 ),
               ),

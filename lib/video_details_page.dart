@@ -274,7 +274,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
-    final artworkHeight = MediaQuery.sizeOf(context).width * 9 / 16;
+    // Give the artwork more breathing room. The image keeps its original ratio
+    // while the blurred backdrop fills the remaining width.
+    final artworkHeight = MediaQuery.sizeOf(context).width * 0.66;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
 
     final meta = VideoMetaLine(
@@ -310,8 +312,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     ColoredBox(color: AppColors.surfaceHigh),
                     ImageFiltered(
                       imageFilter: ui.ImageFilter.blur(
-                        sigmaX: 24,
-                        sigmaY: 24,
+                        sigmaX: 32,
+                        sigmaY: 32,
                       ),
                       child: VideoArtwork(
                         video: video,
@@ -344,29 +346,58 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               left: 0,
               right: 0,
               height: artworkHeight,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  VideoArtwork(
-                    video: video,
-                    showLabel: false,
-                    fit: BoxFit.contain,
-                    transparentBackground: true,
-                  ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
+              child: ShaderMask(
+                // Fade the lower edge into the blurred backdrop so the image
+                // never looks like a small rectangle abruptly pasted above the
+                // title. The backdrop remains visible beneath this mask.
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (bounds) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black, Colors.black, Colors.transparent],
+                  stops: [0.0, 0.84, 1.0],
+                ).createShader(bounds),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ShaderMask(
+                      // The original thumbnail stays undistorted. Only its
+                      // left/right edges dissolve gradually into the blurred
+                      // full-bleed copy behind it.
+                      blendMode: BlendMode.dstIn,
+                      shaderCallback: (bounds) => const LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
                         colors: [
-                          Color(0x24000000),
-                          Color(0x00000000),
+                          Colors.transparent,
+                          Colors.black,
+                          Colors.black,
+                          Colors.transparent,
                         ],
-                        stops: [0, 0.48],
+                        stops: [0.08, 0.27, 0.73, 0.92],
+                      ).createShader(bounds),
+                      child: VideoArtwork(
+                        video: video,
+                        showLabel: false,
+                        fit: BoxFit.contain,
+                        transparentBackground: true,
                       ),
                     ),
-                  ),
-                ],
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0x24000000),
+                            Color(0x00000000),
+                          ],
+                          stops: [0, 0.48],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             Padding(
@@ -625,7 +656,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  double _headerHeight(Size size) => size.width * 9 / 16 + 84;
+  double _headerHeight(Size size) => size.width * 0.66 + 84;
 
   Widget _buildModels({bool onDark = false}) {
     return FutureBuilder<List<ModelRef>>(

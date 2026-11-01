@@ -110,7 +110,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.skip_next_rounded,
-                  color: AppColors.textSecondary,
+                  color: AppColors.accentStrong,
                   title: 'Autoplay next video',
                   subtitle: 'Continue with the next one when a video ends',
                   trailing: _Toggle(
@@ -120,7 +120,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.volume_up_rounded,
-                  color: AppColors.textSecondary,
+                  color: const Color(0xFFE8710A),
                   title: 'Preview sound',
                   subtitle: 'Play sound when you hold a video to preview it',
                   trailing: _Toggle(
@@ -130,7 +130,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.vibration_rounded,
-                  color: AppColors.textSecondary,
+                  color: const Color(0xFF34A853),
                   title: 'Haptic feedback',
                   subtitle: 'Vibrate on taps and long-press',
                   trailing: _Toggle(
@@ -148,7 +148,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.cleaning_services_rounded,
-                  color: AppColors.textSecondary,
+                  color: const Color(0xFFF29900),
                   title: 'Clear cache',
                   subtitle:
                       'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
@@ -171,13 +171,13 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.search_off_rounded,
-                  color: AppColors.textSecondary,
+                  color: const Color(0xFF8E96A8),
                   title: 'Clear search history',
                   onTap: _clearSearches,
                 ),
                 _Row(
                   icon: Icons.history_toggle_off_rounded,
-                  color: AppColors.error,
+                  color: const Color(0xFFD93025),
                   title: 'Clear watch history',
                   subtitle: 'History list and resume points',
                   destructive: true,
@@ -282,13 +282,13 @@ class _Row extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(Radii.small),
+                  color: color,
+                  borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(icon, size: 19, color: color),
+                child: Icon(icon, size: 20, color: Colors.white),
               ),
               const SizedBox(width: Gaps.md),
               Expanded(

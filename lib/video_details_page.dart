@@ -274,10 +274,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
-    // Use a taller, full-bleed artwork area. The sharp image fills the frame
-    // without distortion (BoxFit.cover preserves its ratio); the blurred copy
-    // underneath is revealed softly along the sides and lower edge.
-    final artworkHeight = MediaQuery.sizeOf(context).width * 0.74;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
 
     final meta = VideoMetaLine(
@@ -293,8 +289,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       fallbackToCategory: false,
     );
 
-    // The artwork is a fixed background layer. Details are laid over it,
-    // restoring the original visual composition without a shared Hero route.
+    // Follow the full-bleed header composition: the artwork is the header's
+    // background, not a separate rectangular image above the details.
+    // A blurred copy fills the entire panel; the sharp copy fades into it at
+    // the left/right edges and toward the lower part of the header.
     return ConstrainedBox(
       key: _headerKey,
       constraints: BoxConstraints(
@@ -313,8 +311,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     ColoredBox(color: AppColors.surfaceHigh),
                     ImageFiltered(
                       imageFilter: ui.ImageFilter.blur(
-                        sigmaX: 32,
-                        sigmaY: 32,
+                        sigmaX: 30,
+                        sigmaY: 30,
                       ),
                       child: VideoArtwork(
                         video: video,
@@ -322,49 +320,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                         fit: BoxFit.cover,
                       ),
                     ),
-                    const ColoredBox(color: Color(0x35000000)),
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          stops: [0.0, 0.22, 0.52, 1.0],
-                          colors: [
-                            Color(0x50000000),
-                            Color(0x10000000),
-                            Color(0x70000000),
-                            Color(0xE60B0D12),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: artworkHeight,
-              child: ShaderMask(
-                // Let the image occupy the whole artwork frame, then dissolve
-                // its lower portion into the same image blurred underneath.
-                // This avoids a hard rectangular edge before the title.
-                blendMode: BlendMode.dstIn,
-                shaderCallback: (bounds) => const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black, Colors.black, Colors.transparent],
-                  stops: [0.0, 0.68, 1.0],
-                ).createShader(bounds),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
                     ShaderMask(
-                      // Keep most of the photo crisp and full-width. Only a
-                      // narrow strip at each side reveals the blurred copy,
-                      // creating a soft edge rather than a visible image frame.
+                      // Keep the crisp full-bleed image over the blurred copy.
+                      // The edge masks reveal the same image underneath,
+                      // avoiding visible image borders or empty side bands.
                       blendMode: BlendMode.dstIn,
                       shaderCallback: (bounds) => const LinearGradient(
                         begin: Alignment.centerLeft,
@@ -375,13 +334,29 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                           Colors.black,
                           Colors.transparent,
                         ],
-                        stops: [0.0, 0.10, 0.90, 1.0],
+                        stops: [0.0, 0.075, 0.925, 1.0],
                       ).createShader(bounds),
-                      child: VideoArtwork(
-                        video: video,
-                        showLabel: false,
-                        fit: BoxFit.cover,
-                        transparentBackground: true,
+                      child: ShaderMask(
+                        // Let the clear artwork dissolve into its blurred
+                        // backdrop near the lower edge instead of ending as a
+                        // rectangular image above the title and controls.
+                        blendMode: BlendMode.dstIn,
+                        shaderCallback: (bounds) => const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black,
+                            Colors.black,
+                            Colors.transparent,
+                          ],
+                          stops: [0.0, 0.44, 1.0],
+                        ).createShader(bounds),
+                        child: VideoArtwork(
+                          video: video,
+                          showLabel: false,
+                          fit: BoxFit.cover,
+                          transparentBackground: true,
+                        ),
                       ),
                     ),
                     const DecoratedBox(
@@ -389,11 +364,13 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
+                          stops: [0.0, 0.24, 0.58, 1.0],
                           colors: [
-                            Color(0x24000000),
-                            Color(0x00000000),
+                            Color(0x3D0C1020),
+                            Color(0x260C1020),
+                            Color(0x8A0C1020),
+                            Color(0xF20C1020),
                           ],
-                          stops: [0, 0.48],
                         ),
                       ),
                     ),
@@ -404,7 +381,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             Padding(
               padding: EdgeInsets.fromLTRB(
                 margin,
-                artworkHeight + Gaps.md,
+                context.safe.top + Gaps.sm + kMinTapSize + Gaps.md,
                 margin,
                 Gaps.lg,
               ),

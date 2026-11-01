@@ -59,8 +59,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: AppColors.palette.brightness == Brightness.dark
-                          ? const [Color(0xE52B3341), Color(0xD2181D28)]
-                          : const [Color(0xF4FFFFFF), Color(0xE8E8EDF5)],
+                          ? const [Color(0xE52E3A70), Color(0xD21B2448)]
+                          : const [Color(0xF4FFFFFF), Color(0xE8EAEDFF)],
                     ),
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(

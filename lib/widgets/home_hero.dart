@@ -60,7 +60,7 @@ class HomeHero extends StatelessWidget {
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [Color(0xFF401D27), OnDark.background],
+                        colors: [Color(0xFF302F70), OnDark.background],
                       ),
                     ),
                   ),
@@ -70,9 +70,9 @@ class HomeHero extends StatelessWidget {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Color(0x4D080A0F),
-                        Color(0x08080A0F),
-                        Color(0xF2080A0F),
+                        Color(0x4D0C1020),
+                        Color(0x080C1020),
+                        Color(0xF20C1020),
                       ],
                       stops: [0, 0.35, 1],
                     ),
@@ -117,7 +117,7 @@ class _TopBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
       decoration: BoxDecoration(
-        color: const Color(0x99101319),
+        color: const Color(0x99151A31),
         borderRadius: BorderRadius.circular(17),
         border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
@@ -204,7 +204,7 @@ class _HeroDetails extends StatelessWidget {
             Text(
               'FEATURED',
               style: darkText.overline.copyWith(
-                color: const Color(0xFFFF929A),
+                color: AppColors.accent,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 1.5,
               ),

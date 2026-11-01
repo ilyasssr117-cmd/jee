@@ -152,7 +152,7 @@ class _Placeholder extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF3A2028), Color(0xFF17181E)],
+          colors: [Color(0xFF30356F), Color(0xFF151B2D)],
         ),
       ),
       child: Center(

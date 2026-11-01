@@ -133,8 +133,8 @@ class _AppBottomBarState extends State<AppBottomBar> {
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: AppColors.palette.brightness == Brightness.dark
-                      ? const Color(0xD91C2029)
-                      : const Color(0xEAFBFCFF),
+                      ? const Color(0xDD1A2040)
+                      : const Color(0xEEF0F1FF),
                   borderRadius: BorderRadius.circular(27),
                   border: Border.all(
                     color: AppColors.palette.brightness == Brightness.dark

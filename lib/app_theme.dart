@@ -3,14 +3,14 @@ import 'package:flutter/cupertino.dart'
 import 'package:flutter/material.dart';
 
 abstract final class OnDark {
-  static const Color background = Color(0xFF0D0E12);
-  static const Color surface = Color(0xFF17181E);
-  static const Color surfaceHigh = Color(0xFF23242D);
+  static const Color background = Color(0xFF0C1020);
+  static const Color surface = Color(0xFF151B2D);
+  static const Color surfaceHigh = Color(0xFF202943);
   static const Color outline = Color(0x1FFFFFFF);
   static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFFB7BDCB);
-  static const Color textTertiary = Color(0xFF8E96A8);
-  static const Color accentSoft = Color(0xFF3B171B);
+  static const Color textSecondary = Color(0xFFBBC4DA);
+  static const Color textTertiary = Color(0xFF8996B7);
+  static const Color accentSoft = Color(0xFF292B55);
   static const Color error = Color(0xFFFF8A80);
 }
 
@@ -54,14 +54,14 @@ class Palette {
 
   static const Palette light = Palette(
     brightness: Brightness.light,
-    background: Color(0xFFF4F5FA),
+    background: Color(0xFFF5F6FF),
     surface: Color(0xFFFFFFFF),
-    surfaceHigh: Color(0xFFE8EBF2),
+    surfaceHigh: Color(0xFFE9ECFF),
     outline: Color(0x1F000000),
-    textPrimary: Color(0xFF12141B),
-    textSecondary: Color(0xFF4B5265),
-    textTertiary: Color(0xFF7B8396),
-    accentSoft: Color(0xFFFCE4E6),
+    textPrimary: Color(0xFF171A2B),
+    textSecondary: Color(0xFF4E5673),
+    textTertiary: Color(0xFF7E87A8),
+    accentSoft: Color(0xFFE9E9FF),
     error: Color(0xFFD93025),
   );
 }
@@ -79,9 +79,13 @@ abstract final class AppColors {
   static Color get accentSoft => palette.accentSoft;
   static Color get error => palette.error;
 
-  static const Color accent = Color(0xFFF04452);
+  static const Color accent = Color(0xFF8585FF);
 
-  static const Color accentStrong = Color(0xFFDC2626);
+  static const Color accentStrong = Color(0xFF6875F5);
+  static const Color accentBlue = Color(0xFF7695FF);
+  static const Color accentViolet = Color(0xFF9A86FF);
+  static const Color accentIndigo = Color(0xFF777EF5);
+  static const Color accentMuted = Color(0xFF8795C8);
 
   static const Color star = Color(0xFFFFC857);
 }
@@ -311,7 +315,7 @@ ThemeData buildAppTheme(Brightness brightness) {
     dividerTheme: DividerThemeData(color: p.outline, thickness: 1, space: 1),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.accent,
-      linearTrackColor: Color(0x263F3F46),
+      linearTrackColor: Color(0x263D4770),
     ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith<Color?>(
@@ -344,7 +348,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       behavior: SnackBarBehavior.floating,
       backgroundColor: p.brightness == Brightness.dark
           ? OnDark.surfaceHigh
-          : const Color(0xFF2A2F3D),
+          : const Color(0xFF292F49),
       contentTextStyle: const TextStyle(fontSize: 14, color: Colors.white),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Radii.button),

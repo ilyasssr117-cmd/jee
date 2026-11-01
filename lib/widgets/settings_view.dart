@@ -120,7 +120,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.volume_up_rounded,
-                  color: const Color(0xFFE8710A),
+                  color: AppColors.accentBlue,
                   title: 'Preview sound',
                   subtitle: 'Play sound when you hold a video to preview it',
                   trailing: _Toggle(
@@ -130,7 +130,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.vibration_rounded,
-                  color: const Color(0xFF34A853),
+                  color: AppColors.accentViolet,
                   title: 'Haptic feedback',
                   subtitle: 'Vibrate on taps and long-press',
                   trailing: _Toggle(
@@ -148,7 +148,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.cleaning_services_rounded,
-                  color: const Color(0xFFF29900),
+                  color: AppColors.accentIndigo,
                   title: 'Clear cache',
                   subtitle:
                       'Images, previews and saved lists \u00b7 ${formatBytes(cacheBytes)}',
@@ -171,7 +171,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: [
                 _Row(
                   icon: Icons.search_off_rounded,
-                  color: const Color(0xFF8E96A8),
+                  color: AppColors.accentMuted,
                   title: 'Clear search history',
                   onTap: _clearSearches,
                 ),

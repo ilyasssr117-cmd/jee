@@ -891,7 +891,9 @@ class _PhotoTile extends StatelessWidget {
                 ),
               ),
             ),
-            if (selected) const ColoredBox(color: Color(0x55F04452)),
+            if (selected) ColoredBox(
+              color: AppColors.accent.withValues(alpha: 0.22),
+            ),
             if (selecting)
               Positioned(
                 top: 6,

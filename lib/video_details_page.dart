@@ -274,9 +274,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
-    // Give the artwork more breathing room. The image keeps its original ratio
-    // while the blurred backdrop fills the remaining width.
-    final artworkHeight = MediaQuery.sizeOf(context).width * 0.66;
+    // Use a taller, full-bleed artwork area. The sharp image fills the frame
+    // without distortion (BoxFit.cover preserves its ratio); the blurred copy
+    // underneath is revealed softly along the sides and lower edge.
+    final artworkHeight = MediaQuery.sizeOf(context).width * 0.74;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
 
     final meta = VideoMetaLine(
@@ -347,23 +348,23 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               right: 0,
               height: artworkHeight,
               child: ShaderMask(
-                // Fade the lower edge into the blurred backdrop so the image
-                // never looks like a small rectangle abruptly pasted above the
-                // title. The backdrop remains visible beneath this mask.
+                // Let the image occupy the whole artwork frame, then dissolve
+                // its lower portion into the same image blurred underneath.
+                // This avoids a hard rectangular edge before the title.
                 blendMode: BlendMode.dstIn,
                 shaderCallback: (bounds) => const LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [Colors.black, Colors.black, Colors.transparent],
-                  stops: [0.0, 0.84, 1.0],
+                  stops: [0.0, 0.68, 1.0],
                 ).createShader(bounds),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
                     ShaderMask(
-                      // The original thumbnail stays undistorted. Only its
-                      // left/right edges dissolve gradually into the blurred
-                      // full-bleed copy behind it.
+                      // Keep most of the photo crisp and full-width. Only a
+                      // narrow strip at each side reveals the blurred copy,
+                      // creating a soft edge rather than a visible image frame.
                       blendMode: BlendMode.dstIn,
                       shaderCallback: (bounds) => const LinearGradient(
                         begin: Alignment.centerLeft,
@@ -374,12 +375,12 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                           Colors.black,
                           Colors.transparent,
                         ],
-                        stops: [0.08, 0.27, 0.73, 0.92],
+                        stops: [0.0, 0.10, 0.90, 1.0],
                       ).createShader(bounds),
                       child: VideoArtwork(
                         video: video,
                         showLabel: false,
-                        fit: BoxFit.contain,
+                        fit: BoxFit.cover,
                         transparentBackground: true,
                       ),
                     ),

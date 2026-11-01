@@ -1131,8 +1131,8 @@ class _ReelsTopBar extends StatelessWidget {
   }
 }
 
-// Double-taps near the screen edges skip; double-taps in the middle like.
-const double _kSkipZone = 0.28;
+// Keep skip gestures close to the edges so the middle has more room for likes.
+const double _kSkipZone = 0.18;
 
 class _ReelView extends StatefulWidget {
   const _ReelView({
@@ -1662,8 +1662,8 @@ class _ReelViewState extends State<_ReelView>
   }
 }
 
-/// YouTube-style skip feedback: a soft half-disc on the side that was tapped
-/// with three cascading chevrons and the accumulated seconds.
+/// Compact skip feedback stays close to the tapped edge. It deliberately
+/// avoids the full-height half-screen disc so double-tap likes have room.
 class _SkipFeedback extends StatelessWidget {
   const _SkipFeedback({
     required this.visible,
@@ -1680,68 +1680,69 @@ class _SkipFeedback extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final forward = direction >= 0;
-    const round = Radius.circular(400);
     return Positioned.fill(
       child: IgnorePointer(
         child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 150),
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
           opacity: visible ? 1 : 0,
           child: Align(
             alignment: forward ? Alignment.centerRight : Alignment.centerLeft,
-            child: FractionallySizedBox(
-              widthFactor: 0.42,
-              heightFactor: 1,
-              child: ClipRRect(
-                borderRadius: BorderRadius.horizontal(
-                  left: forward ? round : Radius.zero,
-                  right: forward ? Radius.zero : round,
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: forward ? 0 : 18,
+                right: forward ? 18 : 0,
+              ),
+              child: TweenAnimationBuilder<double>(
+                key: ValueKey<int>(pulse),
+                tween: Tween<double>(begin: 0.88, end: 1),
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutBack,
+                builder: (_, scale, child) => Transform.scale(
+                  scale: scale,
+                  child: child,
                 ),
-                child: ColoredBox(
-                  color: const Color(0x2EFFFFFF),
-                  child: Center(
-                    child: TweenAnimationBuilder<double>(
-                      key: ValueKey<int>(pulse),
-                      tween: Tween<double>(begin: 0, end: 1),
-                      duration: const Duration(milliseconds: 560),
-                      builder: (_, t, __) {
-                        return Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (var i = 0; i < 3; i++)
-                                  Opacity(
-                                    opacity:
-                                        (0.25 +
-                                                0.75 *
-                                                    (t * 3 - (forward ? i : 2 - i))
-                                                        .clamp(0.0, 1.0))
-                                            .toDouble(),
-                                    child: Transform.scale(
-                                      scaleX: forward ? 1 : -1,
-                                      child: const Icon(
-                                        Icons.play_arrow_rounded,
-                                        size: 30,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '$seconds seconds',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                child: Container(
+                  width: 78,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    color: const Color(0xB81A1A1D),
+                    borderRadius: BorderRadius.circular(21),
+                    border: Border.all(
+                      color: const Color(0x33FFFFFF),
+                      width: 0.8,
                     ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x33000000),
+                        blurRadius: 14,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        forward
+                            ? Icons.forward_10_rounded
+                            : Icons.replay_10_rounded,
+                        color: Colors.white,
+                        size: 29,
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        '${forward ? '+' : '−'}${seconds}s',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          height: 1.1,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.1,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

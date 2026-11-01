@@ -1,6 +1,5 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter/cupertino.dart' show CupertinoSliverRefreshControl;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +40,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   static const Duration _refreshIndicatorLimit = Duration(seconds: 8);
   late Future<List<Video>> _relatedFuture;
   late Future<List<ModelRef>> _modelsFuture;
+  List<ModelRef> _models = const <ModelRef>[];
+  Object? _modelsError;
   final ScrollController _scroll = ScrollController();
   final GlobalKey _headerKey = GlobalKey();
 
@@ -56,6 +57,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     super.initState();
     _relatedFuture = _loadRelated();
     _modelsFuture = _loadModels();
+    _watchModels(_modelsFuture);
     _scroll.addListener(() {
       final over = !_scroll.hasClients || _scroll.offset < _headerLimit;
       if (over != _overHeader.value) _overHeader.value = over;
@@ -99,6 +101,30 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           )
           .timeout(_detailsLoadLimit);
 
+  void _watchModels(Future<List<ModelRef>> request) {
+    request.then<void>(
+      (models) {
+        if (!mounted || !identical(request, _modelsFuture)) return;
+        setState(() {
+          // Keep the last known model/profile visible if a refresh responds
+          // with an incomplete or temporarily empty list.
+          if (models.isNotEmpty || _models.isEmpty) {
+            _models = models;
+          }
+          _modelsError = null;
+        });
+      },
+      onError: (Object error) {
+        if (!mounted || !identical(request, _modelsFuture)) return;
+        // A transient error must not replace an already visible profile row.
+        if (_models.isNotEmpty) return;
+        setState(() {
+          _modelsError = error;
+        });
+      },
+    );
+  }
+
   void _openModel(ModelRef model) {
     Navigator.of(context).push<void>(
       adaptivePageRoute<void>(context, builder: (_) => ModelPage(model: model)),
@@ -112,7 +138,12 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   void _reloadModels() {
     if (!mounted) return;
-    setState(() => _modelsFuture = _loadModels(force: true, fresh: true));
+    final request = _loadModels(force: true, fresh: true);
+    setState(() {
+      _modelsFuture = request;
+      _modelsError = null;
+    });
+    _watchModels(request);
   }
 
   Future<void> _refreshDetails() async {
@@ -120,40 +151,32 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     Haptics.play(Haptic.light);
     _refreshing = true;
 
-    // Start a genuinely fresh detail-page request. The model lookup joins that
-    // request, while the two sections continue rendering independently.
+    // Only refresh the changing video recommendations here. Model/profile
+    // information belongs to this video and remains mounted and visible while
+    // a pull-to-refresh is in progress.
     final related = _loadRelated(force: true, fresh: true);
-    final models = _loadModels(force: true);
     if (mounted) {
       setState(() {
         _relatedFuture = related;
-        _modelsFuture = models;
       });
     }
 
     var failed = false;
     var tookTooLong = false;
 
-    Future<void> settle<T>(Future<T> task) async {
+    Future<void> settleRelated() async {
       try {
-        await task;
+        await related;
       } catch (_) {
         failed = true;
       }
     }
 
     try {
-      // The refresh indicator has its own shorter deadline. A slow connection
-      // can keep updating the FutureBuilder sections, but cannot trap the user
-      // under a spinner indefinitely.
-      await Future.wait<void>(<Future<void>>[
-        settle(related),
-        settle(models),
-      ]).timeout(
+      await settleRelated().timeout(
         _refreshIndicatorLimit,
         onTimeout: () {
           tookTooLong = true;
-          return <void>[];
         },
       );
     } finally {
@@ -246,26 +269,47 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         backgroundColor: AppColors.background,
         body: ColoredBox(
           color: AppColors.background,
-          child: CustomScrollView(
-            key: PageStorageKey<String>('video-details-${widget.video.id}'),
-            controller: _scroll,
-            physics: nativeScrollPhysics(context, alwaysScrollable: true),
-            scrollCacheExtent: ScrollCacheExtent.pixels(
-              MediaQuery.sizeOf(context).height,
+          child: RefreshIndicator(
+            onRefresh: _refreshDetails,
+            color: AppColors.accent,
+            backgroundColor: AppColors.surface,
+            edgeOffset: context.safe.top + Gaps.sm,
+            displacement: 44,
+            child: CustomScrollView(
+              key: PageStorageKey<String>('video-details-${widget.video.id}'),
+              controller: _scroll,
+              physics: nativeScrollPhysics(context, alwaysScrollable: true),
+              scrollCacheExtent: ScrollCacheExtent.pixels(
+                MediaQuery.sizeOf(context).height * 0.7,
+              ),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: _DetailsHeroStretch(
+                    controller: _scroll,
+                    child: _buildHeader(margin),
+                  ),
+                ),
+                if (_models.isNotEmpty || _modelsError != null)
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _PinnedModelsDelegate(
+                      extent: context.safe.top + 42 > 78
+                          ? context.safe.top + 42
+                          : 78,
+                      margin: margin,
+                      models: _models,
+                      error: _modelsError,
+                      onRetry: _reloadModels,
+                      onOpen: _openModel,
+                    ),
+                  ),
+                SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
+                _buildRelated(margin),
+                SliverToBoxAdapter(
+                  child: SizedBox(height: Gaps.xl + context.safe.bottom),
+                ),
+              ],
             ),
-            slivers: [
-              CupertinoSliverRefreshControl(
-                onRefresh: _refreshDetails,
-                refreshTriggerPullDistance: 84,
-                refreshIndicatorExtent: 52,
-              ),
-              SliverToBoxAdapter(child: _buildHeader(margin)),
-              SliverToBoxAdapter(child: _buildRelatedTitle(margin)),
-              _buildRelated(margin),
-              SliverToBoxAdapter(
-                child: SizedBox(height: Gaps.xl + context.safe.bottom),
-              ),
-            ],
           ),
         ),
       ),
@@ -483,7 +527,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       ],
                     ),
                   ],
-                  _buildModels(onDark: true),
                 ],
               ),
             ),
@@ -636,87 +679,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   double _headerHeight(Size size) => size.width * 0.66 + 84;
 
-  Widget _buildModels({bool onDark = false}) {
-    return FutureBuilder<List<ModelRef>>(
-      future: _modelsFuture,
-      builder: (context, snapshot) {
-        final models = snapshot.data ?? const <ModelRef>[];
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Padding(
-            padding: EdgeInsets.only(top: Gaps.lg),
-            child: SizedBox(height: 2),
-          );
-        }
-        if (snapshot.hasError) {
-          return Padding(
-            padding: const EdgeInsets.only(top: Gaps.lg),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Couldn’t load model information.', style: AppText.body),
-                ),
-                AppButton(
-                  label: 'Retry',
-                  icon: Icons.refresh_rounded,
-                  style: AppButtonStyle.secondary,
-                  onDark: onDark,
-                  onPressed: _reloadModels,
-                ),
-              ],
-            ),
-          );
-        }
-        if (models.isEmpty) return const SizedBox.shrink();
-        final titleStyle = AppText.label.copyWith(
-          color: onDark
-              ? Colors.white.withValues(alpha: 0.78)
-              : AppColors.textSecondary,
-        );
-        return Padding(
-          padding: const EdgeInsets.only(top: Gaps.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: double.infinity,
-                height: 1,
-                margin: const EdgeInsets.only(bottom: Gaps.md),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      Colors.white.withValues(alpha: 0.02),
-                      Colors.white.withValues(alpha: 0.24),
-                      Colors.white.withValues(alpha: 0.02),
-                    ],
-                  ),
-                ),
-              ),
-              Text(
-                models.length == 1 ? 'Model' : 'Models',
-                style: titleStyle,
-              ),
-              const SizedBox(height: Gaps.sm),
-              Wrap(
-                spacing: Gaps.sm,
-                runSpacing: Gaps.sm,
-                children: [
-                  for (final model in models)
-                    _ModelChip(
-                      name: model.name,
-                      imageUrl: model.imageUrl,
-                      pageUrl: model.url,
-                      onDark: onDark,
-                      onPressed: () => _openModel(model),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildRelatedTitle(double margin) {
     return FutureBuilder<List<Video>>(
       future: _relatedFuture,
@@ -788,8 +750,160 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 }
 
+class _DetailsHeroStretch extends StatelessWidget {
+  const _DetailsHeroStretch({
+    required this.controller,
+    required this.child,
+  });
+
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller,
+      // Keep the hero mounted and rasterized while the refresh gesture moves.
+      child: RepaintBoundary(child: child),
+      builder: (context, child) {
+        final pulled = controller.hasClients
+            ? (-controller.position.pixels).clamp(0.0, 120.0).toDouble()
+            : 0.0;
+        final scale = 1.0 + pulled / 2400.0;
+        return Transform.scale(
+          scale: scale,
+          alignment: Alignment.bottomCenter,
+          child: child,
+        );
+      },
+    );
+  }
+}
+
+class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
+  const _PinnedModelsDelegate({
+    required this.extent,
+    required this.margin,
+    required this.models,
+    required this.error,
+    required this.onRetry,
+    required this.onOpen,
+  });
+
+  final double extent;
+  final double margin;
+  final List<ModelRef> models;
+  final Object? error;
+  final VoidCallback onRetry;
+  final ValueChanged<ModelRef> onOpen;
+
+  @override
+  double get minExtent => extent;
+
+  @override
+  double get maxExtent => extent;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final pinned = shrinkOffset > 0 || overlapsContent;
+    final topInset = pinned ? MediaQuery.paddingOf(context).top : 0.0;
+    final hasModels = models.isNotEmpty;
+
+    return Material(
+      color: AppColors.background,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: AppColors.outline.withValues(alpha: 0.55),
+              width: 0.7,
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            margin,
+            pinned ? topInset : 7,
+            margin,
+            pinned ? 5 : 7,
+          ),
+          child: hasModels
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!pinned) ...[
+                      Text(
+                        models.length == 1 ? 'MODEL' : 'MODELS',
+                        style: AppText.label.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 11,
+                          letterSpacing: 0.7,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                    ],
+                    SizedBox(
+                      height: 36,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: models.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(width: Gaps.sm),
+                        itemBuilder: (context, index) {
+                          final model = models[index];
+                          return _ModelChip(
+                            key: ValueKey<String>('${model.url}|${model.name}'),
+                            name: model.name,
+                            imageUrl: model.imageUrl,
+                            pageUrl: model.url,
+                            onPressed: () => onOpen(model),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                )
+              : Align(
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Couldn’t load model information.',
+                          style: AppText.body,
+                        ),
+                      ),
+                      AppButton(
+                        label: 'Retry',
+                        icon: Icons.refresh_rounded,
+                        style: AppButtonStyle.secondary,
+                        onPressed: onRetry,
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _PinnedModelsDelegate oldDelegate) =>
+      extent != oldDelegate.extent ||
+      margin != oldDelegate.margin ||
+      !identical(models, oldDelegate.models) ||
+      error != oldDelegate.error;
+}
+
 class _ModelChip extends StatelessWidget {
   const _ModelChip({
+    super.key,
     required this.name,
     required this.imageUrl,
     required this.pageUrl,

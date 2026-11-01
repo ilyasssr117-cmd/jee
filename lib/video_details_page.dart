@@ -260,18 +260,18 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       valueListenable: _overHeader,
       builder: (context, overHeader, child) =>
           AnnotatedRegion<SystemUiOverlayStyle>(
-            value: darkMode || overHeader
-                ? SystemUiOverlayStyle.light
-                : SystemUiOverlayStyle.dark,
-            child: child!,
-          ),
+        value: darkMode || overHeader
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
+        child: child!,
+      ),
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: ColoredBox(
           color: AppColors.background,
           child: RefreshIndicator(
             onRefresh: _refreshDetails,
-            color: AppColors.accent,
+            color: AppColors.accentForeground,
             backgroundColor: AppColors.surface,
             edgeOffset: context.safe.top + Gaps.sm,
             displacement: 44,
@@ -448,6 +448,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     collapsedLines: 3,
                     style: darkText.display.copyWith(
                       fontSize: 23,
+                      fontWeight: FontWeight.w700,
                       color: Colors.white,
                       height: 1.12,
                       shadows: const [
@@ -496,12 +497,43 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       _buildFavoriteButton(),
                       _buildDownloadButton(),
                       if (_shareLink != null)
-                        AppButton(
-                          label: 'Copy link',
-                          icon: Icons.link_rounded,
-                          style: AppButtonStyle.secondary,
-                          onDark: true,
-                          onPressed: _copyLink,
+                        PopupMenuButton<String>(
+                          tooltip: 'Share actions',
+                          onSelected: (_) => _copyLink(),
+                          itemBuilder: (context) => const [
+                            PopupMenuItem<String>(
+                              value: 'copy',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.link_rounded, size: 20),
+                                  SizedBox(width: Gaps.sm),
+                                  Text('Copy link'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          child: Semantics(
+                            button: true,
+                            label: 'Share actions',
+                            child: SizedBox(
+                              height: 46,
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 10),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.ios_share_rounded,
+                                        size: 20, color: Colors.white),
+                                    const SizedBox(width: 6),
+                                    Text('Share',
+                                        style: AppText.label
+                                            .copyWith(color: Colors.white)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                     ],
                   ),
@@ -543,8 +575,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   String? get _shareLink {
     final uri = Uri.tryParse(widget.video.pageUrl?.trim() ?? '');
-    final valid =
-        uri != null &&
+    final valid = uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
         uri.host.isNotEmpty &&
         uri.userInfo.isEmpty;
@@ -569,7 +600,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           label: active ? 'Favorited' : 'Favorite',
           icon: active ? Icons.star_rounded : Icons.star_border_rounded,
           iconColor: active ? AppColors.star : null,
-          style: AppButtonStyle.secondary,
+          style: AppButtonStyle.tertiary,
           onDark: true,
           onPressed: () {
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
@@ -592,7 +623,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           return AppButton(
             label: 'Download',
             icon: Icons.download_rounded,
-            style: AppButtonStyle.secondary,
+            style: AppButtonStyle.tertiary,
             onDark: true,
             onPressed: () {
               store.enqueue(widget.video);
@@ -610,7 +641,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 label: 'Downloaded',
                 icon: Icons.download_done_rounded,
                 iconColor: AppColors.accent,
-                style: AppButtonStyle.secondary,
+                style: AppButtonStyle.tertiary,
                 onDark: true,
                 onPressed: () async {
                   final ok = await confirmDialog(
@@ -625,7 +656,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
               AppButton(
                 label: 'Save to Photos',
                 icon: Icons.photo_library_outlined,
-                style: AppButtonStyle.secondary,
+                style: AppButtonStyle.tertiary,
                 onDark: true,
                 onPressed: () =>
                     saveVideoToPhotos(context, id, aboveBar: false),
@@ -638,9 +669,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           valueListenable: item.bytes,
           builder: (context, _, __) {
             final fraction = item.progress;
-            final percent = fraction == null
-                ? ''
-                : ' ${(fraction * 100).round()}%';
+            final percent =
+                fraction == null ? '' : ' ${(fraction * 100).round()}%';
             switch (item.status) {
               case DownloadStatus.downloading:
                 return AppButton(
@@ -648,7 +678,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                       ? 'Downloading\u2026'
                       : '${(fraction * 100).round()}%',
                   icon: Icons.pause_rounded,
-                  style: AppButtonStyle.secondary,
+                  style: AppButtonStyle.tertiary,
                   onDark: true,
                   onPressed: () => store.pause(id),
                 );
@@ -656,7 +686,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 return AppButton(
                   label: 'Waiting\u2026',
                   icon: Icons.pause_rounded,
-                  style: AppButtonStyle.secondary,
+                  style: AppButtonStyle.tertiary,
                   onDark: true,
                   onPressed: () => store.pause(id),
                 );
@@ -666,7 +696,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 return AppButton(
                   label: item.hasPartial ? 'Resume$percent' : 'Retry download',
                   icon: Icons.play_arrow_rounded,
-                  style: AppButtonStyle.secondary,
+                  style: AppButtonStyle.tertiary,
                   onDark: true,
                   onPressed: () => store.resume(id),
                 );
@@ -908,14 +938,12 @@ class _ModelChip extends StatelessWidget {
     required this.imageUrl,
     required this.pageUrl,
     required this.onPressed,
-    this.onDark = false,
   });
 
   final String name;
   final String? imageUrl;
   final String pageUrl;
   final VoidCallback onPressed;
-  final bool onDark;
 
   @override
   Widget build(BuildContext context) {
@@ -928,14 +956,10 @@ class _ModelChip extends StatelessWidget {
         height: 36,
         padding: const EdgeInsets.only(left: 10, right: 14),
         decoration: BoxDecoration(
-          color: onDark
-              ? Colors.white.withValues(alpha: 0.14)
-              : AppColors.surfaceHigh,
+          color: AppColors.surfaceHigh,
           borderRadius: BorderRadius.circular(Radii.pill),
           border: Border.all(
-            color: onDark
-                ? Colors.white.withValues(alpha: 0.24)
-                : AppColors.outline,
+            color: AppColors.outline,
           ),
         ),
         child: Row(
@@ -957,7 +981,7 @@ class _ModelChip extends StatelessWidget {
                 style: AppText.label.copyWith(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: onDark ? Colors.white : AppColors.textPrimary,
+                  color: AppColors.textPrimary,
                 ),
               ),
             ),
@@ -965,9 +989,7 @@ class _ModelChip extends StatelessWidget {
             Icon(
               Icons.chevron_right_rounded,
               size: 20,
-              color: onDark
-                  ? Colors.white.withValues(alpha: 0.76)
-                  : AppColors.textTertiary,
+              color: AppColors.textTertiary,
             ),
           ],
         ),

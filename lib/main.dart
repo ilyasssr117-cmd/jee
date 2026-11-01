@@ -123,17 +123,16 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
 
   final GlobalKey _boundaryKey = GlobalKey();
   ui.Image? _snapshot;
-  late final AnimationController _fade =
-      AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 380),
-      )..addStatusListener((status) {
-        if (status == AnimationStatus.completed && mounted) {
-          final old = _snapshot;
-          setState(() => _snapshot = null);
-          old?.dispose();
-        }
-      });
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  )..addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        final old = _snapshot;
+        setState(() => _snapshot = null);
+        old?.dispose();
+      }
+    });
 
   Brightness _resolve() {
     switch (AppSettings.instance.themeMode) {
@@ -175,9 +174,8 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
   }
 
   void _applyPalette() {
-    AppColors.palette = _brightness == Brightness.dark
-        ? Palette.dark
-        : Palette.light;
+    AppColors.palette =
+        _brightness == Brightness.dark ? Palette.dark : Palette.light;
   }
 
   Future<void> _onSettings() async {
@@ -185,9 +183,8 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
 
     ui.Image? shot;
     try {
-      final boundary =
-          _boundaryKey.currentContext?.findRenderObject()
-              as RenderRepaintBoundary?;
+      final boundary = _boundaryKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
       if (boundary != null && boundary.hasSize && mounted) {
         shot = await boundary.toImage(
           pixelRatio: MediaQuery.devicePixelRatioOf(context),
@@ -235,16 +232,14 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
-            statusBarIconBrightness: isDark
-                ? Brightness.light
-                : Brightness.dark,
+            statusBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
             // iOS uses the opposite brightness convention for status content.
             statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
             systemNavigationBarColor: Colors.transparent,
             systemNavigationBarDividerColor: Colors.transparent,
-            systemNavigationBarIconBrightness: isDark
-                ? Brightness.light
-                : Brightness.dark,
+            systemNavigationBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
             systemStatusBarContrastEnforced: false,
             systemNavigationBarContrastEnforced: false,
           ),
@@ -255,10 +250,7 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
                 key: _boundaryKey,
                 child: MediaQuery(
                   data: media.copyWith(
-                    textScaler: media.textScaler.clamp(
-                      minScaleFactor: 0.9,
-                      maxScaleFactor: 1.25,
-                    ),
+                    textScaler: media.textScaler,
                   ),
                   child: NotificationListener<ScrollStartNotification>(
                     onNotification: (notification) {

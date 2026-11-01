@@ -86,7 +86,10 @@ class _SettingsViewState extends State<SettingsView> {
             Gaps.xl + widget.bottomInset,
           ),
           children: [
-            Text('Settings', style: AppText.headline),
+            Text(
+              'Settings',
+              style: AppText.display.copyWith(fontSize: 34),
+            ),
             const SizedBox(height: Gaps.lg),
             _Group(
               title: 'Appearance',
@@ -156,7 +159,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
                 _Row(
                   icon: Icons.download_for_offline_rounded,
-                  color: AppColors.accent,
+                  color: AppColors.accentStrong,
                   title: 'Delete all downloads',
                   subtitle: downloads.doneCount == 0
                       ? 'Nothing saved'
@@ -206,7 +209,7 @@ class _Group extends StatelessWidget {
         rows.add(
           Divider(
             height: 1,
-            thickness: 1,
+            thickness: 0.5,
             indent: 56,
             color: AppColors.outline,
           ),
@@ -233,7 +236,7 @@ class _Group extends StatelessWidget {
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(Radii.card),
-              border: Border.all(color: AppColors.outline),
+              border: Border.all(color: AppColors.outline, width: 0.7),
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(Radii.card),
@@ -285,10 +288,10 @@ class _Row extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: color,
+                  color: color.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: Icon(icon, size: 20, color: Colors.white),
+                child: Icon(icon, size: 19, color: color),
               ),
               const SizedBox(width: Gaps.md),
               Expanded(
@@ -297,10 +300,10 @@ class _Row extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                      maxLines: 3,
+                      overflow: TextOverflow.visible,
                       style: AppText.title.copyWith(
-                        fontSize: 15,
+                        fontSize: 16,
                         fontWeight: FontWeight.w500,
                         color: destructive
                             ? AppColors.error
@@ -311,8 +314,7 @@ class _Row extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         subtitle!,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: true,
                         style: AppText.caption,
                       ),
                     ],

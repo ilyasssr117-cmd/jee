@@ -54,14 +54,14 @@ class Palette {
 
   static const Palette light = Palette(
     brightness: Brightness.light,
-    background: Color(0xFFF5F6FF),
+    background: Color(0xFFF5F6F8),
     surface: Color(0xFFFFFFFF),
-    surfaceHigh: Color(0xFFE9ECFF),
-    outline: Color(0x1F000000),
+    surfaceHigh: Color(0xFFF0F1F5),
+    outline: Color(0x16000000),
     textPrimary: Color(0xFF171A2B),
-    textSecondary: Color(0xFF4E5673),
-    textTertiary: Color(0xFF7E87A8),
-    accentSoft: Color(0xFFE9E9FF),
+    textSecondary: Color(0xFF454C60),
+    textTertiary: Color(0xFF626B80),
+    accentSoft: Color(0xFFECEEF5),
     error: Color(0xFFD93025),
   );
 }
@@ -81,7 +81,11 @@ abstract final class AppColors {
 
   static const Color accent = Color(0xFF8585FF);
 
-  static const Color accentStrong = Color(0xFF6875F5);
+  static Color get accentStrong => palette.brightness == Brightness.light
+      ? const Color(0xFF555FB8)
+      : const Color(0xFF5968D8);
+  static Color get accentForeground =>
+      palette.brightness == Brightness.light ? accentStrong : accent;
   static const Color accentBlue = Color(0xFF7695FF);
   static const Color accentViolet = Color(0xFF9A86FF);
   static const Color accentIndigo = Color(0xFF777EF5);
@@ -142,63 +146,63 @@ class TextSet {
   final Palette palette;
 
   TextStyle get display => TextStyle(
-    fontSize: 28,
-    height: 1.12,
-    fontWeight: FontWeight.w800,
-    letterSpacing: -0.4,
-    color: palette.textPrimary,
-  );
+        fontSize: 28,
+        height: 1.12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.4,
+        color: palette.textPrimary,
+      );
 
   TextStyle get headline => TextStyle(
-    fontSize: 21,
-    height: 1.18,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.2,
-    color: palette.textPrimary,
-  );
+        fontSize: 21,
+        height: 1.18,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+        color: palette.textPrimary,
+      );
 
   TextStyle get title => TextStyle(
-    fontSize: 16,
-    height: 1.25,
-    fontWeight: FontWeight.w600,
-    color: palette.textPrimary,
-  );
+        fontSize: 16,
+        height: 1.25,
+        fontWeight: FontWeight.w600,
+        color: palette.textPrimary,
+      );
 
   TextStyle get cardTitle => TextStyle(
-    fontSize: 13.5,
-    height: 1.25,
-    fontWeight: FontWeight.w600,
-    color: palette.textPrimary,
-  );
+        fontSize: 13.5,
+        height: 1.25,
+        fontWeight: FontWeight.w600,
+        color: palette.textPrimary,
+      );
 
   TextStyle get body => TextStyle(
-    fontSize: 14,
-    height: 1.4,
-    fontWeight: FontWeight.w400,
-    color: palette.textSecondary,
-  );
+        fontSize: 14,
+        height: 1.4,
+        fontWeight: FontWeight.w400,
+        color: palette.textSecondary,
+      );
 
   TextStyle get label => TextStyle(
-    fontSize: 14,
-    height: 1.2,
-    fontWeight: FontWeight.w600,
-    color: palette.textPrimary,
-  );
+        fontSize: 14,
+        height: 1.2,
+        fontWeight: FontWeight.w600,
+        color: palette.textPrimary,
+      );
 
   TextStyle get caption => TextStyle(
-    fontSize: 12,
-    height: 1.3,
-    fontWeight: FontWeight.w500,
-    color: palette.textTertiary,
-  );
+        fontSize: 12,
+        height: 1.3,
+        fontWeight: FontWeight.w500,
+        color: palette.textTertiary,
+      );
 
-  TextStyle get overline => const TextStyle(
-    fontSize: 11,
-    height: 1.2,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 1.4,
-    color: AppColors.accent,
-  );
+  TextStyle get overline => TextStyle(
+        fontSize: 11,
+        height: 1.2,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.4,
+        color: AppColors.accentForeground,
+      );
 }
 
 abstract final class AppText {
@@ -246,7 +250,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       titleTextStyle: TextStyle(
         color: p.textPrimary,
         fontSize: 20,
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w600,
         letterSpacing: -0.3,
       ),
     ),
@@ -373,19 +377,19 @@ Route<T> adaptivePageRoute<T>(
 
 class FadePageRoute<T> extends PageRouteBuilder<T> {
   FadePageRoute({required WidgetBuilder builder})
-    : super(
-        pageBuilder: (context, _, __) => builder(context),
-        transitionDuration: const Duration(milliseconds: 380),
-        reverseTransitionDuration: const Duration(milliseconds: 300),
-        transitionsBuilder: (context, animation, _, child) => FadeTransition(
-          opacity: CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOut,
-            reverseCurve: Curves.easeIn,
+      : super(
+          pageBuilder: (context, _, __) => builder(context),
+          transitionDuration: const Duration(milliseconds: 380),
+          reverseTransitionDuration: const Duration(milliseconds: 300),
+          transitionsBuilder: (context, animation, _, child) => FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOut,
+              reverseCurve: Curves.easeIn,
+            ),
+            child: child,
           ),
-          child: child,
-        ),
-      );
+        );
 }
 
 /// Scroll physics tuned to the platform's native feel.
@@ -414,5 +418,6 @@ class AppScrollBehavior extends MaterialScrollBehavior {
     BuildContext context,
     Widget child,
     ScrollableDetails details,
-  ) => child;
+  ) =>
+      child;
 }

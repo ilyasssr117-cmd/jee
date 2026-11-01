@@ -233,9 +233,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _resumeAt = null;
       if (startAt != null && startAt > Duration.zero) {
         final limit = controller.value.duration - const Duration(seconds: 5);
-        final target = limit > Duration.zero && startAt > limit
-            ? limit
-            : startAt;
+        final target =
+            limit > Duration.zero && startAt > limit ? limit : startAt;
         await controller.seekTo(target);
       }
       await controller.play();
@@ -318,7 +317,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     bool refresh = false,
   }) async {
     final localPath = _localPath;
-    if (localPath != null && File(localPath).existsSync()) {
+    final localFileExists = localPath != null && await File(localPath).exists();
+    if (!mounted || generation != _initializationGeneration || _isLeaving) {
+      return null;
+    }
+    if (localFileExists) {
       _activeUrl = localPath;
       _activeIsFile = true;
       _activeHeaders = null;
@@ -659,8 +662,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void _handleBack() {
     if (_popping) return;
-    final canHideControls =
-        _showControls &&
+    final canHideControls = _showControls &&
         _problem == null &&
         !_loading &&
         !_completed &&
@@ -747,8 +749,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
     }
 
-    final atEnd =
-        value.isInitialized &&
+    final atEnd = value.isInitialized &&
         value.duration > Duration.zero &&
         value.position >= value.duration - const Duration(milliseconds: 800);
 
@@ -1029,13 +1030,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   void _onScreenTap(TapUpDetails details, double width) {
     if (_problem != null || _loading || _completed) return;
     final x = details.localPosition.dx;
-    final _Side? side = x < width * 0.38
-        ? _Side.left
-        : (x > width * 0.62 ? _Side.right : null);
+    final _Side? side =
+        x < width * 0.38 ? _Side.left : (x > width * 0.62 ? _Side.right : null);
     final now = DateTime.now();
     final last = _lastTapAt;
-    final isDouble =
-        last != null &&
+    final isDouble = last != null &&
         side != null &&
         side == _lastTapSide &&
         now.difference(last) < const Duration(milliseconds: 300);
@@ -1179,8 +1178,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    final VideoPlayerController? live =
-        (controller != null &&
+    final VideoPlayerController? live = (controller != null &&
             controller.value.isInitialized &&
             _problem == null)
         ? controller
@@ -1235,8 +1233,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                 _buildLoading(),
                 AnimatedSwitcher(
                   duration: Motion.fade,
-                  child:
-                      _buildOverlay() ??
+                  child: _buildOverlay() ??
                       const SizedBox.shrink(key: ValueKey<String>('none')),
                 ),
               ],
@@ -1413,8 +1410,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             final delta = target - _scrubOrigin;
             final forward = !delta.isNegative;
             final seconds = delta.inSeconds.abs();
-            final deltaText =
-                '${forward ? '+' : '\u2212'}'
+            final deltaText = '${forward ? '+' : '\u2212'}'
                 '${seconds >= 60 ? _formatDuration(Duration(seconds: seconds)) : '${seconds}s'}';
             _scrubText = '$deltaText   ${_formatDuration(target)}';
           }
@@ -1848,8 +1844,8 @@ class _ProgressRow extends StatelessWidget {
             : 0.0;
         final buffered = totalMs > 0 && value.buffered.isNotEmpty
             ? (value.buffered.last.end.inMilliseconds / totalMs)
-                  .clamp(0.0, 1.0)
-                  .toDouble()
+                .clamp(0.0, 1.0)
+                .toDouble()
             : 0.0;
         final active = dragging.value;
         final trackHeight = active ? 6.0 : 4.0;

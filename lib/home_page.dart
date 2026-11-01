@@ -89,9 +89,9 @@ class _HomePageState extends State<HomePage>
   Animation<double>? _pageSettleAnimation;
 
   List<String> get _categories => <String>[
-    'All',
-    ...videoRepository.categories,
-  ];
+        'All',
+        ...videoRepository.categories,
+      ];
 
   @override
   void initState() {
@@ -477,8 +477,7 @@ class _HomePageState extends State<HomePage>
       }
     }
 
-    final shouldCommit =
-        target != null &&
+    final shouldCommit = target != null &&
         (_dragOffset.value.abs() > width * 0.22 || velocity.abs() > 650);
     _settlePageDrag(shouldCommit ? target : null);
   }
@@ -503,22 +502,18 @@ class _HomePageState extends State<HomePage>
         curve: Curves.easeOutCubic,
       ),
     );
-    _pageSettleController
-        .forward(from: 0)
-        .orCancel
-        .then<void>((_) {
-          if (!mounted) return;
-          setState(() {
-            if (destination != null) _section = destination;
-            _dragTarget = null;
-          });
-          _dragOffset.value = 0;
-          if (destination != null) Haptics.play(Haptic.medium);
-        })
-        .catchError((Object _) {
-          // A new gesture can interrupt an in-flight settle animation. That is a
-          // normal interaction, not an app error.
-        });
+    _pageSettleController.forward(from: 0).orCancel.then<void>((_) {
+      if (!mounted) return;
+      setState(() {
+        if (destination != null) _section = destination;
+        _dragTarget = null;
+      });
+      _dragOffset.value = 0;
+      if (destination != null) Haptics.play(Haptic.medium);
+    }).catchError((Object _) {
+      // A new gesture can interrupt an in-flight settle animation. That is a
+      // normal interaction, not an app error.
+    });
   }
 
   void _transitionToSection(_Section destination) {
@@ -603,7 +598,7 @@ class _HomePageState extends State<HomePage>
     final margin = context.hMargin;
     // The body extends behind the translucent tab bar; keep a scroll inset so
     // the last card can still be brought fully above the glass surface.
-    final bottomInset = kBottomBarHeight + context.safe.bottom;
+    final bottomInset = appBottomBarHeight(context) + context.safe.bottom;
     final featured = _featured;
     final showCategories = _categories.length > 1;
     final firstLoad = _videos.isEmpty && _loading;
@@ -611,8 +606,7 @@ class _HomePageState extends State<HomePage>
         ? null
         : PlaybackProgress.instance.resumePosition(featured.id);
     final screen = MediaQuery.sizeOf(context);
-    _heroLimit =
-        math.min(screen.height * 0.48, 450.0).toDouble() +
+    _heroLimit = math.min(screen.height * 0.48, 450.0).toDouble() +
         context.safe.top +
         Gaps.sm -
         30;
@@ -678,9 +672,8 @@ class _HomePageState extends State<HomePage>
           builder: (context, dragOffset, child) {
             final previewOffset =
                 dragOffset + (dragOffset < 0 ? screen.width : -screen.width);
-            final offset = isCurrent
-                ? dragOffset
-                : (isPreview ? previewOffset : 0.0);
+            final offset =
+                isCurrent ? dragOffset : (isPreview ? previewOffset : 0.0);
             return Transform.translate(
               offset: Offset(offset, 0),
               child: IgnorePointer(
@@ -717,8 +710,7 @@ class _HomePageState extends State<HomePage>
         child: content,
       ),
       builder: (context, searchOpen, page) {
-        final lightIcons =
-            darkMode ||
+        final lightIcons = darkMode ||
             (_section == _Section.reels && !searchOpen) ||
             (_section == _Section.home && !searchOpen && _heroVisible);
         return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -869,8 +861,7 @@ class _HomePageState extends State<HomePage>
             message: error.message,
             actionLabel: 'Retry',
             onAction: () => _loadPage(reset: true),
-            secondaryLabel:
-                error.offline &&
+            secondaryLabel: error.offline &&
                     DownloadStore.instance.items.any(
                       (item) => item.status == DownloadStatus.done,
                     )
@@ -997,7 +988,7 @@ class _RidingTabBar extends StatelessWidget {
       curve: Curves.easeOutCubic,
       padding: EdgeInsets.only(bottom: keyboard),
       child: SizedBox(
-        height: kBottomBarHeight + safeBottom,
+        height: appBottomBarHeight(context) + safeBottom,
         width: double.infinity,
         child: Padding(
           padding: EdgeInsets.only(bottom: safeBottom),

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -28,6 +29,14 @@ class LargeTitleSliver extends StatelessWidget {
         outline: AppColors.outline,
         textColor: AppColors.textPrimary,
         brightness: AppColors.palette.brightness,
+        barExtent: math.max(
+          44,
+          MediaQuery.textScalerOf(context).scale(17) * 1.35 + 16,
+        ),
+        largeExtent: math.max(
+          52,
+          MediaQuery.textScalerOf(context).scale(34) * 1.25,
+        ),
       ),
     );
   }
@@ -43,10 +52,9 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
     required this.outline,
     required this.textColor,
     required this.brightness,
+    required this.barExtent,
+    required this.largeExtent,
   });
-
-  static const double _bar = 44;
-  static const double _large = 52;
 
   final String title;
   final Widget? trailing;
@@ -56,16 +64,18 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
   final Color outline;
   final Color textColor;
   final Brightness brightness;
+  final double barExtent;
+  final double largeExtent;
 
   @override
-  double get minExtent => topPadding + _bar;
+  double get minExtent => topPadding + barExtent;
 
   @override
-  double get maxExtent => topPadding + _bar + _large;
+  double get maxExtent => topPadding + barExtent + largeExtent;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
-    final t = (shrinkOffset / _large).clamp(0.0, 1.0).toDouble();
+    final t = (shrinkOffset / largeExtent).clamp(0.0, 1.0).toDouble();
     // The inline title appears only once the large one has nearly left.
     final inline = ((t - 0.6) / 0.4).clamp(0.0, 1.0).toDouble();
     final barVisible = t > 0.02;
@@ -78,7 +88,7 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
             opacity: inline,
             child: ClipRect(
               child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: background.withValues(alpha: 0.78),
@@ -94,7 +104,7 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
           left: 0,
           right: 0,
           top: topPadding,
-          height: _bar,
+          height: barExtent,
           child: Opacity(
             opacity: inline,
             child: Center(
@@ -115,7 +125,7 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
           Positioned(
             right: margin,
             top: topPadding,
-            height: _bar,
+            height: barExtent,
             child: Center(child: trailing),
           ),
         Positioned(
@@ -154,5 +164,9 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
       topPadding != old.topPadding ||
       margin != old.margin ||
       background != old.background ||
-      brightness != old.brightness;
+      outline != old.outline ||
+      textColor != old.textColor ||
+      brightness != old.brightness ||
+      barExtent != old.barExtent ||
+      largeExtent != old.largeExtent;
 }

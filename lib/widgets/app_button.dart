@@ -6,7 +6,12 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../touch.dart';
 
-enum AppButtonStyle { primary, secondary }
+enum AppButtonStyle { primary, secondary, tertiary }
+
+double appChipTapHeight(BuildContext context) {
+  final scale = MediaQuery.textScalerOf(context).scale(13) / 13;
+  return math.max(44, math.max(36, 24 + 12 * scale)).toDouble();
+}
 
 class AppButton extends StatelessWidget {
   const AppButton({
@@ -36,22 +41,30 @@ class AppButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = style == AppButtonStyle.primary;
-    final Color foreground = primary || onDark
-        ? Colors.white
-        : AppColors.textPrimary;
+    final tertiary = style == AppButtonStyle.tertiary;
+    final Color foreground =
+        primary || onDark ? Colors.white : AppColors.textPrimary;
     final Color background = primary
-        ? AppColors.accent
-        : (onDark ? const Color(0x2EFFFFFF) : AppColors.surfaceHigh);
+        ? AppColors.accentStrong
+        : (tertiary
+            ? Colors.transparent
+            : (onDark ? const Color(0x2EFFFFFF) : AppColors.surfaceHigh));
     final Color border = primary
         ? Colors.transparent
-        : (onDark ? const Color(0x26FFFFFF) : AppColors.outline);
+        : (tertiary
+            ? Colors.transparent
+            : (onDark ? const Color(0x26FFFFFF) : AppColors.outline));
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
     return Pressable(
       semanticLabel: label,
       onTap: loading ? null : onPressed,
       child: AnimatedContainer(
         duration: Motion.quick,
-        height: 46,
-        padding: const EdgeInsets.symmetric(horizontal: 17),
+        constraints: BoxConstraints(minHeight: math.max(46, 44 * textScale)),
+        padding: EdgeInsets.symmetric(
+          horizontal: tertiary ? 10 : 17,
+          vertical: textScale > 1.2 ? 7 : 0,
+        ),
         decoration: BoxDecoration(
           color: background,
           borderRadius: BorderRadius.circular(Radii.button),
@@ -70,7 +83,9 @@ class AppButton extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                maxLines: 1,
+                maxLines: 2,
+                softWrap: true,
+                textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
                 style: AppText.label.copyWith(color: foreground),
               ),
@@ -99,36 +114,46 @@ class AppChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scale = MediaQuery.textScalerOf(context).scale(13) / 13;
+    final chipHeight = math.max(36, 24 + 12 * scale).toDouble();
+    final tapHeight = math.max(44, chipHeight).toDouble();
     return Pressable(
       semanticLabel: selected ? '$label, selected' : label,
       haptic: Haptic.selection,
       pressedScale: 0.93,
       onTap: onPressed,
-      child: AnimatedContainer(
-        duration: Motion.normal,
-        curve: Motion.curve,
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 15),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.accentStrong
-              : (onDark ? const Color(0x1FFFFFFF) : AppColors.surfaceHigh),
-          borderRadius: BorderRadius.circular(Radii.pill),
-          border: Border.all(
-            color: selected
-                ? Colors.transparent
-                : (onDark ? const Color(0x1FFFFFFF) : AppColors.outline),
-          ),
-        ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: AppText.label.copyWith(
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-            color: selected || onDark ? Colors.white : AppColors.textPrimary,
+      child: SizedBox(
+        height: tapHeight,
+        child: Center(
+          child: AnimatedContainer(
+            duration: Motion.normal,
+            curve: Motion.curve,
+            height: chipHeight,
+            padding: const EdgeInsets.symmetric(horizontal: 15),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppColors.accentStrong
+                  : (onDark ? const Color(0x1FFFFFFF) : AppColors.surfaceHigh),
+              borderRadius: BorderRadius.circular(Radii.pill),
+              border: Border.all(
+                color: selected
+                    ? Colors.transparent
+                    : (onDark ? const Color(0x1FFFFFFF) : AppColors.outline),
+              ),
+            ),
+            child: Text(
+              label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.label.copyWith(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                color:
+                    selected || onDark ? Colors.white : AppColors.textPrimary,
+              ),
+            ),
           ),
         ),
       ),

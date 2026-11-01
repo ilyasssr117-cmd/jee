@@ -51,7 +51,7 @@ class MiniPlayerOverlay extends StatelessWidget {
               child: BackdropFilter(
                 // One compact blur surface only; avoid stacking blur filters
                 // across every reel control on older iPhones.
-                filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                 child: Container(
                   height: 78,
                   decoration: BoxDecoration(
@@ -98,16 +98,11 @@ class MiniPlayerOverlay extends StatelessWidget {
                                         color: Colors.black,
                                         child: Center(
                                           child: AspectRatio(
-                                            aspectRatio:
-                                                session
-                                                        .controller
-                                                        .value
-                                                        .aspectRatio >
+                                            aspectRatio: session.controller
+                                                        .value.aspectRatio >
                                                     0
-                                                ? session
-                                                      .controller
-                                                      .value
-                                                      .aspectRatio
+                                                ? session.controller.value
+                                                    .aspectRatio
                                                 : 16 / 9,
                                             child: VideoPlayer(
                                               session.controller,
@@ -150,9 +145,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                                   ValueListenableBuilder<VideoPlayerValue>(
                                     valueListenable: session.controller,
                                     builder: (context, value, _) => _MiniAction(
-                                      tooltip: value.isPlaying
-                                          ? 'Pause'
-                                          : 'Play',
+                                      tooltip:
+                                          value.isPlaying ? 'Pause' : 'Play',
                                       icon: value.isPlaying
                                           ? CupertinoIcons.pause_fill
                                           : CupertinoIcons.play_fill,
@@ -186,8 +180,8 @@ class MiniPlayerOverlay extends StatelessWidget {
                               final progress = duration <= 0
                                   ? 0.0
                                   : (value.position.inMilliseconds / duration)
-                                        .clamp(0.0, 1.0)
-                                        .toDouble();
+                                      .clamp(0.0, 1.0)
+                                      .toDouble();
                               return ClipRRect(
                                 borderRadius: BorderRadius.circular(99),
                                 child: SizedBox(

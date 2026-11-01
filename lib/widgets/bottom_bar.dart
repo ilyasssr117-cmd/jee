@@ -11,6 +11,16 @@ enum AppTab { home, search, reels, library, settings }
 
 const double kBottomBarHeight = 74;
 
+double appDockHeight(BuildContext context) {
+  final scale = MediaQuery.textScalerOf(context).scale(11) / 11;
+  final lines = scale > 1.65 ? 2 : 1;
+  final labelHeight = 11 * scale * 1.1 * lines;
+  return math.max(66, 42 + labelHeight).toDouble();
+}
+
+double appBottomBarHeight(BuildContext context) =>
+    math.max(kBottomBarHeight, appDockHeight(context) + 8).toDouble();
+
 class AppBottomBar extends StatefulWidget {
   const AppBottomBar({
     super.key,
@@ -31,9 +41,21 @@ class _AppBottomBarState extends State<AppBottomBar> {
   static const List<({AppTab tab, IconData icon, String label})> _tabs = [
     (tab: AppTab.home, icon: CupertinoIcons.house_fill, label: 'Home'),
     (tab: AppTab.search, icon: CupertinoIcons.search, label: 'Search'),
-    (tab: AppTab.reels, icon: CupertinoIcons.play_rectangle_fill, label: 'Reels'),
-    (tab: AppTab.library, icon: CupertinoIcons.rectangle_stack_fill, label: 'Library'),
-    (tab: AppTab.settings, icon: CupertinoIcons.slider_horizontal_3, label: 'Settings'),
+    (
+      tab: AppTab.reels,
+      icon: CupertinoIcons.play_rectangle_fill,
+      label: 'Reels'
+    ),
+    (
+      tab: AppTab.library,
+      icon: CupertinoIcons.rectangle_stack_fill,
+      label: 'Library'
+    ),
+    (
+      tab: AppTab.settings,
+      icon: CupertinoIcons.slider_horizontal_3,
+      label: 'Settings'
+    ),
   ];
 
   final GlobalKey _barKey = GlobalKey();
@@ -76,10 +98,8 @@ class _AppBottomBarState extends State<AppBottomBar> {
     if (bar == null || !bar.hasSize) return;
     final local = bar.globalToLocal(globalPosition);
     final itemWidth = bar.size.width / _tabs.length;
-    final index = (local.dx / itemWidth)
-        .floor()
-        .clamp(0, _tabs.length - 1)
-        .toInt();
+    final index =
+        (local.dx / itemWidth).floor().clamp(0, _tabs.length - 1).toInt();
     final next = _tabs[index].tab;
     final nextLeft = (local.dx - itemWidth / 2)
         .clamp(0.0, bar.size.width - itemWidth)
@@ -109,15 +129,15 @@ class _AppBottomBarState extends State<AppBottomBar> {
   Widget build(BuildContext context) {
     final bottom =
         widget.bottomGap ?? math.max(context.safe.bottom - 4, 10.0).toDouble();
-    final width = math
-        .min(MediaQuery.sizeOf(context).width - 28, 420.0)
-        .toDouble();
+    final width =
+        math.min(MediaQuery.sizeOf(context).width - 20, 420.0).toDouble();
+    final dockHeight = appDockHeight(context);
 
     // Scaffold gives bottomNavigationBar a loose height constraint. A bare
     // Center expands to that maximum and makes the dock appear mid-screen.
     // Keep this slot explicitly bounded and pin the glass dock to its bottom.
     return SizedBox(
-      height: kBottomBarHeight + bottom,
+      height: dockHeight + bottom,
       width: double.infinity,
       child: Align(
         alignment: Alignment.bottomCenter,
@@ -126,26 +146,24 @@ class _AppBottomBarState extends State<AppBottomBar> {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(27),
             child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
               child: Container(
                 width: width,
-                height: 66,
+                height: dockHeight,
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: AppColors.palette.brightness == Brightness.dark
-                      ? const Color(0xDD1A2040)
-                      : const Color(0xEEF0F1FF),
+                      ? const Color(0xD21A2040)
+                      : const Color(0xE8F5F6F8),
                   borderRadius: BorderRadius.circular(27),
                   border: Border.all(
-                    color: AppColors.palette.brightness == Brightness.dark
-                        ? const Color(0x2EFFFFFF)
-                        : const Color(0x8CFFFFFF),
-                    width: 1,
+                    color: AppColors.outline,
+                    width: 0.7,
                   ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 16,
+                      blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
                   ],
@@ -155,13 +173,13 @@ class _AppBottomBarState extends State<AppBottomBar> {
                     final itemWidth = constraints.maxWidth / _tabs.length;
                     final selectedLeft =
                         _tabs.indexWhere((item) => item.tab == _indicatorTab) *
-                        itemWidth;
+                            itemWidth;
                     final indicatorLeft = _dragging
                         ? (_dragIndicatorLeft ?? selectedLeft)
                         : selectedLeft;
                     return SizedBox(
                       key: _barKey,
-                      height: 56,
+                      height: dockHeight - 10,
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -231,18 +249,13 @@ class _GlassIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(17),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: AppColors.palette.brightness == Brightness.dark
-              ? Colors.white.withValues(alpha: 0.075)
-              : AppColors.accentSoft.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(21),
-          border: Border.all(
-            color: AppColors.palette.brightness == Brightness.dark
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.white.withValues(alpha: 0.82),
-          ),
+              ? Colors.white.withValues(alpha: 0.065)
+              : AppColors.accentSoft.withValues(alpha: 0.82),
+          borderRadius: BorderRadius.circular(17),
         ),
       ),
     );
@@ -279,7 +292,7 @@ class _TabItem extends StatelessWidget {
           onLongPressMove(details.globalPosition),
       onLongPressEnd: (_) => onLongPressEnd(),
       child: SizedBox(
-        height: 58,
+        height: appDockHeight(context) - 10,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
@@ -299,17 +312,37 @@ class _TabItem extends StatelessWidget {
               duration: Motion.quick,
               curve: Motion.curve,
               style: TextStyle(
-                fontSize: 10,
+                fontSize: 11,
                 height: 1.1,
-                fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                 letterSpacing: 0.1,
                 color: active ? AppColors.textPrimary : AppColors.textTertiary,
               ),
-              child: Text(label, maxLines: 1, overflow: TextOverflow.clip),
+              child: Text(
+                _accessibleLabel(
+                  label,
+                  MediaQuery.textScalerOf(context).scale(11) / 11,
+                ),
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.visible,
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  String _accessibleLabel(String value, double scale) {
+    if (scale <= 1.65) return value;
+    return switch (value) {
+      'Home' => 'Ho\nme',
+      'Search' => 'Sea\nrch',
+      'Reels' => 'Re\nels',
+      'Library' => 'Lib\nrary',
+      'Settings' => 'Set\ntings',
+      _ => value,
+    };
   }
 }

@@ -94,10 +94,10 @@ class _LibraryViewState extends State<LibraryView> {
           ),
         ),
         SizedBox(
-          height: 44,
+          height: appChipTapHeight(context),
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: EdgeInsets.symmetric(horizontal: margin, vertical: 6),
+            padding: EdgeInsets.symmetric(horizontal: margin),
             children: [
               for (final segment in LibrarySegment.values) ...[
                 AppChip(
@@ -120,13 +120,13 @@ class _LibraryViewState extends State<LibraryView> {
                 LibrarySegment.history => _buildHistory(margin),
                 LibrarySegment.downloads => _buildDownloads(margin),
                 LibrarySegment.models => FavoriteModelsView(
-                  onBrowse: widget.onBrowse,
-                  bottomInset: widget.bottomInset,
-                ),
+                    onBrowse: widget.onBrowse,
+                    bottomInset: widget.bottomInset,
+                  ),
                 LibrarySegment.albums => SavedAlbumsView(
-                  onBrowse: widget.onBrowse,
-                  bottomInset: widget.bottomInset,
-                ),
+                    onBrowse: widget.onBrowse,
+                    bottomInset: widget.bottomInset,
+                  ),
               },
             ),
           ),
@@ -236,56 +236,67 @@ class _LibraryViewState extends State<LibraryView> {
         }
 
         final queue = <Video>[for (final entry in entries) entry.video];
-        final rows = <Widget>[];
+        final rows = <({String? section, HistoryEntry? entry})>[];
         String? lastGroup;
         for (final entry in entries) {
           final group = _group(entry.playedAt);
           if (group != lastGroup) {
             lastGroup = group;
-            rows.add(_SectionHeader(group));
+            rows.add((section: group, entry: null));
           }
-          final video = entry.video;
-          final progress = PlaybackProgress.instance;
-          final completed = progress.isCompleted(video.id);
-          final fraction = completed ? null : progress.fraction(video.id);
-          final status = completed
-              ? 'Watched'
-              : (fraction != null
-                    ? '${(fraction * 100).round()}% watched'
-                    : video.duration);
-          rows.add(
-            Dismissible(
-              key: ValueKey<String>('history-${video.id}'),
-              direction: DismissDirection.endToStart,
-              background: const _DeleteBackground(),
-              onDismissed: (_) {
-                Haptics.play(Haptic.medium);
-                HistoryStore.instance.remove(video.id);
-              },
-              child: _VideoRow(
-                video: video,
-                title: video.title,
-                subtitle: status.isEmpty
-                    ? _when(entry.playedAt)
-                    : '${_when(entry.playedAt)} \u00b7 $status',
-                watchedFraction: fraction,
-                onTap: () => widget.onOpen(video, queue),
-              ),
-            ),
-          );
+          rows.add((section: null, entry: entry));
         }
 
-        return ListView(
+        return CustomScrollView(
           scrollCacheExtent: ScrollCacheExtent.pixels(
-            MediaQuery.sizeOf(context).height,
+            MediaQuery.sizeOf(context).height * 0.45,
           ),
-          padding: EdgeInsets.fromLTRB(
-            margin,
-            0,
-            margin,
-            Gaps.xl + widget.bottomInset,
-          ),
-          children: rows,
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                margin,
+                0,
+                margin,
+                Gaps.xl + widget.bottomInset,
+              ),
+              sliver: SliverList.builder(
+                itemCount: rows.length,
+                itemBuilder: (context, index) {
+                  final row = rows[index];
+                  if (row.entry == null) return _SectionHeader(row.section!);
+                  final entry = row.entry!;
+                  final video = entry.video;
+                  final progress = PlaybackProgress.instance;
+                  final completed = progress.isCompleted(video.id);
+                  final fraction =
+                      completed ? null : progress.fraction(video.id);
+                  final status = completed
+                      ? 'Watched'
+                      : (fraction != null
+                          ? '${(fraction * 100).round()}% watched'
+                          : video.duration);
+                  return Dismissible(
+                    key: ValueKey<String>('history-${video.id}'),
+                    direction: DismissDirection.endToStart,
+                    background: const _DeleteBackground(),
+                    onDismissed: (_) {
+                      Haptics.play(Haptic.medium);
+                      HistoryStore.instance.remove(video.id);
+                    },
+                    child: _VideoRow(
+                      video: video,
+                      title: video.title,
+                      subtitle: status.isEmpty
+                          ? _when(entry.playedAt)
+                          : '${_when(entry.playedAt)} \u00b7 $status',
+                      watchedFraction: fraction,
+                      onTap: () => widget.onOpen(video, queue),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         );
       },
     );
@@ -318,56 +329,63 @@ class _LibraryViewState extends State<LibraryView> {
           );
         }
 
-        final rows = <Widget>[
-          Padding(
-            padding: const EdgeInsets.only(bottom: Gaps.sm),
-            child: Text(
-              '${store.doneCount} saved \u00b7 ${formatBytes(store.totalBytes)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.caption,
-            ),
+        return CustomScrollView(
+          scrollCacheExtent: ScrollCacheExtent.pixels(
+            MediaQuery.sizeOf(context).height * 0.45,
           ),
-        ];
-        for (final item in items) {
-          final video = item.video;
-          rows.add(
-            Dismissible(
-              key: ValueKey<String>('download-${video.id}'),
-              direction: DismissDirection.endToStart,
-              background: const _DeleteBackground(),
-              confirmDismiss: (_) => item.status == DownloadStatus.downloading
-                  ? Future<bool>.value(true)
-                  : confirmDialog(
-                      context,
-                      title: 'Delete this download?',
-                      message: 'The video will be removed from your phone.',
-                      confirmLabel: 'Delete',
-                    ),
-              onDismissed: (_) {
-                Haptics.play(Haptic.medium);
-                store.remove(video.id);
-              },
-              child: _DownloadRow(
-                item: item,
-                onTap: item.status == DownloadStatus.done
-                    ? () => _playSaved(item)
-                    : null,
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(margin, Gaps.xs, margin, Gaps.sm),
+                child: Text(
+                  '${store.doneCount} saved \u00b7 ${formatBytes(store.totalBytes)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption,
+                ),
               ),
             ),
-          );
-        }
-        return ListView(
-          scrollCacheExtent: ScrollCacheExtent.pixels(
-            MediaQuery.sizeOf(context).height,
-          ),
-          padding: EdgeInsets.fromLTRB(
-            margin,
-            Gaps.xs,
-            margin,
-            Gaps.xl + widget.bottomInset,
-          ),
-          children: rows,
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                margin,
+                0,
+                margin,
+                Gaps.xl + widget.bottomInset,
+              ),
+              sliver: SliverList.builder(
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  final video = item.video;
+                  return Dismissible(
+                    key: ValueKey<String>('download-${video.id}'),
+                    direction: DismissDirection.endToStart,
+                    background: const _DeleteBackground(),
+                    confirmDismiss: (_) =>
+                        item.status == DownloadStatus.downloading
+                            ? Future<bool>.value(true)
+                            : confirmDialog(
+                                context,
+                                title: 'Delete this download?',
+                                message:
+                                    'The video will be removed from your phone.',
+                                confirmLabel: 'Delete',
+                              ),
+                    onDismissed: (_) {
+                      Haptics.play(Haptic.medium);
+                      store.remove(video.id);
+                    },
+                    child: _DownloadRow(
+                      item: item,
+                      onTap: item.status == DownloadStatus.done
+                          ? () => _playSaved(item)
+                          : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         );
       },
     );
@@ -386,16 +404,19 @@ class _TextAction extends StatelessWidget {
       semanticLabel: label,
       haptic: Haptic.selection,
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-            color: AppColors.accent,
+      child: SizedBox(
+        height: 44,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: AppColors.accentForeground,
+            ),
           ),
         ),
       ),
@@ -542,7 +563,7 @@ class _VideoRow extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.caption.copyWith(color: subtitleColor),
                   ),
@@ -612,8 +633,8 @@ class _DownloadRow extends StatelessWidget {
             title: video.title,
             subtitle: paused
                 ? (item.hasPartial
-                      ? 'Paused \u00b7 ${_amount(item, done)}'
-                      : 'Paused')
+                    ? 'Paused \u00b7 ${_amount(item, done)}'
+                    : 'Paused')
                 : (item.error ?? 'Download failed'),
             subtitleColor: paused ? null : AppColors.error,
             below: item.hasPartial ? _bar(item, waiting: false) : null,
@@ -637,8 +658,8 @@ class _DownloadRow extends StatelessWidget {
             final text = waiting
                 ? 'Waiting\u2026'
                 : (fraction != null
-                      ? '${(fraction * 100).round()}% \u00b7 ${_amount(item, done)}'
-                      : 'Downloading \u00b7 ${formatBytes(done)}');
+                    ? '${(fraction * 100).round()}% \u00b7 ${_amount(item, done)}'
+                    : 'Downloading \u00b7 ${formatBytes(done)}');
             return _VideoRow(
               video: video,
               title: video.title,

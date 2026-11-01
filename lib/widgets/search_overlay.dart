@@ -512,14 +512,14 @@ class SearchOverlayState extends State<SearchOverlay> {
           semanticLabel: 'Close search',
           haptic: Haptic.selection,
           onTap: widget.onClose,
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 13),
             child: Text(
               'Cancel',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,
-                color: AppColors.accent,
+                color: AppColors.accentForeground,
               ),
             ),
           ),
@@ -530,10 +530,10 @@ class SearchOverlayState extends State<SearchOverlay> {
 
   Widget _buildFilters(double margin) {
     return SizedBox(
-      height: 44,
+      height: appChipTapHeight(context),
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(horizontal: margin, vertical: 6),
+        padding: EdgeInsets.symmetric(horizontal: margin),
         children: [
           AppChip(
             label: 'Videos',
@@ -666,13 +666,13 @@ class SearchOverlayState extends State<SearchOverlay> {
     final suggestions = typed.isEmpty
         ? const <String>[]
         : SearchHistory.instance.items
-              .where(
-                (term) =>
-                    term.toLowerCase().startsWith(typed) &&
-                    term.toLowerCase() != typed,
-              )
-              .take(5)
-              .toList();
+            .where(
+              (term) =>
+                  term.toLowerCase().startsWith(typed) &&
+                  term.toLowerCase() != typed,
+            )
+            .take(5)
+            .toList();
 
     final List<Widget> slivers;
     if (waiting &&

@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/cupertino.dart'
@@ -51,6 +52,16 @@ const Duration _kReelDoubleTapWindow = Duration(milliseconds: 260);
 const Duration _kReelLongPressDelay = Duration(milliseconds: 140);
 const double _kReelMoveSlop = 14;
 
+enum _ReelPlaybackState {
+  idle,
+  loading,
+  playing,
+  paused,
+  buffering,
+  failed,
+  retrying,
+}
+
 String? _str(dynamic v) =>
     v is String && v.isNotEmpty && v.length <= 8192 ? v : null;
 
@@ -71,8 +82,8 @@ String? _url(dynamic v) {
 }
 
 String _titleOf(Map video) {
-  final parsed =
-      video['video_text']?['user_display_video_title']?['default']?['parsed_text'];
+  final parsed = video['video_text']?['user_display_video_title']?['default']
+      ?['parsed_text'];
   if (_str(parsed) != null) return _clipText(parsed as String, 240);
   return _clipText(_str(video['action_name']) ?? '', 240);
 }
@@ -253,15 +264,14 @@ class ReelsRepository {
 
   Future<http.Response> _sendBounded(http.Request request) async {
     const maxResponseBytes = 6 * 1024 * 1024;
-    final response = await _client
-        .send(request)
-        .timeout(const Duration(seconds: 20));
+    final response =
+        await _client.send(request).timeout(const Duration(seconds: 20));
     if (response.contentLength != null &&
         response.contentLength! > maxResponseBytes) {
       await response.stream.drain<void>().timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {},
-      );
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
       throw const FormatException('Reels response is too large.');
     }
     final bytes = BytesBuilder(copy: false);
@@ -397,7 +407,6 @@ String _compact(num n) => reelCompact(n);
 
 String _clock(Duration d) => reelClock(d);
 
-
 class ReelsPage extends StatefulWidget {
   const ReelsPage({super.key, required this.active, required this.bottomInset});
 
@@ -418,6 +427,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   final PageController _pager = PageController();
   final List<ReelItem> _items = <ReelItem>[];
   final Map<int, VideoPlayerController> _controllers = {};
+  final Map<int, _ReelPlaybackState> _reelStates = <int, _ReelPlaybackState>{};
+  final Map<VideoPlayerController, VoidCallback> _controllerListeners = {};
   final Map<VideoPlayerController, Future<void>> _initializations = {};
   Future<void> _disposeTail = Future<void>.value();
 
@@ -478,6 +489,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     for (final controller in _controllers.values) {
+      final listener = _controllerListeners.remove(controller);
+      if (listener != null) controller.removeListener(listener);
       unawaited(_disposeReelController(controller));
     }
     _controllers.clear();
@@ -560,6 +573,41 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _ownsController(int index, VideoPlayerController controller) =>
       mounted && identical(_controllers[index], controller);
 
+  void _attachControllerListener(VideoPlayerController controller) {
+    void listener() => _syncControllerState(controller);
+    _controllerListeners[controller] = listener;
+    controller.addListener(listener);
+  }
+
+  void _syncControllerState(VideoPlayerController controller) {
+    if (!mounted) return;
+    int? index;
+    for (final entry in _controllers.entries) {
+      if (identical(entry.value, controller)) {
+        index = entry.key;
+        break;
+      }
+    }
+    if (index == null) return;
+    final value = controller.value;
+    final previous = _reelStates[index] ?? _ReelPlaybackState.idle;
+    if (previous == _ReelPlaybackState.retrying && !value.isInitialized) {
+      return;
+    }
+    final next = value.hasError
+        ? _ReelPlaybackState.failed
+        : !value.isInitialized
+            ? _ReelPlaybackState.loading
+            : value.isBuffering
+                ? _ReelPlaybackState.buffering
+                : value.isPlaying
+                    ? _ReelPlaybackState.playing
+                    : _ReelPlaybackState.paused;
+    if (next == previous) return;
+    _reelStates[index] = next;
+    setState(() {});
+  }
+
   Future<void> _disposeReelController(VideoPlayerController controller) {
     // Serialize native AVPlayer teardown. Rapid swipes otherwise let old
     // players overlap their disposal with initialization of several new ones.
@@ -585,15 +633,24 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   void _evictController(int index) {
     final controller = _controllers.remove(index);
-    if (controller != null) unawaited(_disposeReelController(controller));
+    _reelStates.remove(index);
+    if (controller != null) {
+      final listener = _controllerListeners.remove(controller);
+      if (listener != null) controller.removeListener(listener);
+      unawaited(_disposeReelController(controller));
+    }
   }
 
   VideoPlayerController _build(String url, int index, {String? fallback}) {
+    if (_reelStates[index] != _ReelPlaybackState.retrying) {
+      _reelStates[index] = _ReelPlaybackState.loading;
+    }
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(url),
       httpHeaders: _kMediaHeaders,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
+    _attachControllerListener(controller);
 
     final initialization = () async {
       try {
@@ -608,14 +665,22 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           index == _current && !_muted && widget.active ? 1 : 0,
         );
         if (index == _current && widget.active) await controller.play();
+        _syncControllerState(controller);
         if (mounted) setState(() {});
       } catch (error) {
         if (!_ownsController(index, controller)) return;
         // Remove failed controllers even when no alternate URL exists, so a
         // later rebuild can retry rather than retaining a broken decoder.
         _controllers.remove(index);
+        final listener = _controllerListeners.remove(controller);
+        if (listener != null) controller.removeListener(listener);
         unawaited(_disposeReelController(controller));
-        if (fallback != null) _controllers[index] = _build(fallback, index);
+        if (fallback != null) {
+          _reelStates[index] = _ReelPlaybackState.retrying;
+          _controllers[index] = _build(fallback, index);
+        } else {
+          _reelStates[index] = _ReelPlaybackState.failed;
+        }
         if (mounted) setState(() {});
         if (kDebugMode) {
           debugPrint('[REELS] controller init failed: ${error.runtimeType}');
@@ -643,6 +708,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void _retry(int index) {
     if (index < 0 || index >= _items.length) return;
     _evictController(index);
+    _reelStates[index] = _ReelPlaybackState.retrying;
     _controllerFor(index);
     if (mounted) setState(() {});
   }
@@ -766,6 +832,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
     setState(() {
       _items.removeRange(0, shift);
+      final shiftedStates = <int, _ReelPlaybackState>{
+        for (final entry in _reelStates.entries)
+          if (entry.key >= shift) entry.key - shift: entry.value,
+      };
+      _reelStates
+        ..clear()
+        ..addAll(shiftedStates);
       _controllers
         ..clear()
         ..addAll(reindexed);
@@ -981,6 +1054,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                     key: ValueKey(item.id),
                     item: item,
                     controller: _controllers[i],
+                    playbackState: _reelStates[i] ?? _ReelPlaybackState.idle,
                     isActive: widget.active && i == _current,
                     muted: _muted,
                     saving: _saving,
@@ -997,7 +1071,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             )
           else if (_loading)
             const Center(
-              child: CupertinoActivityIndicator(radius: 14, color: Colors.white70),
+              child:
+                  CupertinoActivityIndicator(radius: 14, color: Colors.white70),
             )
           else if (_error != null)
             _ErrorView(message: _error!, onRetry: () => _loadMore(first: true))
@@ -1085,24 +1160,17 @@ class _ReelsTopBar extends StatelessWidget {
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
+                children: const [
+                  Text(
                     'For You',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 17,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0.1,
-                      shadows: [Shadow(blurRadius: 10, color: Color(0x66000000))],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    width: 18,
-                    height: 3,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(2),
+                      shadows: [
+                        Shadow(blurRadius: 10, color: Color(0x66000000))
+                      ],
                     ),
                   ),
                 ],
@@ -1121,7 +1189,9 @@ class _ReelsTopBar extends StatelessWidget {
                 clear ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
                 color: Colors.white,
                 size: 22,
-                shadows: const [Shadow(blurRadius: 12, color: Color(0x66000000))],
+                shadows: const [
+                  Shadow(blurRadius: 12, color: Color(0x66000000))
+                ],
               ),
             ),
           ),
@@ -1139,6 +1209,7 @@ class _ReelView extends StatefulWidget {
     super.key,
     required this.item,
     required this.controller,
+    required this.playbackState,
     required this.isActive,
     required this.muted,
     required this.saving,
@@ -1153,9 +1224,11 @@ class _ReelView extends StatefulWidget {
 
   final ReelItem item;
   final VideoPlayerController? controller;
+  final _ReelPlaybackState playbackState;
   final bool isActive;
   final bool muted;
   final ValueListenable<Map<String, double>> saving;
+
   /// Space reserved for the iPhone home indicator beneath the action rail.
   final double bottomInset;
   final bool clear;
@@ -1176,12 +1249,15 @@ class _ReelViewState extends State<_ReelView>
   bool _pointerMoved = false;
   bool _secondTapCandidate = false;
   bool _scrubbing = false;
+  bool _playFeedbackVisible = false;
+  bool _playFeedbackPaused = false;
   int? _activePointer;
   Offset? _pointerStart;
   DateTime? _lastTapTime;
   Timer? _longPressTimer;
   Timer? _singleTapTimer;
   Timer? _skipTimer;
+  Timer? _playFeedbackTimer;
 
   int _skipDirection = 0;
   int _skipSeconds = 0;
@@ -1209,6 +1285,7 @@ class _ReelViewState extends State<_ReelView>
     _longPressTimer?.cancel();
     _singleTapTimer?.cancel();
     _skipTimer?.cancel();
+    _playFeedbackTimer?.cancel();
     _heart.dispose();
     super.dispose();
   }
@@ -1230,9 +1307,16 @@ class _ReelViewState extends State<_ReelView>
     Haptics.play(Haptic.selection);
     if (c.value.isPlaying) {
       unawaited(c.pause());
+      _playFeedbackPaused = true;
     } else {
       unawaited(c.play());
+      _playFeedbackPaused = false;
     }
+    setState(() => _playFeedbackVisible = true);
+    _playFeedbackTimer?.cancel();
+    _playFeedbackTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted) setState(() => _playFeedbackVisible = false);
+    });
   }
 
   Future<void> _skip(int direction) async {
@@ -1297,8 +1381,7 @@ class _ReelViewState extends State<_ReelView>
 
     final now = DateTime.now();
     final previousTap = _lastTapTime;
-    _secondTapCandidate =
-        previousTap != null &&
+    _secondTapCandidate = previousTap != null &&
         now.difference(previousTap) <= _kReelDoubleTapWindow;
 
     if (_secondTapCandidate) {
@@ -1424,12 +1507,47 @@ class _ReelViewState extends State<_ReelView>
         // The video is fitted with BoxFit.contain. Keep the uncovered area
         // genuinely black (not a stretched thumbnail or translucent overlay).
         const ColoredBox(color: Colors.black),
+        if (item.thumbUrl != null)
+          Positioned.fill(
+            child: AnimatedOpacity(
+              opacity: ready &&
+                      widget.playbackState != _ReelPlaybackState.buffering &&
+                      widget.playbackState != _ReelPlaybackState.failed
+                  ? 0
+                  : 1,
+              duration: Motion.fade,
+              child: Image.network(
+                item.thumbUrl!,
+                fit: BoxFit.cover,
+                cacheWidth: (MediaQuery.sizeOf(context).width *
+                        MediaQuery.devicePixelRatioOf(context))
+                    .round()
+                    .clamp(128, 1080)
+                    .toInt(),
+                headers: _kMediaHeaders,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.low,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        const Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0x16000000), Color(0x46000000)],
+              ),
+            ),
+          ),
+        ),
 
         Semantics(
           button: true,
           label: 'Video player',
-          hint:
-              'Tap to pause or play. Double-tap the middle to like. '
+          hint: 'Tap to pause or play. Double-tap the middle to like. '
               'Double-tap the left or right edge to rewind or skip 10 seconds. '
               'Press and hold for 2x speed.',
           onTap: _togglePlay,
@@ -1443,61 +1561,79 @@ class _ReelViewState extends State<_ReelView>
               fit: StackFit.expand,
               children: [
                 if (ready && c != null)
-                  RepaintBoundary(child: _video(context, c))
-                else if (c != null && c.value.hasError)
-                  Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          color: Colors.white54,
-                          size: 40,
-                        ),
-                        const SizedBox(height: Gaps.md),
-                        AppButton(
-                          label: 'Try again',
-                          icon: CupertinoIcons.refresh,
-                          style: AppButtonStyle.secondary,
-                          onDark: true,
-                          onPressed: widget.onRetry,
-                        ),
-                      ],
+                  RepaintBoundary(child: _video(context, c)),
+                if (ready &&
+                    item.thumbUrl != null &&
+                    (widget.playbackState == _ReelPlaybackState.buffering ||
+                        widget.playbackState == _ReelPlaybackState.failed))
+                  Positioned.fill(
+                    child: Image.network(
+                      item.thumbUrl!,
+                      fit: BoxFit.cover,
+                      cacheWidth: (MediaQuery.sizeOf(context).width *
+                              MediaQuery.devicePixelRatioOf(context))
+                          .round()
+                          .clamp(128, 1080)
+                          .toInt(),
+                      headers: _kMediaHeaders,
+                      gaplessPlayback: true,
+                      filterQuality: FilterQuality.low,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const SizedBox.shrink(),
                     ),
-                  )
-                else
+                  ),
+                if (ready &&
+                    (widget.playbackState == _ReelPlaybackState.buffering ||
+                        widget.playbackState == _ReelPlaybackState.failed))
+                  const Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x26000000), Color(0x59000000)],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (widget.playbackState == _ReelPlaybackState.failed ||
+                    (c != null && c.value.hasError))
+                  _ReelErrorPanel(onRetry: widget.onRetry)
+                else if (!ready)
                   const Center(
                     child: CupertinoActivityIndicator(
                       radius: 12,
                       color: Colors.white,
                     ),
                   ),
-                if (ready && c != null && widget.isActive)
+                if (ready &&
+                    c != null &&
+                    widget.isActive &&
+                    widget.playbackState != _ReelPlaybackState.failed)
                   _StallSpinner(key: ObjectKey(c), controller: c),
                 if (ready && c != null)
                   IgnorePointer(
                     child: Center(
-                      child: ValueListenableBuilder<VideoPlayerValue>(
-                        valueListenable: c,
-                        builder: (_, v, __) => AnimatedOpacity(
-                          duration: Motion.normal,
-                          opacity: v.isPlaying ? 0 : 1,
-                          child: AnimatedScale(
-                            duration: Motion.normal,
-                            curve: Curves.easeOutBack,
-                            scale: v.isPlaying ? 0.8 : 1,
-                            child: Container(
-                              width: 68,
-                              height: 68,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Color(0x59000000),
-                              ),
-                              child: const Icon(
-                                CupertinoIcons.play_fill,
-                                color: Colors.white,
-                                size: 42,
-                              ),
+                      child: AnimatedOpacity(
+                        duration: Motion.quick,
+                        opacity: _playFeedbackVisible ? 1 : 0,
+                        child: AnimatedScale(
+                          duration: Motion.quick,
+                          curve: Curves.easeOut,
+                          scale: _playFeedbackVisible ? 1 : 0.86,
+                          child: Container(
+                            width: 58,
+                            height: 58,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(0x59000000),
+                            ),
+                            child: Icon(
+                              _playFeedbackPaused
+                                  ? CupertinoIcons.pause_fill
+                                  : CupertinoIcons.play_fill,
+                              color: Colors.white,
+                              size: 32,
                             ),
                           ),
                         ),
@@ -1874,7 +2010,8 @@ class _InfoBlock extends StatelessWidget {
               ),
               if (item.durationSec > 0) ...[
                 const SizedBox(width: 12),
-                const Icon(CupertinoIcons.clock, size: 12, color: Colors.white70),
+                const Icon(CupertinoIcons.clock,
+                    size: 12, color: Colors.white70),
                 const SizedBox(width: 4),
                 Text(
                   _clock(Duration(seconds: item.durationSec)),
@@ -1921,9 +2058,7 @@ class _ActionRail extends StatelessWidget {
             final liked = ReelFavorites.instance.isLiked(item.id);
             final count = item.likes;
             return _RailButton(
-              icon: liked
-                  ? CupertinoIcons.heart_fill
-                  : CupertinoIcons.heart,
+              icon: liked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
               iconColor: liked ? AppColors.accent : Colors.white,
               size: 33,
               label: _compact(count),
@@ -1933,7 +2068,7 @@ class _ActionRail extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 12),
         ValueListenableBuilder<Map<String, double>>(
           valueListenable: saving,
           builder: (_, map, __) {
@@ -1989,9 +2124,11 @@ class _ActionRail extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 12),
         _RailButton(
-          icon: muted ? CupertinoIcons.speaker_slash_fill : CupertinoIcons.speaker_2_fill,
+          icon: muted
+              ? CupertinoIcons.speaker_slash_fill
+              : CupertinoIcons.speaker_2_fill,
           label: muted ? 'Muted' : 'Sound',
           onTap: onMute,
         ),
@@ -2065,8 +2202,7 @@ class _StallSpinnerState extends State<_StallSpinner> {
       if (_show) setState(() => _show = false);
       return;
     }
-    final stalled =
-        v.isInitialized &&
+    final stalled = v.isInitialized &&
         v.isPlaying &&
         v.isBuffering &&
         DateTime.now().difference(_lastMove) >
@@ -2243,10 +2379,25 @@ class _ReelProgressBar extends StatefulWidget {
 class _ReelProgressBarState extends State<_ReelProgressBar> {
   bool _dragging = false;
   bool _wasPlaying = false;
+  bool _showTimes = false;
   double _frac = 0;
-  double _lastShown = 0;
+  Timer? _timeTimer;
 
   VideoPlayerController get _c => widget.controller;
+
+  void _showTimesBriefly() {
+    _timeTimer?.cancel();
+    if (!_showTimes) setState(() => _showTimes = true);
+    _timeTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted && !_dragging) setState(() => _showTimes = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timeTimer?.cancel();
+    super.dispose();
+  }
 
   double _fracAt(double dx, double width) =>
       width <= 0 ? 0 : (dx / width).clamp(0.0, 1.0).toDouble();
@@ -2258,6 +2409,7 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
     setState(() {
       _dragging = true;
       _frac = _fracAt(dx, width);
+      _showTimes = true;
     });
     widget.onScrub(true);
   }
@@ -2283,6 +2435,7 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
     final resume = _wasPlaying;
     setState(() => _dragging = false);
     widget.onScrub(false);
+    _showTimesBriefly();
     unawaited(_seekToFraction(fraction, resume: resume));
   }
 
@@ -2300,10 +2453,11 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
           onTapUp: (d) {
             final fraction = _fracAt(d.localPosition.dx, width);
             setState(() => _frac = fraction);
+            _showTimesBriefly();
             unawaited(_seekToFraction(fraction));
           },
           child: SizedBox(
-            height: 40,
+            height: 44,
             child: ValueListenableBuilder<VideoPlayerValue>(
               valueListenable: _c,
               builder: (_, v, __) {
@@ -2319,8 +2473,6 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                         .clamp(0.0, 1.0)
                         .toDouble();
                 final shown = _dragging ? _frac : played;
-                final snap = _dragging || shown < _lastShown - 0.2;
-                _lastShown = shown;
                 final position = _dragging
                     ? Duration(milliseconds: (total * _frac).round())
                     : v.position;
@@ -2342,18 +2494,19 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 1,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(_clock(position), style: timeStyle),
-                          Text(_clock(v.duration), style: timeStyle),
-                        ],
+                    if (_showTimes || _dragging)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 1,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(_clock(position), style: timeStyle),
+                            Text(_clock(v.duration), style: timeStyle),
+                          ],
+                        ),
                       ),
-                    ),
                     Positioned(
                       left: 0,
                       right: 0,
@@ -2378,22 +2531,12 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                                   color: Color(0x99FFFFFF),
                                 ),
                               ),
-                              TweenAnimationBuilder<double>(
-                                tween: Tween<double>(end: shown),
-                                duration: snap
-                                    ? Duration.zero
-                                    : const Duration(milliseconds: 280),
-                                curve: Curves.linear,
-                                builder: (_, value, __) =>
-                                    FractionallySizedBox(
-                                      alignment: Alignment.centerLeft,
-                                      widthFactor: value
-                                          .clamp(0.0, 1.0)
-                                          .toDouble(),
-                                      child: const ColoredBox(
-                                        color: AppColors.accent,
-                                      ),
-                                    ),
+                              FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: shown.clamp(0.0, 1.0).toDouble(),
+                                child: const ColoredBox(
+                                  color: AppColors.accent,
+                                ),
                               ),
                             ],
                           ),
@@ -2431,6 +2574,85 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
   }
 }
 
+class _ReelErrorPanel extends StatelessWidget {
+  const _ReelErrorPanel({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Gaps.xl),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 340),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(Radii.large),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xD91B1D25),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
+                  borderRadius: BorderRadius.circular(Radii.large),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(Gaps.md),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        CupertinoIcons.exclamationmark_circle,
+                        color: Colors.white70,
+                        size: 22,
+                      ),
+                      const SizedBox(width: Gaps.md),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Unable to load video',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            const Text(
+                              'Check your connection and try again.',
+                              style: TextStyle(
+                                color: Color(0xFFD1D3D9),
+                                fontSize: 12,
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: Gaps.sm),
+                            AppButton(
+                              label: 'Retry',
+                              icon: CupertinoIcons.refresh,
+                              style: AppButtonStyle.secondary,
+                              onDark: true,
+                              onPressed: onRetry,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.message, required this.onRetry});
 
@@ -2440,30 +2662,29 @@ class _ErrorView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Container(
-        padding: const EdgeInsets.all(Gaps.lg),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(Radii.card),
-          border: Border.all(color: AppColors.outline),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: AppText.body,
-            ),
-            const SizedBox(height: Gaps.md),
-            AppButton(
-              label: 'Try again',
-              icon: CupertinoIcons.refresh,
-              onPressed: onRetry,
-            ),
-          ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Gaps.xl),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 340),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(CupertinoIcons.wifi_exclamationmark, size: 26),
+              const SizedBox(height: Gaps.sm),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppText.body,
+              ),
+              const SizedBox(height: Gaps.md),
+              AppButton(
+                label: 'Try again',
+                icon: CupertinoIcons.refresh,
+                style: AppButtonStyle.secondary,
+                onPressed: onRetry,
+              ),
+            ],
+          ),
         ),
       ),
     );

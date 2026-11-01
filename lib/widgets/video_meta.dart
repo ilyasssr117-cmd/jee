@@ -61,7 +61,7 @@ class VideoMetaLine extends StatelessWidget {
             Icon(
               Icons.thumb_up_alt_rounded,
               size: (style.fontSize ?? 12) + 1,
-              color: AppColors.accent,
+              color: AppColors.accentForeground,
             ),
             const SizedBox(width: 4),
             Text(video.likes, maxLines: 1, style: style),
@@ -88,8 +88,7 @@ class VideoMetaLine extends StatelessWidget {
       );
     }
 
-    final showCat =
-        video.category.isNotEmpty &&
+    final showCat = video.category.isNotEmpty &&
         (showCategory || (fallbackToCategory && parts.isEmpty));
     if (showCat) {
       separator();

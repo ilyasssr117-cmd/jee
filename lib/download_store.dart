@@ -82,6 +82,7 @@ class DownloadStore extends ChangeNotifier {
   final Set<String> _pausing = <String>{};
   final Set<String> _sizeRejected = <String>{};
   final Map<String, String> _thumbs = <String, String>{};
+  final Set<String> _verifiedLocalPaths = <String>{};
 
   final Map<String, String> _directUrls = <String, String>{};
   final http.Client _thumbClient = http.Client();
@@ -137,25 +138,22 @@ class DownloadStore extends ChangeNotifier {
         final index = decoded['s'];
         var status =
             index is int && index >= 0 && index < DownloadStatus.values.length
-            ? DownloadStatus.values[index]
-            : DownloadStatus.failed;
+                ? DownloadStatus.values[index]
+                : DownloadStatus.failed;
         if (status == DownloadStatus.queued) status = DownloadStatus.paused;
-        final rawFileName = decoded['f'] is String
-            ? decoded['f'] as String
-            : null;
+        final rawFileName =
+            decoded['f'] is String ? decoded['f'] as String : null;
         final fileName = _isSafeFileName(rawFileName) ? rawFileName : null;
         final entry = DownloadItem(
           video: video,
           status: status,
           fileName: fileName,
-          thumbName:
-              _isSafeFileName(
-                decoded['i'] is String ? decoded['i'] as String : null,
-              )
+          thumbName: _isSafeFileName(
+            decoded['i'] is String ? decoded['i'] as String : null,
+          )
               ? decoded['i'] as String
               : null,
-          bytesTotal:
-              decoded['b'] is int &&
+          bytesTotal: decoded['b'] is int &&
                   (decoded['b'] as int) >= 0 &&
                   (decoded['b'] as int) <= _maxVideoBytes
               ? decoded['b'] as int
@@ -168,13 +166,13 @@ class DownloadStore extends ChangeNotifier {
 
         if (status == DownloadStatus.done) {
           entry.bytes.value = entry.bytesTotal;
-          if (localPathOf(entry) == null) {
+          if (await _verifyLocalPathOf(entry) == null) {
             entry.bytes.dispose();
             continue;
           }
         } else if (dir != null && fileName != null) {
           final part = File('${dir.path}/$fileName.part');
-          final partialBytes = part.existsSync() ? part.lengthSync() : 0;
+          final partialBytes = await part.exists() ? await part.length() : 0;
           if (partialBytes > _maxVideoBytes) {
             entry
               ..status = DownloadStatus.failed
@@ -190,7 +188,7 @@ class DownloadStore extends ChangeNotifier {
         if (thumb != null &&
             _isSafeFileName(thumb) &&
             dir != null &&
-            File('${dir.path}/$thumb').existsSync()) {
+            await File('${dir.path}/$thumb').exists()) {
           _thumbs[video.id] = '${dir.path}/$thumb';
         } else {
           entry.thumbName = null;
@@ -200,11 +198,10 @@ class DownloadStore extends ChangeNotifier {
     }
     _items.sort((a, b) => b.addedAt.compareTo(a.addedAt));
     if (_items.length > _maxQueueItems) {
-      final removable =
-          _items
-              .where((entry) => entry.status != DownloadStatus.downloading)
-              .toList()
-            ..sort((a, b) => a.addedAt.compareTo(b.addedAt));
+      final removable = _items
+          .where((entry) => entry.status != DownloadStatus.downloading)
+          .toList()
+        ..sort((a, b) => a.addedAt.compareTo(b.addedAt));
       while (_items.length > _maxQueueItems && removable.isNotEmpty) {
         final old = removable.removeAt(0);
         if (!_items.remove(old)) continue;
@@ -212,7 +209,7 @@ class DownloadStore extends ChangeNotifier {
         unawaited(_deleteFiles(old));
       }
     }
-    _cleanOrphans();
+    unawaited(_cleanOrphans());
     _downloaderReady = _initDownloader();
     unawaited(_downloaderReady);
   }
@@ -247,8 +244,7 @@ class DownloadStore extends ChangeNotifier {
 
       for (final entry in List<DownloadItem>.of(_items)) {
         if (entry.status == DownloadStatus.done) continue;
-        final record =
-            await downloader.database.recordForId(_taskId(entry)) ??
+        final record = await downloader.database.recordForId(_taskId(entry)) ??
             await downloader.database.recordForId(_legacyTaskId(entry));
         if (record == null) {
           if (entry.status == DownloadStatus.downloading) {
@@ -347,6 +343,7 @@ class DownloadStore extends ChangeNotifier {
       ..status = DownloadStatus.done
       ..bytesTotal = size
       ..error = null;
+    _verifiedLocalPaths.add(file.path);
     entry.bytes.value = size;
   }
 
@@ -432,8 +429,8 @@ class DownloadStore extends ChangeNotifier {
             ..error = sizeRejected
                 ? 'This file exceeds the 2 GB download limit.'
                 : (text.contains('Socket') || text.contains('timed out'))
-                ? 'Connection problem. Tap resume.'
-                : 'Download failed. Tap resume.';
+                    ? 'Connection problem. Tap resume.'
+                    : 'Download failed. Tap resume.';
           if (sizeRejected) unawaited(_deleteFiles(entry));
         }
     }
@@ -527,7 +524,7 @@ class DownloadStore extends ChangeNotifier {
     _syncActivity();
   }
 
-  void _cleanOrphans() {
+  Future<void> _cleanOrphans() async {
     final dir = _dir;
     if (dir == null) return;
     final owned = <String>{
@@ -539,11 +536,11 @@ class DownloadStore extends ChangeNotifier {
       },
     };
     try {
-      for (final entity in dir.listSync(followLinks: false)) {
+      await for (final entity in dir.list(followLinks: false)) {
         if (entity is! File) continue;
         final name = entity.uri.pathSegments.last;
         if (name.startsWith('v_') && !owned.contains(name)) {
-          entity.deleteSync();
+          await entity.delete();
         }
       }
     } catch (_) {}
@@ -558,7 +555,24 @@ class DownloadStore extends ChangeNotifier {
       return null;
     }
     final path = '${dir.path}/$name';
-    return File(path).existsSync() ? path : null;
+    if (_verifiedLocalPaths.contains(path)) return path;
+    if (!File(path).existsSync()) return null;
+    _verifiedLocalPaths.add(path);
+    return path;
+  }
+
+  Future<String?> _verifyLocalPathOf(DownloadItem entry) async {
+    final dir = _dir;
+    final name = entry.fileName;
+    if (dir == null ||
+        !_isSafeFileName(name) ||
+        entry.status != DownloadStatus.done) {
+      return null;
+    }
+    final path = '${dir.path}/$name';
+    if (!await File(path).exists()) return null;
+    _verifiedLocalPaths.add(path);
+    return path;
   }
 
   String? localPath(String id) {
@@ -785,8 +799,7 @@ class DownloadStore extends ChangeNotifier {
 
       final pageUrl = resolved.pageUrl ?? entry.video.pageUrl;
       final pageUri = Uri.tryParse(pageUrl?.trim() ?? '');
-      final validPage =
-          pageUri != null &&
+      final validPage = pageUri != null &&
           (pageUri.scheme == 'http' || pageUri.scheme == 'https') &&
           pageUri.host.isNotEmpty;
       final headers = <String, String>{...streamHeaders(uri, pageUrl)};
@@ -936,16 +949,15 @@ class DownloadStore extends ChangeNotifier {
           'Referer': base['Referer'] ?? '',
           'Accept': 'image/*,*/*;q=0.8',
         });
-      final response = await _thumbClient
-          .send(request)
-          .timeout(const Duration(seconds: 15));
+      final response =
+          await _thumbClient.send(request).timeout(const Duration(seconds: 15));
       if (response.statusCode != 200 ||
           (response.contentLength != null &&
               response.contentLength! > maxBytes)) {
         await response.stream.drain<void>().timeout(
-          const Duration(seconds: 3),
-          onTimeout: () {},
-        );
+              const Duration(seconds: 3),
+              onTimeout: () {},
+            );
         return;
       }
       final bytes = BytesBuilder(copy: false);
@@ -982,14 +994,12 @@ class DownloadStore extends ChangeNotifier {
   bool _looksLikeImage(List<int> bytes) {
     if (bytes.length < 12) return false;
     final jpeg = bytes[0] == 0xFF && bytes[1] == 0xD8;
-    final png =
-        bytes[0] == 0x89 &&
+    final png = bytes[0] == 0x89 &&
         bytes[1] == 0x50 &&
         bytes[2] == 0x4E &&
         bytes[3] == 0x47;
     final gif = bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46;
-    final webp =
-        bytes[0] == 0x52 &&
+    final webp = bytes[0] == 0x52 &&
         bytes[1] == 0x49 &&
         bytes[2] == 0x46 &&
         bytes[3] == 0x46 &&
@@ -1012,25 +1022,26 @@ class DownloadStore extends ChangeNotifier {
       if (!_isSafeFileName(name)) continue;
       try {
         final file = File('${dir.path}/$name');
+        _verifiedLocalPaths.remove(file.path);
         if (await file.exists()) await file.delete();
       } catch (_) {}
     }
   }
 
   void _persist() => LocalStore.writeList(
-    _key,
-    _items
-        .map(
-          (entry) => jsonEncode(<String, dynamic>{
-            'v': videoToJson(entry.video),
-            's': entry.status.index,
-            'f': entry.fileName,
-            'i': entry.thumbName,
-            'b': entry.bytesTotal,
-            'e': entry.error,
-            't': entry.addedAt.millisecondsSinceEpoch,
-          }),
-        )
-        .toList(),
-  );
+        _key,
+        _items
+            .map(
+              (entry) => jsonEncode(<String, dynamic>{
+                'v': videoToJson(entry.video),
+                's': entry.status.index,
+                'f': entry.fileName,
+                'i': entry.thumbName,
+                'b': entry.bytesTotal,
+                'e': entry.error,
+                't': entry.addedAt.millisecondsSinceEpoch,
+              }),
+            )
+            .toList(),
+      );
 }

@@ -24,6 +24,12 @@ typedef AlbumPhotoFetcher = Future<AlbumPhotosPage> Function(
   required int chunk,
 });
 
+final TtlCache<String> _albumFirstPhotoThumbs = TtlCache<String>(
+  ttl: const Duration(hours: 12),
+  maxEntries: 120,
+  cacheable: (url) => url.isNotEmpty,
+);
+
 class AlbumLoader extends ChangeNotifier {
   AlbumLoader(this.album, {AlbumPhotoFetcher? fetchPage})
     : _fetchPage = fetchPage ?? _fetchAlbumPage,
@@ -126,12 +132,6 @@ class AlbumLoader extends ChangeNotifier {
     RegExp(r'\B(?=(\d{3})+(?!\d))'),
     (_) => ',',
   );
-
-final TtlCache<String> _albumFirstPhotoThumbs = TtlCache<String>(
-  ttl: const Duration(hours: 12),
-  maxEntries: 120,
-  cacheable: (url) => url.isNotEmpty,
-);
 
   @override
   void dispose() {

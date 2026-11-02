@@ -144,12 +144,7 @@ class PhotoStore extends ChangeNotifier {
   PhotoStore._();
 
   @visibleForTesting
-  // Private initializing formals require a newer language version than this
-  // package declares. Keep the public test-only parameter names compatible.
-  // ignore: prefer_initializing_formals
-  PhotoStore.forTesting({required Directory root, http.Client? client})
-    : _root = root,
-      _client = client;
+  PhotoStore.forTesting({required this._root, this._client});
 
   static final PhotoStore instance = PhotoStore._();
 

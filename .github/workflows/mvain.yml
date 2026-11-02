@@ -79,6 +79,14 @@ jobs:
                       fixed,
                   )
 
+              if "ScrollCacheExtent" not in fixed:
+                  fixed = re.sub(
+                      r"(?m)^import 'package:flutter/rendering.dart' "
+                      r"show ScrollCacheExtent;\r?\n",
+                      "",
+                      fixed,
+                  )
+
               if fixed != original:
                   path.write_text(fixed, encoding="utf-8")
                   print(f"Updated: {path}")

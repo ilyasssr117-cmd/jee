@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../app_theme.dart';
 import '../favorites_store.dart';

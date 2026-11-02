@@ -47,6 +47,8 @@ abstract class VideoCatalogRepository {
 
   Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0});
 
+  Future<AlbumPhotosPage> getAlbumPhotosPage(AlbumRef album, {int chunk = 0});
+
   Future<String> getPlaybackCookieHeader({
     required Uri streamUri,
     String? pageUrl,
@@ -293,6 +295,15 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   }) async {
     _ensureConfigured();
     return scraper.albumPhotos(album, chunk: chunk);
+  }
+
+  @override
+  Future<AlbumPhotosPage> getAlbumPhotosPage(
+    AlbumRef album, {
+    int chunk = 0,
+  }) async {
+    _ensureConfigured();
+    return scraper.albumPhotosPage(album, chunk: chunk);
   }
 
   @override

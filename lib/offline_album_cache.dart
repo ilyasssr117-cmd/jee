@@ -112,6 +112,11 @@ abstract final class OfflineAlbumCache {
           modelName: album.modelName == null
               ? null
               : _bounded(album.modelName!, 256),
+          totalCount: album.totalCount != null &&
+                  album.totalCount! > 0 &&
+                  album.totalCount! <= 10000000
+              ? album.totalCount
+              : null,
         ),
       );
     }
@@ -130,6 +135,7 @@ abstract final class OfflineAlbumCache {
     final title = raw['title'];
     final url = raw['url'];
     final model = raw['model'];
+    final count = raw['count'];
     if (id is! String ||
         id.isEmpty ||
         id.length > 512 ||
@@ -138,7 +144,8 @@ abstract final class OfflineAlbumCache {
         title.length > 300 ||
         url is! String ||
         url.length > 4096 ||
-        (model != null && model is! String)) {
+        (model != null && model is! String) ||
+        (count != null && count is! int)) {
       return null;
     }
     final uri = Uri.tryParse(url);
@@ -153,6 +160,9 @@ abstract final class OfflineAlbumCache {
       title: title,
       url: url,
       modelName: model is String ? _bounded(model, 256) : null,
+      totalCount: count is int && count > 0 && count <= 10000000
+          ? count
+          : null,
     );
   }
 
@@ -168,6 +178,7 @@ abstract final class OfflineAlbumCache {
               'title': album.title,
               'url': album.url,
               'model': album.modelName,
+              'count': album.totalCount,
             },
         ],
       },

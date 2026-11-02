@@ -121,6 +121,7 @@ class AlbumRef {
     required this.url,
     this.thumbnailUrl,
     this.modelName,
+    this.totalCount,
   });
 
   final String id;
@@ -131,6 +132,8 @@ class AlbumRef {
 
   final String? thumbnailUrl;
 
+  final int? totalCount;
+
   /// Keeps cached album rows while upgrading metadata from a live response.
   /// Offline album pages omit temporary image URLs, so a later network page
   /// must be allowed to fill the thumbnail for an already-seen album.
@@ -140,6 +143,7 @@ class AlbumRef {
         url: fresh.url,
         thumbnailUrl: fresh.thumbnailUrl ?? thumbnailUrl,
         modelName: fresh.modelName ?? modelName,
+        totalCount: fresh.totalCount ?? totalCount,
       );
 
   @override
@@ -159,6 +163,15 @@ class AlbumPhoto {
   final String id;
   final String thumbUrl;
   final String fullUrl;
+}
+
+class AlbumPhotosPage {
+  const AlbumPhotosPage({required this.photos, this.totalCount});
+
+  final List<AlbumPhoto> photos;
+
+  /// Total number reported by the album page, independent of this page size.
+  final int? totalCount;
 }
 
 class PeopleSearchResult {

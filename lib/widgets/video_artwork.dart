@@ -7,6 +7,7 @@ import '../app_theme.dart';
 import '../download_store.dart';
 import '../models.dart';
 import '../reel_favorites.dart';
+import 'fade_in_thumbnail.dart';
 
 class VideoArtwork extends StatelessWidget {
   const VideoArtwork({
@@ -63,17 +64,19 @@ class VideoArtwork extends StatelessWidget {
                     ? Colors.transparent
                     : AppColors.surfaceHigh,
               ),
-              Image.file(
-                File(saved),
+              FadeInThumbnail(
+                identity: 'file:$saved',
+                image: ResizeImage.resizeIfNeeded(
+                  constraints.maxWidth.isFinite
+                      ? (constraints.maxWidth * dpr)
+                          .round()
+                          .clamp(128, 1280)
+                          .toInt()
+                      : null,
+                  null,
+                  FileImage(File(saved)),
+                ),
                 fit: fit,
-                cacheWidth: constraints.maxWidth.isFinite
-                    ? (constraints.maxWidth * dpr)
-                        .round()
-                        .clamp(128, 1280)
-                        .toInt()
-                    : null,
-                gaplessPlayback: true,
-                excludeFromSemantics: true,
                 errorBuilder: (context, error, stackTrace) =>
                     _Placeholder(video: video, showLabel: showLabel),
               ),
@@ -114,12 +117,11 @@ class VideoArtwork extends StatelessWidget {
                   ? Colors.transparent
                   : AppColors.surfaceHigh,
             ),
-            Image(
+            FadeInThumbnail(
+              identity: url,
               image: imageProvider,
               fit: fit,
-              gaplessPlayback: true,
               filterQuality: FilterQuality.medium,
-              excludeFromSemantics: true,
               errorBuilder: (context, error, stackTrace) =>
                   _Placeholder(video: video, showLabel: showLabel),
             ),

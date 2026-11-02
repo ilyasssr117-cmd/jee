@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -52,6 +53,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   double _headerLimit = 200;
   bool _preparing = false;
   bool _refreshing = false;
+  final ValueNotifier<bool> _shareCopied = ValueNotifier<bool>(false);
+  Timer? _shareResetTimer;
   String? _playError;
 
   @override
@@ -68,6 +71,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   @override
   void dispose() {
+    _shareResetTimer?.cancel();
+    _shareCopied.dispose();
     _scroll.dispose();
     _overHeader.dispose();
     super.dispose();
@@ -529,17 +534,33 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   Future<void> _copyLink() async {
     final link = _shareLink;
     if (link == null) return;
-    await Clipboard.setData(ClipboardData(text: link));
+    try {
+      await Clipboard.setData(ClipboardData(text: link));
+    } on PlatformException {
+      return;
+    } on MissingPluginException {
+      return;
+    }
     if (!mounted) return;
     Haptics.play(Haptic.light);
-    showToast(context, 'Link copied', aboveBar: false);
+    _shareResetTimer?.cancel();
+    _shareCopied.value = true;
+    _shareResetTimer = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted) _shareCopied.value = false;
+    });
   }
 
   Widget _buildHeaderActions(Duration? resume) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 330 ||
-            MediaQuery.textScalerOf(context).scale(14) > 17;
+        final actionCount = _shareLink == null ? 2 : 3;
+        final actionGaps = Gaps.xs * (actionCount - 1);
+        final actionWidth = (constraints.maxWidth - actionGaps) / actionCount;
+        final requiredLabelWidth = math.max(
+          appButtonRequiredWidth(context, label: 'Favorited'),
+          appButtonRequiredWidth(context, label: 'Download'),
+        );
+        final compact = actionWidth < requiredLabelWidth;
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -590,41 +611,64 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 
   Widget _buildShareButton({required bool compact}) {
-    return PopupMenuButton<String>(
-      tooltip: 'Share actions',
-      onSelected: (_) => _copyLink(),
-      itemBuilder: (context) => const [
-        PopupMenuItem<String>(
-          value: 'copy',
-          child: Row(
-            children: [
-              Icon(Icons.link_rounded, size: 20),
-              SizedBox(width: Gaps.sm),
-              Text('Copy link'),
-            ],
-          ),
-        ),
-      ],
-      child: Semantics(
+    return ValueListenableBuilder<bool>(
+      valueListenable: _shareCopied,
+      builder: (context, copied, _) => Semantics(
         button: true,
-        label: 'Share actions',
+        label: copied ? 'Video link copied' : 'Copy video link',
         child: SizedBox(
           height: 46,
           width: double.infinity,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.ios_share_rounded,
-                  size: 20, color: Colors.white),
-              if (!compact) ...[
-                const SizedBox(width: 6),
-                Text(
-                  'Share',
-                  style: AppText.label.copyWith(color: Colors.white),
-                ),
-              ],
-            ],
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: _copyLink,
+              borderRadius: BorderRadius.circular(Radii.button),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 22,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      reverseDuration: const Duration(milliseconds: 180),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) =>
+                          RotationTransition(
+                        turns: Tween<double>(begin: -0.12, end: 0)
+                            .animate(animation),
+                        child: ScaleTransition(scale: animation, child: child),
+                      ),
+                      child: copied
+                          ? const Icon(
+                              Icons.check_rounded,
+                              key: ValueKey<String>('copied'),
+                              size: 20,
+                              color: Color(0xFF63D98B),
+                            )
+                          : const Icon(
+                              Icons.ios_share_rounded,
+                              key: ValueKey<String>('share'),
+                              size: 20,
+                              color: Colors.white,
+                            ),
+                    ),
+                  ),
+                  if (!compact) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      'Share',
+                      maxLines: 1,
+                      softWrap: false,
+                      style: AppText.label.copyWith(color: Colors.white),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -644,6 +688,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           style: AppButtonStyle.tertiary,
           onDark: true,
           expand: true,
+          singleLine: true,
           onPressed: () {
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
@@ -669,6 +714,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             style: AppButtonStyle.tertiary,
             onDark: true,
             expand: true,
+            singleLine: true,
             onPressed: () {
               store.enqueue(widget.video);
               showToast(context, 'Download started', aboveBar: false);
@@ -705,13 +751,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             child: ExcludeSemantics(
               child: IgnorePointer(
                 child: AppButton(
-                  label: compact ? '' : 'Downloaded',
+                  label: compact ? '' : 'Saved',
                   semanticLabel: 'Download options',
                   icon: Icons.download_done_rounded,
                   iconColor: AppColors.accent,
                   style: AppButtonStyle.tertiary,
                   onDark: true,
                   expand: true,
+                  singleLine: true,
                   onPressed: () {},
                 ),
               ),
@@ -728,11 +775,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             switch (item.status) {
               case DownloadStatus.downloading:
                 return AppButton(
-                  label: compact
-                      ? (fraction == null ? '' : '${(fraction * 100).round()}%')
-                      : (fraction == null
-                          ? 'Downloading\u2026'
-                          : '${(fraction * 100).round()}%'),
+                  label: fraction == null ? '' : '${(fraction * 100).round()}%',
                   semanticLabel: fraction == null
                       ? 'Downloading'
                       : 'Downloading ${(fraction * 100).round()} percent',
@@ -740,16 +783,18 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   style: AppButtonStyle.tertiary,
                   onDark: true,
                   expand: true,
+                  singleLine: true,
                   onPressed: () => store.pause(id),
                 );
               case DownloadStatus.queued:
                 return AppButton(
-                  label: compact ? '' : 'Waiting\u2026',
+                  label: compact ? '' : 'Waiting',
                   semanticLabel: 'Download waiting',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.tertiary,
                   onDark: true,
                   expand: true,
+                  singleLine: true,
                   onPressed: () => store.pause(id),
                 );
               case DownloadStatus.paused:
@@ -758,7 +803,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 return AppButton(
                   label: compact
                       ? (fraction == null ? '' : '${(fraction * 100).round()}%')
-                      : (item.hasPartial ? 'Resume$percent' : 'Retry download'),
+                      : (item.hasPartial ? 'Resume' : 'Retry'),
                   semanticLabel: item.hasPartial
                       ? 'Resume download$percent'
                       : 'Retry download',
@@ -766,6 +811,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   style: AppButtonStyle.tertiary,
                   onDark: true,
                   expand: true,
+                  singleLine: true,
                   onPressed: () => store.resume(id),
                 );
             }

@@ -22,13 +22,23 @@ void main() {
     final loader = AlbumLoader(
       _album,
       fetchPage: (_, {required chunk}) async => switch (chunk) {
-        0 => List<AlbumPhoto>.generate(100, _photo),
-        1 => <AlbumPhoto>[
-            _photo(99), // overlap between pages must not add a duplicate.
-            ...List<AlbumPhoto>.generate(100, (index) => _photo(index + 100)),
-          ],
-        2 => List<AlbumPhoto>.generate(100, (index) => _photo(index + 200)),
-        _ => const <AlbumPhoto>[],
+        0 => AlbumPhotosPage(
+            photos: List<AlbumPhoto>.generate(100, _photo),
+            totalCount: 100,
+          ),
+        1 => AlbumPhotosPage(
+            photos: <AlbumPhoto>[
+              _photo(99), // overlap between pages must not add a duplicate.
+              ...List<AlbumPhoto>.generate(100, (index) => _photo(index + 100)),
+            ],
+            totalCount: 200,
+          ),
+        2 => AlbumPhotosPage(
+            photos:
+                List<AlbumPhoto>.generate(100, (index) => _photo(index + 200)),
+            totalCount: 300,
+          ),
+        _ => const AlbumPhotosPage(photos: <AlbumPhoto>[]),
       },
     );
     addTearDown(loader.dispose);
@@ -51,8 +61,52 @@ void main() {
     expect(loader.photos, hasLength(300));
   });
 
+  test(
+      'reported album total is shown after one batch without fetching the rest',
+      () async {
+    var calls = 0;
+    final loader = AlbumLoader(
+      _album,
+      fetchPage: (_, {required chunk}) async {
+        calls++;
+        return AlbumPhotosPage(
+          photos: List<AlbumPhoto>.generate(100, _photo),
+          totalCount: 1247,
+        );
+      },
+    );
+    addTearDown(loader.dispose);
+
+    await loader.load();
+
+    expect(loader.totalCount, 1247);
+    expect(loader.photos, hasLength(100));
+    expect(loader.countLabel, '1,247 photos');
+    expect(calls, 1);
+  });
+
+  test('album-list total is available before opening the first image batch',
+      () {
+    final album = AlbumRef(
+      id: _album.id,
+      title: _album.title,
+      url: _album.url,
+      totalCount: 100,
+    );
+    final loader = AlbumLoader(
+      album,
+      fetchPage: (_, {required chunk}) async => AlbumPhotosPage(
+        photos: List<AlbumPhoto>.generate(100, _photo),
+      ),
+    );
+    addTearDown(loader.dispose);
+
+    expect(loader.photos, isEmpty);
+    expect(loader.countLabel, '100 photos');
+  });
+
   test('only one album page request can run at a time', () async {
-    final response = Completer<List<AlbumPhoto>>();
+    final response = Completer<AlbumPhotosPage>();
     var calls = 0;
     final loader = AlbumLoader(
       _album,
@@ -66,7 +120,7 @@ void main() {
     final first = loader.load();
     final second = loader.load();
     expect(calls, 1);
-    response.complete(<AlbumPhoto>[_photo(0)]);
+    response.complete(AlbumPhotosPage(photos: <AlbumPhoto>[_photo(0)]));
     await Future.wait(<Future<void>>[first, second]);
     expect(loader.photos, hasLength(1));
   });

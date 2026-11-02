@@ -607,13 +607,20 @@ class Scraper {
           url: target.toString(),
           thumbnailUrl: _absoluteUrl(_albumImageSource(card), uri),
           modelName: modelName,
+          totalCount: _albumTotalFromCard(card),
         ),
       );
     }
     return albums;
   }
 
-  Future<List<AlbumPhoto>> albumPhotos(AlbumRef album, {int chunk = 0}) async {
+  Future<List<AlbumPhoto>> albumPhotos(AlbumRef album, {int chunk = 0}) async =>
+      (await albumPhotosPage(album, chunk: chunk)).photos;
+
+  Future<AlbumPhotosPage> albumPhotosPage(
+    AlbumRef album, {
+    int chunk = 0,
+  }) async {
     final base = Uri.parse(album.url);
     final Uri uri;
     Map<String, String>? extra;
@@ -643,7 +650,7 @@ class Scraper {
     } on ScraperException catch (error) {
       final status = error.statusCode;
       if (chunk > 0 && status != null && status >= 400 && status < 500) {
-        return const <AlbumPhoto>[];
+        return const AlbumPhotosPage(photos: <AlbumPhoto>[]);
       }
       rethrow;
     }
@@ -668,7 +675,45 @@ class Scraper {
       if (!seen.add(id)) continue;
       photos.add(AlbumPhoto(id: id, thumbUrl: thumb, fullUrl: full));
     }
-    return photos;
+    return AlbumPhotosPage(
+      photos: photos,
+      totalCount: chunk == 0 ? _albumTotalCount(document) : null,
+    );
+  }
+
+  int? _albumTotalCount(dom.Document document) {
+    for (final label in document.querySelectorAll('.media-data__list-title')) {
+      final normalized = _collapse(label.text).toLowerCase();
+      if (normalized != 'images:' && normalized != 'photos:') continue;
+      final value = label.parent?.querySelector('.media-data__list-value')?.text;
+      final count = _parseImageCount(value);
+      if (count != null) return count;
+    }
+
+    // This catalogue exposes an exact image count in the load-more label.
+    // data-total on that button is the number of async batches, not images.
+    final loadMoreLabel = document
+        .querySelector('.js-ajax-images2')
+        ?.text;
+    final match = loadMoreLabel == null
+        ? null
+        : RegExp(
+            r'([\d\s.,\u00a0]+)\s+(?:images|photos|pictures)\b',
+            caseSensitive: false,
+          ).firstMatch(loadMoreLabel);
+    return _parseImageCount(match?.group(1));
+  }
+
+  int? _albumTotalFromCard(dom.Element card) {
+    final count = card.querySelector('i[class*="photo-shape"]')?.parent?.text;
+    return _parseImageCount(count);
+  }
+
+  int? _parseImageCount(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+    final count = int.tryParse(digits);
+    return count != null && count > 0 && count <= 10000000 ? count : null;
   }
 
   static String _photoId(String url) {

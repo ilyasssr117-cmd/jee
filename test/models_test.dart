@@ -207,6 +207,7 @@ void main() {
                 <img class="lazyload" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                      data-src="https://storage4.example.test/contents/albums/preview/576x760/6000/6078/preview.jpg" alt="pictures 9">
               </div>
+              <ul class="thumb__data"><li><i class="icon-photo-shape-8"></i>1 250</li></ul>
             </a>
           </div>
           <div class="item thumb thumb--albums">
@@ -227,6 +228,7 @@ void main() {
     expect(requested.single, '/models/playwithanny/albums/');
     expect(albums, hasLength(2));
     expect(albums[0].title, 'Goddess Grazi pictures 9');
+    expect(albums[0].totalCount, 1250);
     expect(
       albums[0].url,
       'https://x.example.test/albums/6078/grazi-pictures-9/',
@@ -309,6 +311,34 @@ void main() {
       scraper.close();
     },
   );
+
+  test('album first page reports the exact total without fetching all photos', () async {
+    final client = MockClient(
+      (_) async => http.Response('''
+        <ul><li><span class="media-data__list-title">Images:</span>
+          <strong class="media-data__list-value">1 247</strong></li></ul>
+        <a class="js-ajax-images2" data-from="1" data-total="13">Show More 1,247 Photos</a>
+        <div id="albumGallery">
+          <div class="item"><a class="grid-item" href="/sources/one.jpg">
+            <img src="/thumb-one.jpg"></a></div>
+          <div class="item"><a class="grid-item" href="/sources/two.jpg">
+            <img src="/thumb-two.jpg"></a></div>
+        </div>
+      ''', 200),
+    );
+    final scraper = _scraper(client);
+    const album = AlbumRef(
+      id: 'x.example.test/albums/37/set/',
+      title: 'Set',
+      url: 'https://x.example.test/albums/37/set/',
+    );
+
+    final page = await scraper.albumPhotosPage(album);
+
+    expect(page.totalCount, 1247);
+    expect(page.photos, hasLength(2));
+    scraper.close();
+  });
 
   test('album photos: page, then load-more from=1, 2, 3 until nothing is left', () async {
     final seen = <Uri>[];

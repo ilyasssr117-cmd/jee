@@ -15,21 +15,24 @@ import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
+import 'widgets/fade_in_thumbnail.dart';
 import 'widgets/state_views.dart';
 
-typedef AlbumPhotoFetcher = Future<List<AlbumPhoto>> Function(
+typedef AlbumPhotoFetcher = Future<AlbumPhotosPage> Function(
   AlbumRef album, {
   required int chunk,
 });
 
 class AlbumLoader extends ChangeNotifier {
   AlbumLoader(this.album, {AlbumPhotoFetcher? fetchPage})
-    : _fetchPage = fetchPage ?? _fetchAlbumPage;
+    : _fetchPage = fetchPage ?? _fetchAlbumPage,
+      totalCount = album.totalCount;
 
   final AlbumRef album;
   final AlbumPhotoFetcher _fetchPage;
   final List<AlbumPhoto> photos = <AlbumPhoto>[];
   final Set<String> _seen = <String>{};
+  int? totalCount;
   bool loading = false;
   bool finished = false;
   Object? error;
@@ -79,10 +82,11 @@ class AlbumLoader extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final chunk = await _fetchPage(album, chunk: _next);
+      final page = await _fetchPage(album, chunk: _next);
       if (_disposed || run != _run) return;
 
-      for (final photo in chunk) {
+      if (page.totalCount != null) totalCount = page.totalCount;
+      for (final photo in page.photos) {
         if (_seen.add(photo.id)) {
           photos.add(photo);
         }
@@ -90,7 +94,10 @@ class AlbumLoader extends ChangeNotifier {
       _next++;
       // Duplicate-only pages can still precede new images. The empty server
       // page is the end-of-album signal.
-      if (chunk.isEmpty) finished = true;
+      if (page.photos.isEmpty) {
+        finished = true;
+        totalCount ??= photos.length;
+      }
     } catch (e) {
       if (_disposed || run != _run) return;
       error = e;
@@ -102,17 +109,22 @@ class AlbumLoader extends ChangeNotifier {
     }
   }
 
-  static Future<List<AlbumPhoto>> _fetchAlbumPage(
+  static Future<AlbumPhotosPage> _fetchAlbumPage(
     AlbumRef album, {
     int chunk = 0,
-  }) => videoRepository.getAlbumPhotos(album, chunk: chunk);
+  }) => videoRepository.getAlbumPhotosPage(album, chunk: chunk);
 
   String get countLabel {
-    final n = photos.length;
-    final base = '$n photo${n == 1 ? '' : 's'}';
-    if (loading) return '$base · loading…';
+    final n = totalCount ?? photos.length;
+    final base = '${_groupCount(n)} photo${n == 1 ? '' : 's'}';
+    if (loading && totalCount == null) return '$base · loading…';
     return base;
   }
+
+  static String _groupCount(int count) => count.toString().replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (_) => ',',
+  );
 
   @override
   void dispose() {
@@ -676,6 +688,7 @@ class PhotoGridSliver extends StatelessWidget {
                   final photo = photos[index];
                   return _PhotoTile(
                     key: ValueKey<String>(photo.id),
+                    identity: photo.thumbUrl,
                     image: CachedNetworkImageProvider(
                       photo.thumbUrl,
                       headers: loader.imageHeaders,
@@ -808,7 +821,8 @@ class AlbumCard extends StatelessWidget {
                           size: 32,
                         ),
                       )
-                    : Image(
+                    : FadeInThumbnail(
+                        identity: thumb,
                         image: ResizeImage(
                           CachedNetworkImageProvider(
                             thumb,
@@ -817,7 +831,6 @@ class AlbumCard extends StatelessWidget {
                           width: (160 * dpr).round().clamp(128, 960).toInt(),
                         ),
                         fit: BoxFit.cover,
-                        gaplessPlayback: true,
                         errorBuilder: (context, error, stack) => placeholder,
                       ),
               ),
@@ -846,6 +859,7 @@ class AlbumCard extends StatelessWidget {
 class _PhotoTile extends StatelessWidget {
   const _PhotoTile({
     super.key,
+    required this.identity,
     required this.image,
     required this.selecting,
     required this.selected,
@@ -855,6 +869,7 @@ class _PhotoTile extends StatelessWidget {
   });
 
   final ImageProvider image;
+  final String identity;
   final bool selecting;
   final bool selected;
   final bool saved;
@@ -877,14 +892,14 @@ class _PhotoTile extends StatelessWidget {
           children: [
             ColoredBox(
               color: AppColors.surfaceHigh,
-              child: Image(
+              child: FadeInThumbnail(
+                identity: identity,
                 image: ResizeImage(
                   image,
                   width: (160 * dpr).round(),
                   allowUpscaling: false,
                 ),
                 fit: BoxFit.cover,
-                gaplessPlayback: true,
                 errorBuilder: (context, error, stack) => Icon(
                   Icons.broken_image_outlined,
                   color: AppColors.textTertiary,

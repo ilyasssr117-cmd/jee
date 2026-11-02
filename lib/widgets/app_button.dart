@@ -13,6 +13,23 @@ double appChipTapHeight(BuildContext context) {
   return math.max(44, math.max(36, 24 + 12 * scale)).toDouble();
 }
 
+double appButtonRequiredWidth(
+  BuildContext context, {
+  required String label,
+  bool hasIcon = true,
+  AppButtonStyle style = AppButtonStyle.tertiary,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(text: label, style: AppText.label),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout();
+  final horizontalPadding = style == AppButtonStyle.tertiary ? 20.0 : 34.0;
+  final iconAndGap = hasIcon ? 26.0 : 0.0;
+  return painter.width + horizontalPadding + iconAndGap + 2;
+}
+
 class AppButton extends StatelessWidget {
   const AppButton({
     super.key,
@@ -25,6 +42,7 @@ class AppButton extends StatelessWidget {
     this.expand = false,
     this.onDark = false,
     this.semanticLabel,
+    this.singleLine = false,
   });
 
   final String label;
@@ -40,6 +58,9 @@ class AppButton extends StatelessWidget {
   final bool onDark;
 
   final String? semanticLabel;
+
+  /// Keeps short action labels on one line when the button shares a row.
+  final bool singleLine;
 
   @override
   Widget build(BuildContext context) {
@@ -87,8 +108,8 @@ class AppButton extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                maxLines: 2,
-                softWrap: true,
+                maxLines: singleLine ? 1 : 2,
+                softWrap: !singleLine,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
                 style: AppText.label.copyWith(color: foreground),

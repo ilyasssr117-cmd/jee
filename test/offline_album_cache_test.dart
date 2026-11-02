@@ -22,12 +22,17 @@ void main() {
         url: 'https://catalog.example.test/albums/1/',
         modelName: 'Example',
         thumbnailUrl: 'https://cdn.example.test/cover.jpg?token=temporary',
+        totalCount: 1247,
       );
 
       OfflineAlbumCache.write('offline-album-test', const <AlbumRef>[album]);
       expect(
         OfflineAlbumCache.read('offline-album-test')?.single.title,
         'Offline album',
+      );
+      expect(
+        OfflineAlbumCache.read('offline-album-test')?.single.totalCount,
+        1247,
       );
 
       await Future<void>.delayed(const Duration(milliseconds: 300));

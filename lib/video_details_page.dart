@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -42,6 +43,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   late Future<List<ModelRef>> _modelsFuture;
   List<ModelRef> _models = const <ModelRef>[];
   Object? _modelsError;
+  bool _modelsLoading = true;
   final ScrollController _scroll = ScrollController();
   final GlobalKey _headerKey = GlobalKey();
 
@@ -112,6 +114,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             _models = models;
           }
           _modelsError = null;
+          _modelsLoading = false;
         });
       },
       onError: (Object error) {
@@ -120,6 +123,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         if (_models.isNotEmpty) return;
         setState(() {
           _modelsError = error;
+          _modelsLoading = false;
         });
       },
     );
@@ -142,6 +146,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     setState(() {
       _modelsFuture = request;
       _modelsError = null;
+      _modelsLoading = true;
     });
     _watchModels(request);
   }
@@ -289,15 +294,16 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     child: _buildHeader(margin),
                   ),
                 ),
-                if (_models.isNotEmpty || _modelsError != null)
+                if (_models.isNotEmpty ||
+                    _modelsError != null ||
+                    _modelsLoading)
                   SliverPersistentHeader(
                     pinned: true,
                     delegate: _PinnedModelsDelegate(
-                      extent: context.safe.top + 42 > 78
-                          ? context.safe.top + 42
-                          : 78,
+                      extent: _modelsHeaderExtent(context),
                       margin: margin,
                       models: _models,
+                      loading: _modelsLoading,
                       error: _modelsError,
                       onRetry: _reloadModels,
                       onOpen: _openModel,
@@ -408,12 +414,12 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          stops: [0.0, 0.24, 0.58, 1.0],
+                          stops: [0.0, 0.30, 0.64, 1.0],
                           colors: [
-                            Color(0x3D0C1020),
-                            Color(0x260C1020),
-                            Color(0x8A0C1020),
-                            Color(0xF20C1020),
+                            Color(0x300C1020),
+                            Color(0x180C1020),
+                            Color(0x650C1020),
+                            Color(0xE80C1020),
                           ],
                         ),
                       ),
@@ -445,10 +451,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   const SizedBox(height: 6),
                   ExpandableText(
                     video.title,
-                    collapsedLines: 3,
+                    collapsedLines: 2,
                     style: darkText.display.copyWith(
                       fontSize: 23,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: Colors.white,
                       height: 1.12,
                       shadows: const [
@@ -464,7 +470,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     const SizedBox(height: Gaps.sm),
                     Text(
                       video.description,
-                      maxLines: 3,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Color(0xFFD6D9E2),
@@ -474,69 +480,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     ),
                   ],
                   const SizedBox(height: Gaps.md),
-                  Wrap(
-                    spacing: Gaps.sm,
-                    runSpacing: Gaps.sm,
-                    children: [
-                      AppButton(
-                        label: resume != null
-                            ? 'Resume ${_formatResume(resume)}'
-                            : 'Play',
-                        icon: Icons.play_arrow_rounded,
-                        loading: _preparing,
-                        onPressed: _play,
-                      ),
-                      if (resume != null)
-                        AppButton(
-                          label: 'Start over',
-                          icon: Icons.replay_rounded,
-                          style: AppButtonStyle.secondary,
-                          onDark: true,
-                          onPressed: () => _play(fromStart: true),
-                        ),
-                      _buildFavoriteButton(),
-                      _buildDownloadButton(),
-                      if (_shareLink != null)
-                        PopupMenuButton<String>(
-                          tooltip: 'Share actions',
-                          onSelected: (_) => _copyLink(),
-                          itemBuilder: (context) => const [
-                            PopupMenuItem<String>(
-                              value: 'copy',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.link_rounded, size: 20),
-                                  SizedBox(width: Gaps.sm),
-                                  Text('Copy link'),
-                                ],
-                              ),
-                            ),
-                          ],
-                          child: Semantics(
-                            button: true,
-                            label: 'Share actions',
-                            child: SizedBox(
-                              height: 46,
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 10),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.ios_share_rounded,
-                                        size: 20, color: Colors.white),
-                                    const SizedBox(width: 6),
-                                    Text('Share',
-                                        style: AppText.label
-                                            .copyWith(color: Colors.white)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+                  _buildHeaderActions(resume),
                   if (_playError != null) ...[
                     const SizedBox(height: Gaps.sm),
                     Row(
@@ -591,17 +535,115 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     showToast(context, 'Link copied', aboveBar: false);
   }
 
-  Widget _buildFavoriteButton() {
+  Widget _buildHeaderActions(Duration? resume) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 330 ||
+            MediaQuery.textScalerOf(context).scale(14) > 17;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: resume == null
+                        ? 'Play'
+                        : 'Resume ${_formatResume(resume)}',
+                    icon: Icons.play_arrow_rounded,
+                    loading: _preparing,
+                    expand: true,
+                    onPressed: _play,
+                  ),
+                ),
+                if (resume != null) ...[
+                  const SizedBox(width: Gaps.sm),
+                  Expanded(
+                    child: AppButton(
+                      label: 'Start over',
+                      icon: Icons.replay_rounded,
+                      style: AppButtonStyle.secondary,
+                      onDark: true,
+                      expand: true,
+                      onPressed: () => _play(fromStart: true),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: Gaps.sm),
+            Row(
+              children: [
+                Expanded(child: _buildFavoriteButton(compact: compact)),
+                const SizedBox(width: Gaps.xs),
+                Expanded(child: _buildDownloadButton(compact: compact)),
+                if (_shareLink != null) ...[
+                  const SizedBox(width: Gaps.xs),
+                  Expanded(child: _buildShareButton(compact: compact)),
+                ],
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildShareButton({required bool compact}) {
+    return PopupMenuButton<String>(
+      tooltip: 'Share actions',
+      onSelected: (_) => _copyLink(),
+      itemBuilder: (context) => const [
+        PopupMenuItem<String>(
+          value: 'copy',
+          child: Row(
+            children: [
+              Icon(Icons.link_rounded, size: 20),
+              SizedBox(width: Gaps.sm),
+              Text('Copy link'),
+            ],
+          ),
+        ),
+      ],
+      child: Semantics(
+        button: true,
+        label: 'Share actions',
+        child: SizedBox(
+          height: 46,
+          width: double.infinity,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.ios_share_rounded,
+                  size: 20, color: Colors.white),
+              if (!compact) ...[
+                const SizedBox(width: 6),
+                Text(
+                  'Share',
+                  style: AppText.label.copyWith(color: Colors.white),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFavoriteButton({required bool compact}) {
     return ListenableBuilder(
       listenable: FavoritesStore.instance,
       builder: (context, _) {
         final active = FavoritesStore.instance.isFavorite(widget.video.id);
         return AppButton(
-          label: active ? 'Favorited' : 'Favorite',
+          label: compact ? '' : (active ? 'Favorited' : 'Favorite'),
+          semanticLabel: active ? 'Favorited' : 'Favorite',
           icon: active ? Icons.star_rounded : Icons.star_border_rounded,
           iconColor: active ? AppColors.star : null,
           style: AppButtonStyle.tertiary,
           onDark: true,
+          expand: true,
           onPressed: () {
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
@@ -611,7 +653,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  Widget _buildDownloadButton() {
+  Widget _buildDownloadButton({required bool compact}) {
     return ListenableBuilder(
       listenable: DownloadStore.instance,
       builder: (context, _) {
@@ -621,10 +663,12 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
         if (item == null) {
           return AppButton(
-            label: 'Download',
+            label: compact ? '' : 'Download',
+            semanticLabel: 'Download',
             icon: Icons.download_rounded,
             style: AppButtonStyle.tertiary,
             onDark: true,
+            expand: true,
             onPressed: () {
               store.enqueue(widget.video);
               showToast(context, 'Download started', aboveBar: false);
@@ -633,35 +677,45 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         }
 
         if (item.status == DownloadStatus.done) {
-          return Wrap(
-            spacing: Gaps.sm,
-            runSpacing: Gaps.sm,
-            children: [
-              AppButton(
-                label: 'Downloaded',
-                icon: Icons.download_done_rounded,
-                iconColor: AppColors.accent,
-                style: AppButtonStyle.tertiary,
-                onDark: true,
-                onPressed: () async {
-                  final ok = await confirmDialog(
-                    context,
-                    title: 'Delete this download?',
-                    message: 'The video will be removed from your phone.',
-                    confirmLabel: 'Delete',
-                  );
-                  if (ok) await store.remove(id);
-                },
+          return PopupMenuButton<String>(
+            tooltip: 'Download options',
+            onSelected: (action) async {
+              if (action == 'photos') {
+                await saveVideoToPhotos(context, id, aboveBar: false);
+              } else if (action == 'delete') {
+                final ok = await confirmDialog(
+                  context,
+                  title: 'Delete this download?',
+                  message: 'The video will be removed from your phone.',
+                  confirmLabel: 'Delete',
+                );
+                if (ok) await store.remove(id);
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<String>(
+                value: 'photos',
+                child: Text('Save to Photos'),
               ),
-              AppButton(
-                label: 'Save to Photos',
-                icon: Icons.photo_library_outlined,
-                style: AppButtonStyle.tertiary,
-                onDark: true,
-                onPressed: () =>
-                    saveVideoToPhotos(context, id, aboveBar: false),
+              PopupMenuItem<String>(
+                value: 'delete',
+                child: Text('Delete download'),
               ),
             ],
+            child: ExcludeSemantics(
+              child: IgnorePointer(
+                child: AppButton(
+                  label: compact ? '' : 'Downloaded',
+                  semanticLabel: 'Download options',
+                  icon: Icons.download_done_rounded,
+                  iconColor: AppColors.accent,
+                  style: AppButtonStyle.tertiary,
+                  onDark: true,
+                  expand: true,
+                  onPressed: () {},
+                ),
+              ),
+            ),
           );
         }
 
@@ -674,30 +728,44 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
             switch (item.status) {
               case DownloadStatus.downloading:
                 return AppButton(
-                  label: fraction == null
-                      ? 'Downloading\u2026'
-                      : '${(fraction * 100).round()}%',
+                  label: compact
+                      ? (fraction == null ? '' : '${(fraction * 100).round()}%')
+                      : (fraction == null
+                          ? 'Downloading\u2026'
+                          : '${(fraction * 100).round()}%'),
+                  semanticLabel: fraction == null
+                      ? 'Downloading'
+                      : 'Downloading ${(fraction * 100).round()} percent',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.tertiary,
                   onDark: true,
+                  expand: true,
                   onPressed: () => store.pause(id),
                 );
               case DownloadStatus.queued:
                 return AppButton(
-                  label: 'Waiting\u2026',
+                  label: compact ? '' : 'Waiting\u2026',
+                  semanticLabel: 'Download waiting',
                   icon: Icons.pause_rounded,
                   style: AppButtonStyle.tertiary,
                   onDark: true,
+                  expand: true,
                   onPressed: () => store.pause(id),
                 );
               case DownloadStatus.paused:
               case DownloadStatus.failed:
               case DownloadStatus.done:
                 return AppButton(
-                  label: item.hasPartial ? 'Resume$percent' : 'Retry download',
+                  label: compact
+                      ? (fraction == null ? '' : '${(fraction * 100).round()}%')
+                      : (item.hasPartial ? 'Resume$percent' : 'Retry download'),
+                  semanticLabel: item.hasPartial
+                      ? 'Resume download$percent'
+                      : 'Retry download',
                   icon: Icons.play_arrow_rounded,
                   style: AppButtonStyle.tertiary,
                   onDark: true,
+                  expand: true,
                   onPressed: () => store.resume(id),
                 );
             }
@@ -707,7 +775,17 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     );
   }
 
-  double _headerHeight(Size size) => size.width * 0.66 + 84;
+  double _headerHeight(Size size) =>
+      (size.width * 0.58 + 112).clamp(320.0, 400.0).toDouble();
+
+  double _modelsHeaderExtent(BuildContext context) {
+    final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final chipHeight = math.max(36.0, 28 * scale + 8);
+    final labelHeight = 13 * scale * 1.2;
+    final safePinned = context.safe.top + chipHeight + 10;
+    final unpinned = labelHeight + 5 + chipHeight + 14;
+    return math.max(78.0, math.max(safePinned, unpinned));
+  }
 
   Widget _buildRelatedTitle(double margin) {
     return FutureBuilder<List<Video>>(
@@ -815,6 +893,7 @@ class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
     required this.extent,
     required this.margin,
     required this.models,
+    required this.loading,
     required this.error,
     required this.onRetry,
     required this.onOpen,
@@ -823,6 +902,7 @@ class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
   final double extent;
   final double margin;
   final List<ModelRef> models;
+  final bool loading;
   final Object? error;
   final VoidCallback onRetry;
   final ValueChanged<ModelRef> onOpen;
@@ -842,6 +922,8 @@ class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
     final pinned = shrinkOffset > 0 || overlapsContent;
     final topInset = pinned ? MediaQuery.paddingOf(context).top : 0.0;
     final hasModels = models.isNotEmpty;
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final chipHeight = math.max(36.0, 28 * textScale + 8);
 
     return Material(
       color: AppColors.background,
@@ -869,16 +951,18 @@ class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
                     if (!pinned) ...[
                       Text(
                         models.length == 1 ? 'MODEL' : 'MODELS',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: AppText.label.copyWith(
                           color: AppColors.textSecondary,
-                          fontSize: 11,
+                          fontSize: 13,
                           letterSpacing: 0.7,
                         ),
                       ),
                       const SizedBox(height: 5),
                     ],
                     SizedBox(
-                      height: 36,
+                      height: chipHeight,
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         physics: const BouncingScrollPhysics(),
@@ -899,25 +983,49 @@ class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
                     ),
                   ],
                 )
-              : Align(
-                  alignment: Alignment.centerLeft,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Couldn’t load model information.',
-                          style: AppText.body,
+              : loading
+                  ? Row(
+                      children: [
+                        Text(
+                          'MODELS',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.label.copyWith(
+                            color: AppColors.textSecondary,
+                            fontSize: 13,
+                            letterSpacing: 0.7,
+                          ),
                         ),
+                        const Spacer(),
+                        SizedBox(
+                          width: math.min(22, chipHeight * 0.45),
+                          height: math.min(22, chipHeight * 0.45),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.accentForeground,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Align(
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Couldn’t load model information.',
+                              style: AppText.body,
+                            ),
+                          ),
+                          AppButton(
+                            label: 'Retry',
+                            icon: Icons.refresh_rounded,
+                            style: AppButtonStyle.secondary,
+                            onPressed: onRetry,
+                          ),
+                        ],
                       ),
-                      AppButton(
-                        label: 'Retry',
-                        icon: Icons.refresh_rounded,
-                        style: AppButtonStyle.secondary,
-                        onPressed: onRetry,
-                      ),
-                    ],
-                  ),
-                ),
+                    ),
         ),
       ),
     );
@@ -928,6 +1036,7 @@ class _PinnedModelsDelegate extends SliverPersistentHeaderDelegate {
       extent != oldDelegate.extent ||
       margin != oldDelegate.margin ||
       !identical(models, oldDelegate.models) ||
+      loading != oldDelegate.loading ||
       error != oldDelegate.error;
 }
 
@@ -947,13 +1056,16 @@ class _ModelChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final chipHeight = math.max(36.0, 28 * textScale + 8);
+    final avatarSize = math.min(40.0, 25 * textScale);
     return Pressable(
       semanticLabel: 'Model $name',
       haptic: Haptic.selection,
       pressedScale: 0.95,
       onTap: onPressed,
       child: Container(
-        height: 36,
+        height: chipHeight,
         padding: const EdgeInsets.only(left: 10, right: 14),
         decoration: BoxDecoration(
           color: AppColors.surfaceHigh,
@@ -969,7 +1081,7 @@ class _ModelChip extends StatelessWidget {
               name: name,
               imageUrl: imageUrl,
               pageUrl: pageUrl,
-              size: 25,
+              size: avatarSize,
             ),
             const SizedBox(width: 8),
             ConstrainedBox(

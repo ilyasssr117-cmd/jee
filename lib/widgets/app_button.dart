@@ -24,6 +24,7 @@ class AppButton extends StatelessWidget {
     this.iconColor,
     this.expand = false,
     this.onDark = false,
+    this.semanticLabel,
   });
 
   final String label;
@@ -37,6 +38,8 @@ class AppButton extends StatelessWidget {
   final bool expand;
 
   final bool onDark;
+
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +59,7 @@ class AppButton extends StatelessWidget {
             : (onDark ? const Color(0x26FFFFFF) : AppColors.outline));
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
     return Pressable(
-      semanticLabel: label,
+      semanticLabel: semanticLabel ?? label,
       onTap: loading ? null : onPressed,
       child: AnimatedContainer(
         duration: Motion.quick,
@@ -79,7 +82,8 @@ class AppButton extends StatelessWidget {
               CupertinoActivityIndicator(radius: 8, color: foreground)
             else if (icon != null)
               Icon(icon, size: 20, color: iconColor ?? foreground),
-            if (loading || icon != null) const SizedBox(width: 6),
+            if ((loading || icon != null) && label.isNotEmpty)
+              const SizedBox(width: 6),
             Flexible(
               child: Text(
                 label,

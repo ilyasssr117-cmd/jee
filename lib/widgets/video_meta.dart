@@ -3,6 +3,55 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../models.dart';
 
+/// Converts raw catalog counts to a compact value that fits video cards.
+/// Text such as "views" is omitted because the adjacent icon identifies it.
+String compactMetric(String raw) {
+  final value = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (value.isEmpty) return value;
+
+  final abbreviated = RegExp(
+    r'^([0-9]+(?:[.,][0-9]+)?)\s*([kmb])\b',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (abbreviated != null) {
+    final amount = double.tryParse(abbreviated.group(1)!.replaceAll(',', '.'));
+    if (amount == null) return value;
+    return '${_metricNumber(amount)}${abbreviated.group(2)!.toUpperCase()}';
+  }
+
+  final count = RegExp(r'^([0-9][0-9., ]*)').firstMatch(value);
+  if (count == null) return value;
+  var number = count.group(1)!.replaceAll(' ', '');
+  if (number.contains(',') && number.contains('.')) {
+    if (number.lastIndexOf(',') > number.lastIndexOf('.')) {
+      number = number.replaceAll('.', '').replaceAll(',', '.');
+    } else {
+      number = number.replaceAll(',', '');
+    }
+  } else if (number.contains(',')) {
+    number = RegExp(r',\d{1,2}$').hasMatch(number)
+        ? number.replaceAll(',', '.')
+        : number.replaceAll(',', '');
+  } else if (RegExp(r'\.\d{3}$').hasMatch(number)) {
+    number = number.replaceAll('.', '');
+  }
+
+  final amount = double.tryParse(number);
+  if (amount == null) return value;
+  if (amount >= 999500000) return '${_metricNumber(amount / 1000000000)}B';
+  if (amount >= 999500) return '${_metricNumber(amount / 1000000)}M';
+  if (amount >= 1000) return '${_metricNumber(amount / 1000)}K';
+  return _metricNumber(amount);
+}
+
+String _metricNumber(double value) {
+  if (value == value.roundToDouble()) return value.toInt().toString();
+  final rounded = value.toStringAsFixed(1);
+  return rounded.endsWith('.0')
+      ? rounded.substring(0, rounded.length - 2)
+      : rounded;
+}
+
 class VideoMetaLine extends StatelessWidget {
   const VideoMetaLine({
     super.key,
@@ -64,7 +113,12 @@ class VideoMetaLine extends StatelessWidget {
               color: AppColors.accentForeground,
             ),
             const SizedBox(width: 4),
-            Text(video.likes, maxLines: 1, style: style),
+            Text(
+              compactMetric(video.likes),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
           ],
         ),
       );
@@ -74,7 +128,11 @@ class VideoMetaLine extends StatelessWidget {
       separator();
       parts.add(
         Flexible(
-          child: _IconText(Icons.visibility_outlined, video.views, style),
+          child: _IconText(
+            Icons.visibility_outlined,
+            compactMetric(video.views),
+            style,
+          ),
         ),
       );
     }

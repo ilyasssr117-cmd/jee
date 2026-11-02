@@ -424,7 +424,7 @@ class ReelsPage extends StatefulWidget {
 class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   final ReelsRepository _repo = ReelsRepository();
   final http.Client _media = _makeClient();
-  final PageController _pager = PageController();
+  final PageController _pager = PageController(viewportFraction: 1.0);
   final List<ReelItem> _items = <ReelItem>[];
   final Map<int, VideoPlayerController> _controllers = {};
   final Map<int, _ReelPlaybackState> _reelStates = <int, _ReelPlaybackState>{};
@@ -759,12 +759,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 
   void _onPageChanged(int index) {
+    final previous = _current;
     _current = index;
     _syncPending = true;
 
-    // Evict the reel that just left the screen immediately instead of waiting
-    // for scroll-end. This prevents a third decoder living through long swipes.
-    final keep = <int>{index, index + 1};
+    // Keep the outgoing texture through the transition. PageView can still
+    // expose part of that page after onPageChanged fires at the midpoint.
+    // ScrollEnd sync releases it before another neighbor is preloaded.
+    final keep = <int>{previous, index};
     for (final oldIndex in _controllers.keys.toList()) {
       if (!keep.contains(oldIndex)) _evictController(oldIndex);
     }
@@ -781,6 +783,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       unawaited(entry.value.setPlaybackSpeed(1));
     }
     if (index >= _items.length - _kPreloadAhead) _loadMore();
+    if (mounted) setState(() {});
   }
 
   bool _onScrollNotification(ScrollNotification n) {
@@ -1043,28 +1046,32 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                 controller: _pager,
                 scrollDirection: Axis.vertical,
                 pageSnapping: true,
-                physics: PageScrollPhysics(
-                  parent: nativeScrollPhysics(context, alwaysScrollable: true),
+                physics: const PageScrollPhysics(
+                  parent: ClampingScrollPhysics(),
                 ),
+                padEnds: false,
+                clipBehavior: Clip.hardEdge,
                 itemCount: _items.length,
                 onPageChanged: _onPageChanged,
                 itemBuilder: (context, i) {
                   final item = _items[i];
-                  return _ReelView(
-                    key: ValueKey(item.id),
-                    item: item,
-                    controller: _controllers[i],
-                    playbackState: _reelStates[i] ?? _ReelPlaybackState.idle,
-                    isActive: widget.active && i == _current,
-                    muted: _muted,
-                    saving: _saving,
-                    bottomInset: bottom,
-                    clear: _clear,
-                    onMute: _toggleMute,
-                    onSaveMenu: () => _showSaveMenu(item),
-                    onRetry: () => _retry(i),
-                    onToggleLike: () => _toggleLike(item),
-                    onDoubleTapLike: () => _likeFromDoubleTap(item),
+                  return RepaintBoundary(
+                    child: _ReelView(
+                      key: ValueKey(item.id),
+                      item: item,
+                      controller: _controllers[i],
+                      playbackState: _reelStates[i] ?? _ReelPlaybackState.idle,
+                      isActive: widget.active && i == _current,
+                      muted: _muted,
+                      saving: _saving,
+                      bottomInset: bottom,
+                      clear: _clear,
+                      onMute: _toggleMute,
+                      onSaveMenu: () => _showSaveMenu(item),
+                      onRetry: () => _retry(i),
+                      onToggleLike: () => _toggleLike(item),
+                      onDoubleTapLike: () => _likeFromDoubleTap(item),
+                    ),
                   );
                 },
               ),
@@ -1156,11 +1163,11 @@ class _ReelsTopBar extends StatelessWidget {
       child: Row(
         children: [
           const SizedBox(width: 44),
-          Expanded(
+          const Expanded(
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                children: const [
+                children: [
                   Text(
                     'For You',
                     style: TextStyle(

@@ -513,7 +513,7 @@ class SearchOverlayState extends State<SearchOverlay> {
           haptic: Haptic.selection,
           onTap: widget.onClose,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 13),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 13),
             child: Text(
               'Cancel',
               style: TextStyle(

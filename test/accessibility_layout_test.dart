@@ -27,9 +27,9 @@ void main() {
             data: MediaQuery.of(context).copyWith(
               textScaler: const TextScaler.linear(2),
             ),
-            child: Scaffold(
-              body: const SettingsView(bottomInset: 120),
-              bottomNavigationBar: const AppBottomBar(
+            child: const Scaffold(
+              body: SettingsView(bottomInset: 120),
+              bottomNavigationBar: AppBottomBar(
                 selected: AppTab.settings,
                 onSelect: _ignoreTab,
                 bottomGap: 0,

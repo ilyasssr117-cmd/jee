@@ -159,6 +159,49 @@ void main() {
     scraper.close();
   });
 
+  test('model profile reads its lazy thumbnail from the model directory', () async {
+    final requested = <String>[];
+    final client = MockClient((request) async {
+      requested.add(request.url.path);
+      if (request.url.path == '/models/playwithanny/videos/') {
+        return http.Response(_person().replaceAll('%CARDS%', ''), 200);
+      }
+      if (request.url.path == '/models/') {
+        return http.Response('''
+          <div class="item thumb thumb--models">
+            <a href="https://x.example.test/models/playwithanny/"
+               title="Playwithanny">
+              <div class="img-holder">
+                <img class="album lazyload"
+                  src="data:image/gif;base64,AAAA"
+                  data-src="https://storage4.example.test/contents/albums/preview/576x760/2000/2114/preview.jpg"
+                  data-webp="https://storage4.example.test/contents/albums/preview/576x760/2000/2114/preview.jpg"
+                  alt="Playwithanny" width="288" height="380" />
+              </div>
+            </a>
+          </div>''', 200);
+      }
+      return http.Response('not found', 404);
+    });
+    final scraper = _scraper(client);
+    const model = ModelRef(
+      name: 'Playwithanny',
+      url: 'https://x.example.test/models/playwithanny/',
+    );
+
+    final profile = await scraper.modelProfile(model);
+
+    expect(
+      profile.imageUrl,
+      'https://storage4.example.test/contents/albums/preview/576x760/2000/2114/preview.jpg',
+    );
+    expect(requested, <String>[
+      '/models/playwithanny/videos/',
+      '/models/',
+    ]);
+    scraper.close();
+  });
+
   test('later pages use /videos/2/ and past the last page is empty', () async {
     final requested = <String>[];
     final client = MockClient((request) async {

@@ -157,6 +157,12 @@ class Scraper {
     maxEntries: 4,
   );
 
+  final TtlCache<Map<String, String>> _modelDirectoryImages =
+      TtlCache<Map<String, String>>(
+    ttl: const Duration(minutes: 30),
+    maxEntries: 1,
+  );
+
   Future<String> _getDetailPage(Uri uri, {bool fresh = false}) =>
       _detailPages.fetch(uri.toString(), () => _get(uri), force: fresh);
 
@@ -813,7 +819,40 @@ class Scraper {
 
   Future<ModelProfile> modelProfile(ModelRef model) async {
     final result = await modelPage(model);
-    return result.profile ?? ModelProfile(name: model.name);
+    final profile = result.profile ?? ModelProfile(name: model.name);
+    if (profile.imageUrl != null) return profile;
+
+    // Model video pages can omit portraits that are available as lazy-loaded
+    // .thumb--models images in the directory. Cache one directory response
+    // instead of issuing a separate request for every model row.
+    try {
+      final images = await _modelDirectoryImages.fetch(
+        'models-directory',
+        () async {
+          final uri = config.baseUri.resolve('models/');
+          final directory = html.parse(await _get(uri));
+          final result = <String, String>{};
+          for (final card in directory.querySelectorAll('.thumb--models')) {
+            final anchor = card.querySelector('a[href]');
+            final target = _resolveHttp(anchor?.attributes['href'], uri);
+            final modelUrl = target == null ? null : _modelBase(target);
+            if (target == null || modelUrl == null) continue;
+            final image = _absoluteUrl(_albumImageSource(card), target);
+            if (image != null) result[modelUrl.toString()] = image;
+          }
+          return result;
+        },
+      );
+      final wanted = _modelBase(Uri.parse(model.url));
+      if (wanted == null) return profile;
+      final image = images[wanted.toString()];
+      if (image != null) {
+        return ModelProfile(name: profile.name, imageUrl: image);
+      }
+    } on ScraperException {
+      // Keep profile loading usable when the optional directory lookup fails.
+    }
+    return profile;
   }
 
   Future<PeopleSearchResult> searchPeople(String query) async {

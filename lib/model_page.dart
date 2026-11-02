@@ -36,7 +36,6 @@ enum _Mode { videos, photos }
 
 class _ModelPageState extends State<ModelPage> {
   static const int _maxPages = 300;
-  static const int _maxAlbumPages = 60;
 
   _Mode _mode = _Mode.videos;
 
@@ -44,6 +43,7 @@ class _ModelPageState extends State<ModelPage> {
 
   final List<AlbumRef> _albums = <AlbumRef>[];
   final Set<String> _albumSeen = <String>{};
+  final Map<String, int> _albumIndexById = <String, int>{};
   int _albumNext = 1;
   bool _albumsLoading = true;
   bool _albumsRequestActive = false;
@@ -87,10 +87,7 @@ class _ModelPageState extends State<ModelPage> {
   }
 
   Future<void> _loadAlbums() async {
-    if (!mounted ||
-        _albumsRequestActive ||
-        _albumsFinishedLoading ||
-        _albumNext > _maxAlbumPages) {
+    if (!mounted || _albumsRequestActive || _albumsFinishedLoading) {
       return;
     }
     final run = ++_albumRun;
@@ -108,7 +105,10 @@ class _ModelPageState extends State<ModelPage> {
     if (cached != null && cached.isNotEmpty && mounted && run == _albumRun) {
       setState(() {
         for (final album in cached) {
-          if (_albumSeen.add(album.id)) _albums.add(album);
+          if (_albumSeen.add(album.id)) {
+            _albumIndexById[album.id] = _albums.length;
+            _albums.add(album);
+          }
         }
         _albumsError = null;
         _albumsLoading = true;
@@ -126,14 +126,19 @@ class _ModelPageState extends State<ModelPage> {
       var added = 0;
       for (final album in result) {
         if (_albumSeen.add(album.id)) {
+          _albumIndexById[album.id] = _albums.length;
           _albums.add(album);
           added++;
+        } else {
+          final index = _albumIndexById[album.id];
+          if (index != null) {
+            // Offline album metadata intentionally omits temporary image URLs.
+            // Refresh cached rows in place when live data supplies the cover.
+            _albums[index] = _albums[index].refreshedBy(album);
+          }
         }
       }
-      final finished =
-          result.isEmpty ||
-          (added == 0 && cached == null) ||
-          page >= _maxAlbumPages;
+      final finished = result.isEmpty || (added == 0 && cached == null);
       setState(() {
         _albumNext = page + 1;
         _albumsLoading = false;

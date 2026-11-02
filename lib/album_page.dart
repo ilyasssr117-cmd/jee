@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,22 +17,24 @@ import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/state_views.dart';
 
-class AlbumLoader extends ChangeNotifier {
-  AlbumLoader(this.album);
+typedef AlbumPhotoFetcher = Future<List<AlbumPhoto>> Function(
+  AlbumRef album, {
+  required int chunk,
+});
 
-  static const int _maxChunks = 120;
-  static const int _maxPhotos = 1200;
+class AlbumLoader extends ChangeNotifier {
+  AlbumLoader(this.album, {AlbumPhotoFetcher? fetchPage})
+    : _fetchPage = fetchPage ?? _fetchAlbumPage;
 
   final AlbumRef album;
+  final AlbumPhotoFetcher _fetchPage;
   final List<AlbumPhoto> photos = <AlbumPhoto>[];
   final Set<String> _seen = <String>{};
   bool loading = false;
   bool finished = false;
-  bool limitReached = false;
   Object? error;
 
   int _next = 0;
-  int _stale = 0;
   int _run = 0;
   bool _disposed = false;
   Future<void>? _loadFuture;
@@ -76,29 +79,18 @@ class AlbumLoader extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final chunk = await videoRepository.getAlbumPhotos(album, chunk: _next);
+      final chunk = await _fetchPage(album, chunk: _next);
       if (_disposed || run != _run) return;
 
-      var added = 0;
       for (final photo in chunk) {
-        if (photos.length >= _maxPhotos) {
-          limitReached = true;
-          break;
-        }
         if (_seen.add(photo.id)) {
           photos.add(photo);
-          added++;
         }
       }
       _next++;
-      _stale = added == 0 ? _stale + 1 : 0;
-      if (chunk.isEmpty ||
-          _stale >= 3 ||
-          limitReached ||
-          photos.length >= _maxPhotos ||
-          _next > _maxChunks) {
-        finished = true;
-      }
+      // Duplicate-only pages can still precede new images. The empty server
+      // page is the end-of-album signal.
+      if (chunk.isEmpty) finished = true;
     } catch (e) {
       if (_disposed || run != _run) return;
       error = e;
@@ -110,11 +102,15 @@ class AlbumLoader extends ChangeNotifier {
     }
   }
 
+  static Future<List<AlbumPhoto>> _fetchAlbumPage(
+    AlbumRef album, {
+    int chunk = 0,
+  }) => videoRepository.getAlbumPhotos(album, chunk: chunk);
+
   String get countLabel {
     final n = photos.length;
     final base = '$n photo${n == 1 ? '' : 's'}';
     if (loading) return '$base · loading…';
-    if (limitReached) return '$base · display limit reached';
     return base;
   }
 
@@ -680,7 +676,7 @@ class PhotoGridSliver extends StatelessWidget {
                   final photo = photos[index];
                   return _PhotoTile(
                     key: ValueKey<String>(photo.id),
-                    image: NetworkImage(
+                    image: CachedNetworkImageProvider(
                       photo.thumbUrl,
                       headers: loader.imageHeaders,
                     ),
@@ -752,7 +748,10 @@ class PhotoGridSliver extends StatelessWidget {
           for (final p in loader.photos)
             ViewerItem(
               id: p.id,
-              thumb: NetworkImage(p.thumbUrl, headers: headers),
+              thumb: CachedNetworkImageProvider(
+                p.thumbUrl,
+                headers: headers,
+              ),
               full: NetworkImage(p.fullUrl, headers: headers),
               remote: p,
             ),
@@ -790,15 +789,7 @@ class AlbumCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final thumb = album.thumbnailUrl;
-    final placeholder = Container(
-      color: AppColors.surfaceHigh,
-      alignment: Alignment.center,
-      child: Icon(
-        Icons.photo_library_outlined,
-        color: AppColors.textTertiary,
-        size: 32,
-      ),
-    );
+    final placeholder = ColoredBox(color: AppColors.surfaceHigh);
     return Pressable(
       semanticLabel: 'Album ${album.title}',
       onTap: onTap,
@@ -810,15 +801,24 @@ class AlbumCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(Radii.card),
               child: SizedBox.expand(
                 child: thumb == null
-                    ? placeholder
-                    : Image.network(
-                        thumb,
+                    ? Center(
+                        child: Icon(
+                          Icons.photo_library_outlined,
+                          color: AppColors.textTertiary,
+                          size: 32,
+                        ),
+                      )
+                    : Image(
+                        image: ResizeImage(
+                          CachedNetworkImageProvider(
+                            thumb,
+                            headers: imageHeadersFor(album.url),
+                          ),
+                          width: (160 * dpr).round().clamp(128, 960).toInt(),
+                        ),
                         fit: BoxFit.cover,
-                        headers: imageHeadersFor(album.url),
-                        cacheWidth: (200 * dpr).round(),
+                        gaplessPlayback: true,
                         errorBuilder: (context, error, stack) => placeholder,
-                        loadingBuilder: (context, child, progress) =>
-                            progress == null ? child : placeholder,
                       ),
               ),
             ),

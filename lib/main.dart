@@ -77,10 +77,11 @@ Future<void> _bootstrap() async {
   };
 
   final imageCache = PaintingBinding.instance.imageCache;
-  // Keep the decoded-image cache bounded for older iPhones. Large image
-  // caches compete with AVPlayer's video buffers and can cause long FPS drops.
+  // Keep enough decoded, size-limited thumbnails for an album/video page to
+  // survive ordinary scrolling and route changes without refetching them.
+  // The cache remains bounded to avoid unbounded image memory growth.
   imageCache.maximumSize = 96;
-  imageCache.maximumSizeBytes = 32 << 20;
+  imageCache.maximumSizeBytes = 64 << 20;
 
   await applyBrowseOrientation();
 

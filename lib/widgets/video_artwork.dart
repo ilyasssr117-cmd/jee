@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -67,9 +68,9 @@ class VideoArtwork extends StatelessWidget {
                 fit: fit,
                 cacheWidth: constraints.maxWidth.isFinite
                     ? (constraints.maxWidth * dpr)
-                          .round()
-                          .clamp(128, 1280)
-                          .toInt()
+                        .round()
+                        .clamp(128, 1280)
+                        .toInt()
                     : null,
                 gaplessPlayback: true,
                 excludeFromSemantics: true,
@@ -82,8 +83,7 @@ class VideoArtwork extends StatelessWidget {
 
         final url = video.thumbnailUrl?.trim() ?? '';
         final uri = Uri.tryParse(url);
-        final valid =
-            uri != null &&
+        final valid = uri != null &&
             (uri.scheme == 'http' || uri.scheme == 'https') &&
             uri.host.isNotEmpty &&
             uri.userInfo.isEmpty;
@@ -96,6 +96,16 @@ class VideoArtwork extends StatelessWidget {
           cacheWidth = (((px + 63) ~/ 64) * 64).clamp(128, 1280).toInt();
         }
 
+        final provider = CachedNetworkImageProvider(
+          url,
+          headers: _headersFor(video),
+        );
+        final ImageProvider<Object> imageProvider = ResizeImage.resizeIfNeeded(
+          cacheWidth,
+          null,
+          provider,
+        );
+
         return Stack(
           fit: StackFit.expand,
           children: [
@@ -104,23 +114,12 @@ class VideoArtwork extends StatelessWidget {
                   ? Colors.transparent
                   : AppColors.surfaceHigh,
             ),
-            Image.network(
-              url,
+            Image(
+              image: imageProvider,
               fit: fit,
-              cacheWidth: cacheWidth,
-              headers: _headersFor(video),
               gaplessPlayback: true,
               filterQuality: FilterQuality.medium,
               excludeFromSemantics: true,
-              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                if (wasSynchronouslyLoaded) return child;
-                return AnimatedOpacity(
-                  opacity: frame == null ? 0 : 1,
-                  duration: Motion.fade,
-                  curve: Curves.easeOut,
-                  child: child,
-                );
-              },
               errorBuilder: (context, error, stackTrace) =>
                   _Placeholder(video: video, showLabel: showLabel),
             ),

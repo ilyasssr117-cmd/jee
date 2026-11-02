@@ -243,6 +243,28 @@ void main() {
     scraper.close();
   });
 
+  test('album covers read lazy image attributes and the largest srcset item', () async {
+    final client = MockClient(
+      (_) async => http.Response('''
+        <div class="thumb--albums"><a href="/albums/1/first/" title="First">
+          <img src="data:image/gif;base64,AAAA" data-lazy-src="//cdn.test/first.jpg">
+        </a></div>
+        <div class="thumb--albums"><a href="/albums/2/second/" title="Second">
+          <img srcset="/small.jpg 320w, /large.jpg 960w" src="/tiny.jpg">
+        </a></div>
+      ''', 200),
+    );
+    final scraper = _scraper(client);
+
+    final albums = await scraper.modelAlbums(
+      const ModelRef(name: 'Model', url: 'https://x.example.test/models/m/'),
+    );
+
+    expect(albums[0].thumbnailUrl, 'https://cdn.test/first.jpg');
+    expect(albums[1].thumbnailUrl, 'https://x.example.test/large.jpg');
+    scraper.close();
+  });
+
   test(
     'site-wide albums come from /albums/ and later pages from /albums/N/',
     () async {

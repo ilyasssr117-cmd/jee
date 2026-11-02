@@ -21,6 +21,7 @@ dependencies:
   media_kit_libs_windows_video: any
   shared_preferences: ^2.5.3
   background_downloader: ^9.2.0
+  cached_network_image: 3.4.1
 
 dependency_overrides:
   video_player_avfoundation: 2.8.6

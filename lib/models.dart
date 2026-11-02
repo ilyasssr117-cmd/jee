@@ -131,6 +131,17 @@ class AlbumRef {
 
   final String? thumbnailUrl;
 
+  /// Keeps cached album rows while upgrading metadata from a live response.
+  /// Offline album pages omit temporary image URLs, so a later network page
+  /// must be allowed to fill the thumbnail for an already-seen album.
+  AlbumRef refreshedBy(AlbumRef fresh) => AlbumRef(
+        id: id,
+        title: fresh.title.isNotEmpty ? fresh.title : title,
+        url: fresh.url,
+        thumbnailUrl: fresh.thumbnailUrl ?? thumbnailUrl,
+        modelName: fresh.modelName ?? modelName,
+      );
+
   @override
   bool operator ==(Object other) => other is AlbumRef && other.id == id;
 

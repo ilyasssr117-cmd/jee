@@ -463,12 +463,69 @@ class Scraper {
 
   String? _imageSource(dom.Element? image) {
     if (image == null) return null;
-    const names = ['data-src', 'data-original', 'data-webp', 'src'];
+    const names = <String>[
+      'data-src',
+      'data-lazy-src',
+      'data-original-src',
+      'data-original',
+      'data-webp',
+      'data-srcset',
+      'srcset',
+      'src',
+    ];
     for (final name in names) {
       final value = image.attributes[name]?.trim();
-      if (value != null && value.isNotEmpty && !value.startsWith('data:')) {
-        return value;
+      if (value == null || value.isEmpty || value.startsWith('data:')) continue;
+      if (name.endsWith('srcset')) return _bestSrcsetUrl(value);
+      return value;
+    }
+    return null;
+  }
+
+  String? _bestSrcsetUrl(String srcset) {
+    String? best;
+    var bestWidth = -1;
+    for (final candidate in srcset.split(',')) {
+      final parts = candidate.trim().split(RegExp(r'\s+'));
+      if (parts.isEmpty || parts.first.isEmpty || parts.first.startsWith('data:')) {
+        continue;
       }
+      final descriptor = parts.length > 1 ? parts.last : '';
+      final width = int.tryParse(descriptor.replaceFirst(RegExp(r'w$'), ''));
+      final score = width ?? (descriptor.endsWith('x')
+          ? ((double.tryParse(descriptor.substring(0, descriptor.length - 1)) ?? 0) * 1000).round()
+          : 0);
+      if (best == null || score > bestWidth) {
+        best = parts.first;
+        bestWidth = score;
+      }
+    }
+    return best;
+  }
+
+  String? _albumImageSource(dom.Element card) {
+    final image = _imageSource(card.querySelector('img'));
+    if (image != null) return image;
+    final source = card.querySelector('picture source[srcset]');
+    final srcset = source?.attributes['data-srcset'] ??
+        source?.attributes['srcset'];
+    if (srcset != null) {
+      final candidate = _bestSrcsetUrl(srcset);
+      if (candidate != null) return candidate;
+    }
+    for (final element in <dom.Element?>[
+      card,
+      card.querySelector('.img-holder'),
+      card.querySelector('[style*="background"]'),
+    ]) {
+      final style = element?.attributes['style'];
+      if (style == null) continue;
+      final match = RegExp(
+        r'''background(?:-image)?\s*:[^;]*?url\((?:["']?)(.*?)(?:["']?)\)''',
+        caseSensitive: false,
+      ).firstMatch(style);
+      final value = match?.group(1)?.trim();
+      if (value != null && value.isNotEmpty) return value;
     }
     return null;
   }
@@ -548,7 +605,7 @@ class Scraper {
           id: id,
           title: title,
           url: target.toString(),
-          thumbnailUrl: _absoluteUrl(_imageSource(image), uri),
+          thumbnailUrl: _absoluteUrl(_albumImageSource(card), uri),
           modelName: modelName,
         ),
       );

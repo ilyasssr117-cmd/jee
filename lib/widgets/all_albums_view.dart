@@ -21,15 +21,12 @@ class AllAlbumsView extends StatefulWidget {
 }
 
 class _AllAlbumsViewState extends State<AllAlbumsView> {
-  static const int _maxEmptyPages = 2;
-  static const int _maxPages = 60;
-
   final ScrollController _scroll = ScrollController();
   final List<AlbumRef> _albums = <AlbumRef>[];
   final Set<String> _seen = <String>{};
+  final Map<String, int> _indexById = <String, int>{};
 
   int _page = 1;
-  int _emptyPages = 0;
   int _generation = 0;
   bool _loading = false;
   bool _hasMore = true;
@@ -67,8 +64,8 @@ class _AllAlbumsViewState extends State<AllAlbumsView> {
       if (reset) {
         _albums.clear();
         _seen.clear();
+        _indexById.clear();
         _page = 1;
-        _emptyPages = 0;
         _hasMore = true;
       }
     });
@@ -86,6 +83,9 @@ class _AllAlbumsViewState extends State<AllAlbumsView> {
       ];
       if (cachedFresh.isNotEmpty) {
         setState(() {
+          for (final album in cachedFresh) {
+            _indexById[album.id] = _albums.length;
+          }
           _albums.addAll(cachedFresh);
           _loading = true;
           _error = null;
@@ -101,19 +101,21 @@ class _AllAlbumsViewState extends State<AllAlbumsView> {
       if (!mounted || generation != _generation) return;
       OfflineAlbumCache.write(cacheKey, result);
 
-      final fresh = <AlbumRef>[
-        for (final album in result)
-          if (_seen.add(album.id)) album,
-      ];
       setState(() {
-        _albums.addAll(fresh);
+        for (final album in result) {
+          final index = _indexById[album.id];
+          if (index == null) {
+            if (!_seen.add(album.id)) continue;
+            _indexById[album.id] = _albums.length;
+            _albums.add(album);
+          } else {
+            // Offline metadata omits thumbnail URLs; upgrade those entries
+            // when the matching live page arrives.
+            _albums[index] = _albums[index].refreshedBy(album);
+          }
+        }
         _page = page + 1;
-        final emptyPage = result.isEmpty || (fresh.isEmpty && cached == null);
-        _emptyPages = emptyPage ? _emptyPages + 1 : 0;
-        _hasMore =
-            result.isNotEmpty &&
-            _emptyPages < _maxEmptyPages &&
-            page < _maxPages;
+        _hasMore = result.isNotEmpty;
         _loading = false;
       });
 

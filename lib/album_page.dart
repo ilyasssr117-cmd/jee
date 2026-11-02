@@ -11,6 +11,7 @@ import 'models.dart';
 import 'native_bridge.dart';
 import 'photo_saver.dart';
 import 'photo_store.dart';
+import 'request_cache.dart';
 import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
@@ -125,6 +126,12 @@ class AlbumLoader extends ChangeNotifier {
     RegExp(r'\B(?=(\d{3})+(?!\d))'),
     (_) => ',',
   );
+
+final TtlCache<String> _albumFirstPhotoThumbs = TtlCache<String>(
+  ttl: const Duration(hours: 12),
+  maxEntries: 120,
+  cacheable: (url) => url.isNotEmpty,
+);
 
   @override
   void dispose() {
@@ -786,7 +793,7 @@ class PhotoGridSliver extends StatelessWidget {
       );
 }
 
-class AlbumCard extends StatelessWidget {
+class AlbumCard extends StatefulWidget {
   const AlbumCard({
     super.key,
     required this.album,
@@ -799,13 +806,53 @@ class AlbumCard extends StatelessWidget {
   final String? subtitle;
 
   @override
+  State<AlbumCard> createState() => _AlbumCardState();
+}
+
+class _AlbumCardState extends State<AlbumCard> {
+  String? _firstPhotoThumb;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadFirstPhotoThumb());
+  }
+
+  @override
+  void didUpdateWidget(covariant AlbumCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.album.id != widget.album.id) {
+      _firstPhotoThumb = null;
+      unawaited(_loadFirstPhotoThumb());
+    }
+  }
+
+  Future<void> _loadFirstPhotoThumb() async {
+    try {
+      final album = widget.album;
+      final thumb = await _albumFirstPhotoThumbs.fetch(album.url, () async {
+        final page = await videoRepository.getAlbumPhotosPage(album);
+        for (final photo in page.photos) {
+          if (photo.thumbUrl.isNotEmpty) return photo.thumbUrl;
+        }
+        return '';
+      });
+      if (!mounted || thumb.isEmpty) return;
+      setState(() => _firstPhotoThumb = thumb);
+    } catch (_) {
+      // Keep the source cover or placeholder if the album page is unavailable.
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final thumb = album.thumbnailUrl;
+    final album = widget.album;
+    final thumb = _firstPhotoThumb ?? album.thumbnailUrl;
     final placeholder = ColoredBox(color: AppColors.surfaceHigh);
     return Pressable(
       semanticLabel: 'Album ${album.title}',
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -843,9 +890,9 @@ class AlbumCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: AppText.cardTitle,
           ),
-          if (subtitle != null)
+          if (widget.subtitle != null)
             Text(
-              subtitle!,
+              widget.subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppText.caption,

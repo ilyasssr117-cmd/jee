@@ -20,6 +20,7 @@ import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/expandable_text.dart';
+import 'widgets/glass.dart';
 import 'widgets/model_avatar.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_artwork.dart';
@@ -485,7 +486,14 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                     ),
                   ],
                   const SizedBox(height: Gaps.md),
-                  _buildHeaderActions(resume),
+                  GlassSurface(
+                    blur: false,
+                    shadow: false,
+                    borderRadius: 24,
+                    tint: const Color(0x40101428),
+                    padding: const EdgeInsets.all(Gaps.sm),
+                    child: _buildHeaderActions(resume),
+                  ),
                   if (_playError != null) ...[
                     const SizedBox(height: Gaps.sm),
                     Row(
@@ -560,7 +568,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           appButtonRequiredWidth(context, label: 'Favorited'),
           appButtonRequiredWidth(context, label: 'Download'),
         );
-        final compact = actionWidth < requiredLabelWidth;
+        // Labels scale down to fit (FitLabel) instead of wrapping or vanishing;
+        // only fall back to icon-only when there is truly no room.
+        final compact = actionWidth < requiredLabelWidth * 0.6;
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -659,11 +669,11 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                   ),
                   if (!compact) ...[
                     const SizedBox(width: 6),
-                    Text(
-                      'Share',
-                      maxLines: 1,
-                      softWrap: false,
-                      style: AppText.label.copyWith(color: Colors.white),
+                    Flexible(
+                      child: FitLabel(
+                        'Share',
+                        style: AppText.label.copyWith(color: Colors.white),
+                      ),
                     ),
                   ],
                 ],

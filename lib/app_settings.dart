@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'local_store.dart';
 import 'touch.dart';
+import 'widgets/glass.dart';
 
 enum AppThemeMode { system, dark, light }
 
@@ -14,16 +15,19 @@ class AppSettings extends ChangeNotifier {
   static const String _hapticsKey = 'settings_haptics_v1';
   static const String _autoplayKey = 'settings_autoplay_v1';
   static const String _soundKey = 'settings_preview_sound_v1';
+  static const String _glassKey = 'settings_liquid_glass_v1';
 
   AppThemeMode _themeMode = AppThemeMode.system;
   bool _haptics = true;
   bool _autoplayNext = true;
   bool _previewSound = true;
+  bool _liquidGlass = true;
 
   AppThemeMode get themeMode => _themeMode;
   bool get haptics => _haptics;
   bool get autoplayNext => _autoplayNext;
   bool get previewSound => _previewSound;
+  bool get liquidGlass => _liquidGlass;
 
   void load() {
     final saved = LocalStore.readString(_themeKey);
@@ -34,7 +38,9 @@ class AppSettings extends ChangeNotifier {
     _haptics = LocalStore.readBool(_hapticsKey, fallback: true);
     _autoplayNext = LocalStore.readBool(_autoplayKey, fallback: true);
     _previewSound = LocalStore.readBool(_soundKey, fallback: true);
+    _liquidGlass = LocalStore.readBool(_glassKey, fallback: true);
     Haptics.enabled = _haptics;
+    Glass.enabled = _liquidGlass;
   }
 
   void setThemeMode(AppThemeMode mode) {
@@ -56,6 +62,14 @@ class AppSettings extends ChangeNotifier {
     if (_autoplayNext == value) return;
     _autoplayNext = value;
     LocalStore.writeBool(_autoplayKey, value);
+    notifyListeners();
+  }
+
+  void setLiquidGlass(bool value) {
+    if (_liquidGlass == value) return;
+    _liquidGlass = value;
+    Glass.enabled = value;
+    LocalStore.writeBool(_glassKey, value);
     notifyListeners();
   }
 

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +9,7 @@ import '../mini_player.dart';
 import '../native_bridge.dart';
 import '../playback_launcher.dart';
 import 'bottom_bar.dart';
+import 'glass.dart';
 
 class MiniPlayerOverlay extends StatelessWidget {
   const MiniPlayerOverlay({super.key});
@@ -46,38 +46,11 @@ class MiniPlayerOverlay extends StatelessWidget {
             key: ValueKey<String>('mini-${session.video.id}'),
             direction: DismissDirection.horizontal,
             onDismissed: (_) => unawaited(MiniPlayer.instance.close()),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(22),
-              child: BackdropFilter(
-                // One compact blur surface only; avoid stacking blur filters
-                // across every reel control on older iPhones.
-                filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                child: Container(
-                  height: 78,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: AppColors.palette.brightness == Brightness.dark
-                          ? const [Color(0xE52E3A70), Color(0xD21B2448)]
-                          : const [Color(0xF4FFFFFF), Color(0xE8EAEDFF)],
-                    ),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: Colors.white.withValues(
-                        alpha: AppColors.palette.brightness == Brightness.dark
-                            ? 0.24
-                            : 0.78,
-                      ),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.22),
-                        blurRadius: 24,
-                        offset: const Offset(0, 9),
-                      ),
-                    ],
-                  ),
+            child: SizedBox(
+              height: 78,
+              child: GlassSurface(
+                borderRadius: 22,
+                sigma: 22,
                   child: Stack(
                     children: [
                       Positioned.fill(
@@ -199,7 +172,6 @@ class MiniPlayerOverlay extends StatelessWidget {
                       ),
                     ],
                   ),
-                ),
               ),
             ),
           ),
@@ -227,7 +199,7 @@ class _MiniAction extends StatelessWidget {
     return IconButton(
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 38, height: 42),
+      constraints: const BoxConstraints.tightFor(width: 44, height: 44),
       padding: EdgeInsets.zero,
       onPressed: onPressed,
       icon: Icon(

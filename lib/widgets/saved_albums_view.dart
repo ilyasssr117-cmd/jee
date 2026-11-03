@@ -449,7 +449,10 @@ class _SavedAlbumPageState extends State<SavedAlbumPage> {
     final count = _selection.ids.length;
     return SelectionBarFrame(
       count: count,
+      total: album.photos.length,
       onSelectAll: () => _selection.selectAll(album.photos.map((p) => p.id)),
+      onClear: _selection.deselectAll,
+      onDone: _selection.clear,
       actions: [
         Expanded(
           child: AppButton(

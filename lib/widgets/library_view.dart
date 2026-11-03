@@ -79,7 +79,17 @@ class _LibraryViewState extends State<LibraryView> {
           ),
           child: Row(
             children: [
-              Expanded(child: Text('Library', style: AppText.headline)),
+              Expanded(
+                child: Text(
+                  'Library',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.display.copyWith(
+                    fontSize: 34,
+                    letterSpacing: 0.37,
+                  ),
+                ),
+              ),
               if (_segment == LibrarySegment.history)
                 ListenableBuilder(
                   listenable: HistoryStore.instance,

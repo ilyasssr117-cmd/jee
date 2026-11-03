@@ -3,7 +3,6 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/cupertino.dart'
@@ -33,6 +32,7 @@ import 'touch.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/expandable_text.dart';
+import 'widgets/glass.dart';
 
 const String _kUserAgent = kReelUserAgent;
 
@@ -1184,23 +1184,15 @@ class _ReelsTopBar extends StatelessWidget {
               ),
             ),
           ),
-          Pressable(
-            semanticLabel: clear ? 'Show controls' : 'Hide controls',
+          RoundIconButton(
+            icon: clear ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
+            iconSize: 20,
+            size: 36,
+            tapSize: kMinTapSize,
+            background: const Color(0x38000000),
             haptic: Haptic.selection,
-            pressedScale: 0.85,
+            label: clear ? 'Show controls' : 'Hide controls',
             onTap: onToggleClear,
-            child: SizedBox(
-              width: 44,
-              height: 44,
-              child: Icon(
-                clear ? CupertinoIcons.eye_slash : CupertinoIcons.eye,
-                color: Colors.white,
-                size: 22,
-                shadows: const [
-                  Shadow(blurRadius: 12, color: Color(0x66000000))
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -2183,7 +2175,7 @@ class _StallSpinnerState extends State<_StallSpinner> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onValue);
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) => _tick());
+    _onValue();
   }
 
   @override
@@ -2194,10 +2186,23 @@ class _StallSpinnerState extends State<_StallSpinner> {
   }
 
   void _onValue() {
-    final pos = widget.controller.value.position;
+    final value = widget.controller.value;
+    final pos = value.position;
     if (pos != _lastPos) {
       _lastPos = pos;
       _lastMove = DateTime.now();
+      if (_show && mounted) setState(() => _show = false);
+    }
+    // Poll only while buffering. An always-on 500 ms timer keeps the CPU
+    // waking up for every visible reel even when playback is perfectly fine.
+    if (value.isBuffering) {
+      _timer ??= Timer.periodic(
+        const Duration(milliseconds: 500),
+        (_) => _tick(),
+      );
+    } else if (_timer != null) {
+      _timer!.cancel();
+      _timer = null;
       if (_show && mounted) setState(() => _show = false);
     }
   }
@@ -2593,65 +2598,52 @@ class _ReelErrorPanel extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: Gaps.xl),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 340),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(Radii.large),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xD91B1D25),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.12),
-                  ),
-                  borderRadius: BorderRadius.circular(Radii.large),
+          child: GlassSurface(
+            borderRadius: Radii.large,
+            tint: const Color(0x8C101218),
+            padding: const EdgeInsets.all(Gaps.md),
+            child: Row(
+              children: [
+                const Icon(
+                  CupertinoIcons.exclamationmark_circle,
+                  color: Colors.white70,
+                  size: 22,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(Gaps.md),
-                  child: Row(
+                const SizedBox(width: Gaps.md),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        CupertinoIcons.exclamationmark_circle,
-                        color: Colors.white70,
-                        size: 22,
-                      ),
-                      const SizedBox(width: Gaps.md),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Unable to load video',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            const Text(
-                              'Check your connection and try again.',
-                              style: TextStyle(
-                                color: Color(0xFFD1D3D9),
-                                fontSize: 12,
-                                height: 1.3,
-                              ),
-                            ),
-                            const SizedBox(height: Gaps.sm),
-                            AppButton(
-                              label: 'Retry',
-                              icon: CupertinoIcons.refresh,
-                              style: AppButtonStyle.secondary,
-                              onDark: true,
-                              onPressed: onRetry,
-                            ),
-                          ],
+                      const Text(
+                        'Unable to load video',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                         ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'Check your connection and try again.',
+                        style: TextStyle(
+                          color: Color(0xFFD1D3D9),
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: Gaps.sm),
+                      AppButton(
+                        label: 'Retry',
+                        icon: CupertinoIcons.refresh,
+                        style: AppButtonStyle.secondary,
+                        onDark: true,
+                        onPressed: onRetry,
                       ),
                     ],
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),

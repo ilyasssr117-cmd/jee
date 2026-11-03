@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/fade_in_thumbnail.dart';
+import 'widgets/glass.dart';
 import 'widgets/state_views.dart';
 
 typedef AlbumPhotoFetcher = Future<AlbumPhotosPage> Function(
@@ -162,6 +164,12 @@ class PhotoSelection extends ChangeNotifier {
     ids
       ..clear()
       ..addAll(all);
+    notifyListeners();
+  }
+
+  /// Keeps selection mode on but unselects everything.
+  void deselectAll() {
+    ids.clear();
     notifyListeners();
   }
 
@@ -390,7 +398,7 @@ class _AlbumPageState extends State<AlbumPage> {
                     padding: EdgeInsets.symmetric(horizontal: margin),
                   ),
                   SliverToBoxAdapter(
-                    child: SizedBox(height: Gaps.xl + context.safe.bottom + 72),
+                    child: SizedBox(height: Gaps.xl + context.safe.bottom + 150),
                   ),
                 ],
               ),
@@ -505,8 +513,11 @@ class PhotoSelectionBar extends StatelessWidget {
         final count = selection.ids.length;
         return SelectionBarFrame(
           count: count,
+          total: loader.photos.length,
           onSelectAll: () =>
               selection.selectAll(loader.photos.map((p) => p.id)),
+          onClear: selection.deselectAll,
+          onDone: selection.clear,
           actions: [
             Expanded(
               child: AppButton(
@@ -549,73 +560,146 @@ class SelectionBarFrame extends StatelessWidget {
     required this.count,
     required this.onSelectAll,
     required this.actions,
+    this.total,
+    this.onClear,
+    this.onDone,
   });
 
   final int count;
+
+  /// Number of photos that can be selected. Used to flip "Select all" into
+  /// "Deselect all" once everything is selected.
+  final int? total;
   final VoidCallback onSelectAll;
+
+  /// Unselects every photo but stays in selection mode.
+  final VoidCallback? onClear;
+
+  /// Leaves selection mode. Always reachable from the bar, so the user never
+  /// has to scroll back to the top just to cancel.
+  final VoidCallback? onDone;
 
   final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final allSelected = total != null && total! > 0 && count >= total!;
+    final canClear = onClear != null && count > 0;
+    final bottomInset = context.safe.bottom;
+    return Padding(
       padding: EdgeInsets.fromLTRB(
         context.hMargin,
-        Gaps.sm,
+        0,
         context.hMargin,
-        Gaps.md + context.safe.bottom,
+        math.max(bottomInset, Gaps.md),
       ),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceHigh,
-        border: Border(top: BorderSide(color: AppColors.outline)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  count == 0 ? 'Tap photos to select' : '$count selected',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.caption.copyWith(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
+      child: GlassSurface(
+        borderRadius: 28,
+        padding: const EdgeInsets.fromLTRB(Gaps.md, Gaps.sm, Gaps.md, Gaps.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                if (onDone != null)
+                  _BarTextButton(
+                    label: 'Done',
+                    semanticLabel: 'Exit selection mode',
+                    bold: true,
+                    onTap: onDone!,
                   ),
-                ),
-              ),
-              Pressable(
-                semanticLabel: 'Select all',
-                haptic: Haptic.selection,
-                onTap: onSelectAll,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 6,
-                    horizontal: 4,
-                  ),
+                Expanded(
                   child: Text(
-                    'Select all',
-                    style: AppText.caption.copyWith(
-                      color: AppColors.accent,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                    count == 0 ? 'Select items' : '$count selected',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: AppText.label.copyWith(
+                      fontSize: 15,
+                      color: AppColors.textPrimary,
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: Gaps.xs),
-          Row(
-            children: [
-              for (var i = 0; i < actions.length; i++) ...[
-                if (i > 0) const SizedBox(width: Gaps.sm),
-                actions[i],
+                if (canClear && !allSelected) ...[
+                  _BarTextButton(
+                    label: 'Clear',
+                    semanticLabel: 'Deselect all',
+                    onTap: onClear!,
+                  ),
+                ] else if (allSelected && onClear != null)
+                  _BarTextButton(
+                    label: 'Deselect all',
+                    semanticLabel: 'Deselect all',
+                    onTap: onClear!,
+                  )
+                else
+                  _BarTextButton(
+                    label: 'Select all',
+                    semanticLabel: 'Select all',
+                    onTap: onSelectAll,
+                  ),
               ],
-            ],
+            ),
+            if (canClear && !allSelected)
+              Align(
+                alignment: Alignment.centerRight,
+                child: _BarTextButton(
+                  label: 'Select all',
+                  semanticLabel: 'Select all',
+                  onTap: onSelectAll,
+                ),
+              ),
+            const SizedBox(height: Gaps.xs),
+            Row(
+              children: [
+                for (var i = 0; i < actions.length; i++) ...[
+                  if (i > 0) const SizedBox(width: Gaps.sm),
+                  actions[i],
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BarTextButton extends StatelessWidget {
+  const _BarTextButton({
+    required this.label,
+    required this.onTap,
+    required this.semanticLabel,
+    this.bold = false,
+  });
+
+  final String label;
+  final String semanticLabel;
+  final VoidCallback onTap;
+  final bool bold;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      semanticLabel: semanticLabel,
+      haptic: Haptic.selection,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: kMinTapSize),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Gaps.sm),
+          child: Center(
+            widthFactor: 1,
+            child: FitLabel(
+              label,
+              style: AppText.label.copyWith(
+                fontSize: 15,
+                color: AppColors.accentForeground,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -960,20 +1044,21 @@ class _PhotoTile extends StatelessWidget {
               Positioned(
                 top: 6,
                 right: 6,
-                child: Container(
-                  width: 24,
-                  height: 24,
+                child: AnimatedContainer(
+                  duration: Motion.quick,
+                  width: 26,
+                  height: 26,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: selected
-                        ? AppColors.accent
-                        : const Color(0x66000000),
+                        ? AppColors.accentStrong
+                        : const Color(0x55000000),
                     border: Border.all(color: Colors.white, width: 2),
                   ),
                   child: selected
                       ? const Icon(
                           Icons.check_rounded,
-                          size: 20,
+                          size: 18,
                           color: Colors.white,
                         )
                       : null,
@@ -1095,6 +1180,14 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
       showToast(context, 'Already saved in Albums.', aboveBar: false);
       return;
     }
+    if (store.jobFor(album.id) != null) {
+      showToast(
+        context,
+        'This album is already downloading. This photo will be included.',
+        aboveBar: false,
+      );
+      return;
+    }
     setState(() => _busy = true);
     final saved = await store.savePhotos(album, <AlbumPhoto>[
       remote,
@@ -1171,21 +1264,23 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                   child: Row(
                     children: [
                       RoundIconButton(
+                        glass: true,
                         icon: Icons.close_rounded,
                         iconSize: 20,
+                        tapSize: kMinTapSize,
                         label: 'Close',
                         onTap: () => Navigator.of(context).maybePop(),
                       ),
                       const Spacer(),
                       if (items.isNotEmpty)
-                        Container(
+                        GlassSurface(
+                          borderRadius: Radii.pill,
+                          sigma: 16,
+                          shadow: false,
+                          tint: const Color(0x38000000),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0x8C000000),
-                            borderRadius: BorderRadius.circular(Radii.pill),
                           ),
                           child: Text(
                             '${_index + 1} / ${items.length}'
@@ -1197,6 +1292,8 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                       if (current != null) ...[
                         if (canDownload || (isSaved && current.remote != null))
                           RoundIconButton(
+                            glass: true,
+                            tapSize: kMinTapSize,
                             icon: isSaved
                                 ? Icons.download_done_rounded
                                 : Icons.download_rounded,
@@ -1206,6 +1303,8 @@ class _PhotoViewerPageState extends State<PhotoViewerPage> {
                           ),
                         const SizedBox(width: Gaps.sm),
                         RoundIconButton(
+                          glass: true,
+                          tapSize: kMinTapSize,
                           icon: Icons.photo_library_outlined,
                           iconSize: 20,
                           label: 'Save to Photos',

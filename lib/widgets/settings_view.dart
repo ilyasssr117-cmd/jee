@@ -11,7 +11,9 @@ import '../preview_manager.dart';
 import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
+import 'app_button.dart' show FitLabel;
 import 'dialogs.dart';
+import 'large_title.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key, required this.bottomInset});
@@ -78,19 +80,19 @@ class _SettingsViewState extends State<SettingsView> {
         final downloads = DownloadStore.instance;
         final cacheBytes = PaintingBinding.instance.imageCache.currentSizeBytes;
 
-        return ListView(
-          padding: EdgeInsets.fromLTRB(
-            margin,
-            context.safe.top + Gaps.lg,
-            margin,
-            Gaps.xl + widget.bottomInset,
-          ),
-          children: [
-            Text(
-              'Settings',
-              style: AppText.display.copyWith(fontSize: 34),
-            ),
-            const SizedBox(height: Gaps.lg),
+        return CustomScrollView(
+          physics: nativeScrollPhysics(context, alwaysScrollable: true),
+          slivers: [
+            const LargeTitleSliver(title: 'Settings'),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                margin,
+                Gaps.md,
+                margin,
+                Gaps.xl + widget.bottomInset,
+              ),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate(<Widget>[
             _Group(
               title: 'Appearance',
               children: [
@@ -104,6 +106,16 @@ class _SettingsViewState extends State<SettingsView> {
                       (AppThemeMode.dark, 'Dark'),
                       (AppThemeMode.light, 'Light'),
                     ],
+                  ),
+                ),
+                _Row(
+                  icon: Icons.blur_on_rounded,
+                  color: AppColors.accentBlue,
+                  title: 'Liquid Glass',
+                  subtitle: 'Translucent bars and controls. Turn off to save battery',
+                  trailing: _Toggle(
+                    value: settings.liquidGlass,
+                    onChanged: settings.setLiquidGlass,
                   ),
                 ),
               ],
@@ -187,6 +199,9 @@ class _SettingsViewState extends State<SettingsView> {
                   onTap: _clearWatched,
                 ),
               ],
+            ),
+                ]),
+              ),
             ),
           ],
         );
@@ -391,10 +406,8 @@ class _Segmented<T extends Object> extends StatelessWidget {
             for (final (option, label) in options)
               option: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 7),
-                child: Text(
+                child: FitLabel(
                   label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: AppText.label.copyWith(
                     fontSize: 13,
                     color: option == value

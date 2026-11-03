@@ -1,0 +1,1428 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'app_theme.dart';
+import 'error_text.dart';
+import 'media_headers.dart';
+import 'models.dart';
+import 'native_bridge.dart';
+import 'photo_saver.dart';
+import 'photo_store.dart';
+import 'request_cache.dart';
+import 'touch.dart';
+import 'video_repository.dart';
+import 'widgets/app_button.dart';
+import 'widgets/dialogs.dart';
+import 'widgets/fade_in_thumbnail.dart';
+import 'widgets/state_views.dart';
+
+typedef AlbumPhotoFetcher = Future<AlbumPhotosPage> Function(
+  AlbumRef album, {
+  required int chunk,
+});
+
+final TtlCache<String> _albumFirstPhotoThumbs = TtlCache<String>(
+  ttl: const Duration(hours: 12),
+  maxEntries: 120,
+  cacheable: (url) => url.isNotEmpty,
+);
+
+class AlbumLoader extends ChangeNotifier {
+  AlbumLoader(this.album, {AlbumPhotoFetcher? fetchPage})
+    : _fetchPage = fetchPage ?? _fetchAlbumPage,
+      totalCount = album.totalCount;
+
+  final AlbumRef album;
+  final AlbumPhotoFetcher _fetchPage;
+  final List<AlbumPhoto> photos = <AlbumPhoto>[];
+  final Set<String> _seen = <String>{};
+  int? totalCount;
+  bool loading = false;
+  bool finished = false;
+  Object? error;
+
+  int _next = 0;
+  int _run = 0;
+  bool _disposed = false;
+  Future<void>? _loadFuture;
+
+  Map<String, String>? get imageHeaders => imageHeadersFor(album.url);
+
+  /// Fetches one chunk only. UI scrolling decides when another chunk is needed.
+  Future<void> load() {
+    if (_disposed || finished) return Future<void>.value();
+    final current = _loadFuture;
+    if (current != null) return current;
+
+    late final Future<void> future;
+    future = _loadChunk().whenComplete(() {
+      if (identical(_loadFuture, future)) _loadFuture = null;
+    });
+    _loadFuture = future;
+    return future;
+  }
+
+  /// Used only for explicit full-album actions such as Save All or Select All.
+  /// [shouldContinue] lets a screen stop waiting when the user cancels the
+  /// action; an already-running page request is allowed to finish safely.
+  Future<void> loadAll({bool Function()? shouldContinue}) async {
+    while (!_disposed && !finished && (shouldContinue?.call() ?? true)) {
+      final active = _loadFuture;
+      if (active != null) {
+        await active;
+      } else {
+        await load();
+      }
+      if (error != null || _disposed) return;
+      if (!finished && (shouldContinue?.call() ?? true)) {
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+    }
+  }
+
+  Future<void> _loadChunk() async {
+    if (_disposed || finished || loading) return;
+    final run = ++_run;
+    loading = true;
+    error = null;
+    notifyListeners();
+
+    try {
+      final page = await _fetchPage(album, chunk: _next);
+      if (_disposed || run != _run) return;
+
+      if (page.totalCount != null) totalCount = page.totalCount;
+      for (final photo in page.photos) {
+        if (_seen.add(photo.id)) {
+          photos.add(photo);
+        }
+      }
+      _next++;
+      // Duplicate-only pages can still precede new images. The empty server
+      // page is the end-of-album signal.
+      if (page.photos.isEmpty) {
+        finished = true;
+        totalCount ??= photos.length;
+      }
+    } catch (e) {
+      if (_disposed || run != _run) return;
+      error = e;
+    } finally {
+      if (!_disposed && run == _run) {
+        loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  static Future<AlbumPhotosPage> _fetchAlbumPage(
+    AlbumRef album, {
+    int chunk = 0,
+  }) => videoRepository.getAlbumPhotosPage(album, chunk: chunk);
+
+  String get countLabel {
+    final n = totalCount ?? photos.length;
+    final base = '${_groupCount(n)} photo${n == 1 ? '' : 's'}';
+    if (loading && totalCount == null) return '$base · loading…';
+    return base;
+  }
+
+  static String _groupCount(int count) => count.toString().replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (_) => ',',
+  );
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _run++;
+    super.dispose();
+  }
+}
+
+class PhotoSelection extends ChangeNotifier {
+  bool _active = false;
+  final Set<String> ids = <String>{};
+
+  bool get active => _active;
+
+  void start([String? firstId]) {
+    _active = true;
+    if (firstId != null) ids.add(firstId);
+    notifyListeners();
+  }
+
+  void toggle(String id) {
+    if (!ids.remove(id)) ids.add(id);
+    notifyListeners();
+  }
+
+  void selectAll(Iterable<String> all) {
+    ids
+      ..clear()
+      ..addAll(all);
+    notifyListeners();
+  }
+
+  void clear() {
+    _active = false;
+    ids.clear();
+    notifyListeners();
+  }
+}
+
+/// Loads every remaining page before selecting all photos.
+/// Returns false when loading fails or the user cancels the operation.
+Future<bool> selectAllAlbumPhotos(
+  AlbumLoader loader,
+  PhotoSelection selection, {
+  bool Function()? shouldContinue,
+}) async {
+  await loader.loadAll(shouldContinue: shouldContinue);
+  if ((shouldContinue?.call() ?? true) == false ||
+      loader.error != null ||
+      !loader.finished) {
+    return false;
+  }
+  selection.selectAll(loader.photos.map((photo) => photo.id));
+  return true;
+}
+
+Future<void> savePhotosToAlbums(
+  BuildContext context,
+  AlbumLoader loader, {
+  List<AlbumPhoto>? only,
+  String? modelName,
+}) async {
+  final store = PhotoStore.instance;
+  if (store.jobFor(loader.album.id) != null) {
+    showToast(context, 'Already saving this album.', aboveBar: false);
+    return;
+  }
+
+  if (only == null && !loader.finished) {
+    showToast(context, 'Preparing the whole album…', aboveBar: false);
+    await loader.loadAll();
+    if (!context.mounted) return;
+    if (loader.error != null) {
+      showToast(context, 'Couldn\u2019t load all the photos.', aboveBar: false);
+      return;
+    }
+  }
+
+  final photos = List<AlbumPhoto>.of(only ?? loader.photos);
+  final todo = photos.length - store.savedCount(loader.album.id, photos);
+  if (todo == 0) {
+    showToast(context, 'Already saved in Albums.', aboveBar: false);
+    return;
+  }
+  showToast(
+    context,
+    'Saving $todo photo${todo == 1 ? '' : 's'}\u2026',
+    aboveBar: false,
+  );
+
+  final saved = await store.savePhotos(
+    loader.album,
+    photos,
+    modelName: modelName,
+    headers: null,
+  );
+  if (!context.mounted) return;
+  showToast(
+    context,
+    saved == todo
+        ? 'Saved $saved photo${saved == 1 ? '' : 's'} to Albums.'
+        : 'Saved $saved of $todo photos.',
+    aboveBar: false,
+  );
+}
+
+Future<void> sendToPhotos(BuildContext context, List<String> paths) async {
+  if (paths.isEmpty) return;
+  if (paths.length > 1) {
+    showToast(
+      context,
+      'Saving ${paths.length} photos to Photos\u2026',
+      aboveBar: false,
+    );
+  }
+
+  final result = await PhotoSaver.saveToGallery(paths);
+  if (!context.mounted) return;
+
+  if (result.denied) {
+    showToast(
+      context,
+      'Allow access to Photos in Settings to save pictures.',
+      aboveBar: false,
+    );
+    return;
+  }
+  if (result.saved > 0) {
+    final partial = result.failed > 0 ? ' (${result.failed} failed)' : '';
+    showToast(
+      context,
+      result.saved == 1
+          ? 'Saved to Photos.'
+          : 'Saved ${result.saved} photos to Photos.$partial',
+      aboveBar: false,
+    );
+    return;
+  }
+
+  const limit = 150;
+  final batch = paths.length > limit ? paths.sublist(0, limit) : paths;
+  final ok = await NativeBridge.instance.shareFiles(batch);
+  if (!context.mounted) return;
+  if (!ok) {
+    showToast(context, 'Couldn\u2019t save to Photos.', aboveBar: false);
+  } else if (paths.length > limit) {
+    showToast(
+      context,
+      'Sent the first $limit photos. Use Select for the rest.',
+      aboveBar: false,
+    );
+  }
+}
+
+class AlbumPage extends StatefulWidget {
+  const AlbumPage({super.key, required this.album, this.modelName});
+
+  final AlbumRef album;
+  final String? modelName;
+
+  @override
+  State<AlbumPage> createState() => _AlbumPageState();
+}
+
+class _AlbumPageState extends State<AlbumPage> {
+  late final AlbumLoader _loader = AlbumLoader(widget.album);
+  final PhotoSelection _selection = PhotoSelection();
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _loader.addListener(_onLoaderChanged);
+    _loader.load();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients ||
+        _loader.loading ||
+        _loader.finished ||
+        _loader.error != null) {
+      return;
+    }
+    if (_scrollController.position.extentAfter < 700) {
+      unawaited(_loader.load());
+    }
+  }
+
+  void _onLoaderChanged() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _onScroll();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    _loader.removeListener(_onLoaderChanged);
+    _selection.dispose();
+    _loader.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final margin = context.hMargin;
+    final darkMode = AppColors.palette.brightness == Brightness.dark;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: darkMode ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      child: ListenableBuilder(
+        listenable: _selection,
+        builder: (context, child) => PopScope(
+          canPop: !_selection.active,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _selection.clear();
+          },
+          child: child!,
+        ),
+        child: Scaffold(
+          backgroundColor: AppColors.background,
+          body: Stack(
+            children: [
+              CustomScrollView(
+                controller: _scrollController,
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        margin,
+                        context.safe.top + Gaps.md,
+                        margin,
+                        Gaps.lg,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const PageBackButton(),
+                          const SizedBox(height: Gaps.lg),
+                          Text(
+                            widget.album.title,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.headline,
+                          ),
+                          const SizedBox(height: 4),
+                          ListenableBuilder(
+                            listenable: _loader,
+                            builder: (context, _) => Text(
+                              _loader.countLabel,
+                              style: AppText.body.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: Gaps.lg),
+                          AlbumToolbar(
+                            loader: _loader,
+                            selection: _selection,
+                            modelName: widget.modelName,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  PhotoGridSliver(
+                    loader: _loader,
+                    selection: _selection,
+                    modelName: widget.modelName,
+                    padding: EdgeInsets.symmetric(horizontal: margin),
+                  ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: Gaps.xl + context.safe.bottom + 72),
+                  ),
+                ],
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: PhotoSelectionBar(
+                  loader: _loader,
+                  selection: _selection,
+                  modelName: widget.modelName,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AlbumToolbar extends StatelessWidget {
+  const AlbumToolbar({
+    super.key,
+    required this.loader,
+    required this.selection,
+    this.modelName,
+  });
+
+  final AlbumLoader loader;
+  final PhotoSelection selection;
+  final String? modelName;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = PhotoStore.instance;
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[loader, selection, store]),
+      builder: (context, _) {
+        final job = store.jobFor(loader.album.id);
+        final photos = loader.photos;
+        final allSaved =
+            loader.finished &&
+            photos.isNotEmpty &&
+            store.savedCount(loader.album.id, photos) == photos.length;
+
+        final String downloadLabel;
+        final IconData downloadIcon;
+        final VoidCallback downloadAction;
+        if (job != null) {
+          downloadLabel = 'Saving ${job.done}/${job.total} \u00b7 Stop';
+          downloadIcon = Icons.close_rounded;
+          downloadAction = () => store.cancel(loader.album.id);
+        } else if (allSaved) {
+          downloadLabel = 'Saved in Albums';
+          downloadIcon = Icons.download_done_rounded;
+          downloadAction = () => showToast(
+            context,
+            'Find it in Library > Albums.',
+            aboveBar: false,
+          );
+        } else {
+          downloadLabel = 'Download all';
+          downloadIcon = Icons.download_rounded;
+          downloadAction = () =>
+              savePhotosToAlbums(context, loader, modelName: modelName);
+        }
+
+        return Wrap(
+          spacing: Gaps.sm,
+          runSpacing: Gaps.sm,
+          children: [
+            AppButton(
+              label: selection.active ? 'Cancel' : 'Select',
+              icon: selection.active
+                  ? Icons.close_rounded
+                  : Icons.check_circle_outline_rounded,
+              style: AppButtonStyle.secondary,
+              onPressed: () =>
+                  selection.active ? selection.clear() : selection.start(),
+            ),
+            AppButton(
+              label: downloadLabel,
+              icon: downloadIcon,
+              singleLine: true,
+              onPressed: downloadAction,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class PhotoSelectionBar extends StatefulWidget {
+  const PhotoSelectionBar({
+    super.key,
+    required this.loader,
+    required this.selection,
+    this.modelName,
+  });
+
+  final AlbumLoader loader;
+  final PhotoSelection selection;
+  final String? modelName;
+
+  @override
+  State<PhotoSelectionBar> createState() => _PhotoSelectionBarState();
+}
+
+class _PhotoSelectionBarState extends State<PhotoSelectionBar> {
+  bool _loadingAll = false;
+  int _selectAllRun = 0;
+
+  Future<void> _selectAll() async {
+    if (_loadingAll) return;
+    final run = ++_selectAllRun;
+    setState(() => _loadingAll = true);
+    try {
+      final completed = await selectAllAlbumPhotos(
+        widget.loader,
+        widget.selection,
+        shouldContinue: () => mounted && run == _selectAllRun,
+      );
+      if (!mounted || run != _selectAllRun) return;
+      if (!completed) {
+        showToast(
+          context,
+          'Couldn\u2019t load the whole album. Try again.',
+          aboveBar: false,
+        );
+      }
+    } finally {
+      if (mounted && run == _selectAllRun) {
+        setState(() => _loadingAll = false);
+      }
+    }
+  }
+
+  void _cancelSelection() {
+    // Invalidate an in-progress Select all operation so it cannot select
+    // photos after the user has cancelled from the sticky bottom bar.
+    _selectAllRun++;
+    setState(() => _loadingAll = false);
+    widget.selection.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge(
+        <Listenable>[widget.loader, widget.selection],
+      ),
+      builder: (context, _) {
+        if (!widget.selection.active) return const SizedBox.shrink();
+        final count = widget.selection.ids.length;
+        return SelectionBarFrame(
+          count: count,
+          onSelectAll: _selectAll,
+          onCancel: _cancelSelection,
+          selectAllLoading: _loadingAll,
+          actions: [
+            Expanded(
+              child: AppButton(
+                label: 'Download',
+                icon: Icons.download_rounded,
+                expand: true,
+                singleLine: true,
+                onPressed: () async {
+                  if (count == 0) {
+                    showToast(
+                      context,
+                      'Tap photos to select them.',
+                      aboveBar: false,
+                    );
+                    return;
+                  }
+                  final chosen = [
+                    for (final photo in widget.loader.photos)
+                      if (widget.selection.ids.contains(photo.id)) photo,
+                  ];
+                  _cancelSelection();
+                  await savePhotosToAlbums(
+                    context,
+                    widget.loader,
+                    only: chosen,
+                    modelName: widget.modelName,
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class SelectionBarFrame extends StatelessWidget {
+  const SelectionBarFrame({
+    super.key,
+    required this.count,
+    required this.onSelectAll,
+    required this.onCancel,
+    required this.actions,
+    this.selectAllLoading = false,
+  });
+
+  final int count;
+  final VoidCallback onSelectAll;
+  final VoidCallback onCancel;
+  final bool selectAllLoading;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        context.hMargin,
+        Gaps.sm,
+        context.hMargin,
+        Gaps.md + context.safe.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceHigh,
+        border: Border(top: BorderSide(color: AppColors.outline)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  count == 0 ? 'Tap photos to select' : '$count selected',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              Pressable(
+                semanticLabel: selectAllLoading
+                    ? 'Loading all photos'
+                    : 'Select all',
+                haptic: Haptic.selection,
+                onTap: selectAllLoading ? null : onSelectAll,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 4,
+                  ),
+                  child: Text(
+                    selectAllLoading ? 'Loading…' : 'Select all',
+                    style: AppText.caption.copyWith(
+                      color: selectAllLoading
+                          ? AppColors.textSecondary
+                          : AppColors.accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: Gaps.sm),
+              Pressable(
+                semanticLabel: 'Cancel selection',
+                haptic: Haptic.selection,
+                onTap: onCancel,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 4,
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: AppText.caption.copyWith(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: Gaps.xs),
+          Row(
+            children: [
+              for (var i = 0; i < actions.length; i++) ...[
+                if (i > 0) const SizedBox(width: Gaps.sm),
+                actions[i],
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PhotoGridSliver extends StatelessWidget {
+  const PhotoGridSliver({
+    super.key,
+    required this.loader,
+    this.selection,
+    this.modelName,
+    this.padding = EdgeInsets.zero,
+  });
+
+  final AlbumLoader loader;
+  final PhotoSelection? selection;
+  final String? modelName;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final store = PhotoStore.instance;
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[
+        loader,
+        store,
+        if (selection != null) selection!,
+      ]),
+      builder: (context, _) {
+        final photos = loader.photos;
+
+        if (photos.isEmpty) {
+          if (loader.error != null) {
+            final friendly = describeError(loader.error!, subject: 'photos');
+            return SliverFillRemaining(
+              hasScrollBody: false,
+              child: StatusView(
+                icon: friendly.icon,
+                title: friendly.title,
+                message: friendly.message,
+                actionLabel: 'Retry',
+                onAction: loader.load,
+              ),
+            );
+          }
+          if (loader.finished) {
+            return const SliverFillRemaining(
+              hasScrollBody: false,
+              child: StatusView(
+                icon: Icons.photo_library_outlined,
+                title: 'No photos',
+                message: 'This album is empty.',
+              ),
+            );
+          }
+          return SliverPadding(
+            padding: padding,
+            sliver: SliverGrid(
+              gridDelegate: _gridDelegate,
+              delegate: SliverChildBuilderDelegate(
+                (context, index) =>
+                    const SkeletonPulse(child: SkeletonBlock(radius: 6)),
+                childCount: 12,
+              ),
+            ),
+          );
+        }
+
+        final selecting = selection?.active ?? false;
+        return SliverMainAxisGroup(
+          slivers: [
+            SliverPadding(
+              padding: padding,
+              sliver: SliverGrid(
+                gridDelegate: _gridDelegate,
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final photo = photos[index];
+                  return _PhotoTile(
+                    key: ValueKey<String>(photo.id),
+                    identity: photo.thumbUrl,
+                    image: CachedNetworkImageProvider(
+                      photo.thumbUrl,
+                      headers: loader.imageHeaders,
+                    ),
+                    selecting: selecting,
+                    selected: selection?.ids.contains(photo.id) ?? false,
+                    saved: store.isSaved(loader.album.id, photo.id),
+                    onTap: () {
+                      if (selecting) {
+                        selection!.toggle(photo.id);
+                      } else {
+                        _openViewer(context, index);
+                      }
+                    },
+                    onLongPress: selection == null || selecting
+                        ? null
+                        : () => selection!.start(photo.id),
+                  );
+                }, childCount: photos.length),
+              ),
+            ),
+            if (loader.error != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: padding.add(const EdgeInsets.only(top: Gaps.lg)),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Couldn\u2019t load the rest of the photos.',
+                          style: AppText.body,
+                        ),
+                      ),
+                      AppButton(
+                        label: 'Retry',
+                        icon: Icons.refresh_rounded,
+                        style: AppButtonStyle.secondary,
+                        onPressed: loader.load,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (loader.loading)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: Gaps.lg),
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _openViewer(BuildContext context, int index) {
+    final headers = loader.imageHeaders;
+    openPhotoViewer(
+      context,
+      PhotoViewerPage(
+        listenable: loader,
+        items: () => <ViewerItem>[
+          for (final p in loader.photos)
+            ViewerItem(
+              id: p.id,
+              thumb: CachedNetworkImageProvider(
+                p.thumbUrl,
+                headers: headers,
+              ),
+              full: NetworkImage(p.fullUrl, headers: headers),
+              remote: p,
+            ),
+        ],
+        isLoading: () => loader.loading,
+        album: loader.album,
+        modelName: modelName,
+        initialIndex: index,
+      ),
+    );
+  }
+
+  static const SliverGridDelegate _gridDelegate =
+      SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+        childAspectRatio: 3 / 4,
+      );
+}
+
+class AlbumCard extends StatefulWidget {
+  const AlbumCard({
+    super.key,
+    required this.album,
+    required this.onTap,
+    this.subtitle,
+  });
+
+  final AlbumRef album;
+  final VoidCallback onTap;
+  final String? subtitle;
+
+  @override
+  State<AlbumCard> createState() => _AlbumCardState();
+}
+
+class _AlbumCardState extends State<AlbumCard> {
+  String? _firstPhotoThumb;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadFirstPhotoThumb());
+  }
+
+  @override
+  void didUpdateWidget(covariant AlbumCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.album.id != widget.album.id) {
+      _firstPhotoThumb = null;
+      unawaited(_loadFirstPhotoThumb());
+    }
+  }
+
+  Future<void> _loadFirstPhotoThumb() async {
+    try {
+      final album = widget.album;
+      final thumb = await _albumFirstPhotoThumbs.fetch(album.url, () async {
+        final page = await videoRepository.getAlbumPhotosPage(album);
+        for (final photo in page.photos) {
+          if (photo.thumbUrl.isNotEmpty) return photo.thumbUrl;
+        }
+        return '';
+      });
+      if (!mounted || thumb.isEmpty) return;
+      setState(() => _firstPhotoThumb = thumb);
+    } catch (_) {
+      // Keep the source cover or placeholder if the album page is unavailable.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final album = widget.album;
+    final thumb = _firstPhotoThumb ?? album.thumbnailUrl;
+    final placeholder = ColoredBox(color: AppColors.surfaceHigh);
+    return Pressable(
+      semanticLabel: 'Album ${album.title}',
+      onTap: widget.onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.card),
+              child: SizedBox.expand(
+                child: thumb == null
+                    ? Center(
+                        child: Icon(
+                          Icons.photo_library_outlined,
+                          color: AppColors.textTertiary,
+                          size: 32,
+                        ),
+                      )
+                    : FadeInThumbnail(
+                        identity: thumb,
+                        image: ResizeImage(
+                          CachedNetworkImageProvider(
+                            thumb,
+                            headers: imageHeadersFor(album.url),
+                          ),
+                          width: (160 * dpr).round().clamp(128, 960).toInt(),
+                        ),
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stack) => placeholder,
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            album.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.cardTitle,
+          ),
+          if (widget.subtitle != null)
+            Text(
+              widget.subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoTile extends StatelessWidget {
+  const _PhotoTile({
+    super.key,
+    required this.identity,
+    required this.image,
+    required this.selecting,
+    required this.selected,
+    required this.saved,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final ImageProvider image;
+  final String identity;
+  final bool selecting;
+  final bool selected;
+  final bool saved;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return Pressable(
+      semanticLabel: selected ? 'Photo, selected' : 'Photo',
+      haptic: selecting ? Haptic.selection : Haptic.none,
+      pressedScale: 0.97,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: AppColors.surfaceHigh,
+              child: FadeInThumbnail(
+                identity: identity,
+                image: ResizeImage(
+                  image,
+                  width: (160 * dpr).round(),
+                  allowUpscaling: false,
+                ),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stack) => Icon(
+                  Icons.broken_image_outlined,
+                  color: AppColors.textTertiary,
+                ),
+              ),
+            ),
+            if (selected) ColoredBox(
+              color: AppColors.accent.withValues(alpha: 0.22),
+            ),
+            if (selecting)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected
+                        ? AppColors.accent
+                        : const Color(0x66000000),
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: selected
+                      ? const Icon(
+                          Icons.check_rounded,
+                          size: 20,
+                          color: Colors.white,
+                        )
+                      : null,
+                ),
+              )
+            else if (saved)
+              const Positioned(right: 6, bottom: 6, child: _SavedBadge()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedBadge extends StatelessWidget {
+  const _SavedBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: Color(0xCC1FA971),
+      ),
+      child: const Icon(
+        Icons.download_done_rounded,
+        size: 20,
+        color: Colors.white,
+      ),
+    );
+  }
+}
+
+class ViewerItem {
+  const ViewerItem({
+    required this.id,
+    required this.thumb,
+    required this.full,
+    this.remote,
+    this.localPath,
+  });
+
+  final String id;
+  final ImageProvider thumb;
+  final ImageProvider full;
+  final AlbumPhoto? remote;
+  final String? localPath;
+}
+
+void openPhotoViewer(BuildContext context, PhotoViewerPage page) {
+  Navigator.of(context)
+      .push<void>(adaptivePageRoute<void>(context, builder: (_) => page));
+}
+
+class PhotoViewerPage extends StatefulWidget {
+  const PhotoViewerPage({
+    super.key,
+    required this.listenable,
+    required this.items,
+    required this.initialIndex,
+    this.isLoading,
+    this.album,
+    this.modelName,
+  });
+
+  final Listenable listenable;
+  final List<ViewerItem> Function() items;
+  final int initialIndex;
+  final bool Function()? isLoading;
+
+  final AlbumRef? album;
+  final String? modelName;
+
+  @override
+  State<PhotoViewerPage> createState() => _PhotoViewerPageState();
+}
+
+class _PhotoViewerPageState extends State<PhotoViewerPage> {
+  late final PageController _pages = PageController(
+    initialPage: widget.initialIndex,
+  );
+  late int _index = widget.initialIndex;
+  bool _zoomed = false;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
+
+  Future<String?> _ensureLocalPath(ViewerItem item) async {
+    final local = item.localPath;
+    if (local != null) return local;
+    final remote = item.remote;
+    final album = widget.album;
+    if (remote == null || album == null) return null;
+
+    final store = PhotoStore.instance;
+    if (!store.isSaved(album.id, remote.id)) {
+      await store.savePhotos(album, <AlbumPhoto>[
+        remote,
+      ], modelName: widget.modelName);
+    }
+    final saved = store.album(album.id);
+    final photo = saved?.photos.where((p) => p.id == remote.id).firstOrNull;
+    if (saved == null || photo == null) return null;
+    return store.fileOf(saved, photo).path;
+  }
+
+  Future<void> _download(ViewerItem item) async {
+    final remote = item.remote;
+    final album = widget.album;
+    if (remote == null || album == null || _busy) return;
+    final store = PhotoStore.instance;
+    if (store.isSaved(album.id, remote.id)) {
+      showToast(context, 'Already saved in Albums.', aboveBar: false);
+      return;
+    }
+    setState(() => _busy = true);
+    final saved = await store.savePhotos(album, <AlbumPhoto>[
+      remote,
+    ], modelName: widget.modelName);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    showToast(
+      context,
+      saved == 1 ? 'Saved to Albums.' : 'Couldn\u2019t save this photo.',
+      aboveBar: false,
+    );
+  }
+
+  Future<void> _share(ViewerItem item) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final path = await _ensureLocalPath(item);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (path == null) {
+      showToast(context, 'Couldn\u2019t prepare this photo.', aboveBar: false);
+      return;
+    }
+    await sendToPhotos(context, <String>[path]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: ListenableBuilder(
+          listenable: Listenable.merge(<Listenable>[
+            widget.listenable,
+            PhotoStore.instance,
+          ]),
+          builder: (context, _) {
+            final items = widget.items();
+            final current = items.isEmpty
+                ? null
+                : items[_index.clamp(0, items.length - 1)];
+            final album = widget.album;
+            final isSaved =
+                current?.localPath != null ||
+                (current?.remote != null &&
+                    album != null &&
+                    PhotoStore.instance.isSaved(album.id, current!.remote!.id));
+            final canDownload =
+                current?.remote != null && album != null && !isSaved;
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                PageView.builder(
+                  controller: _pages,
+                  physics: _zoomed
+                      ? const NeverScrollableScrollPhysics()
+                      : const PageScrollPhysics(),
+                  itemCount: items.length,
+                  onPageChanged: (value) => setState(() => _index = value),
+                  itemBuilder: (context, index) => _ZoomablePhoto(
+                    key: ValueKey<String>(items[index].id),
+                    item: items[index],
+                    onZoomChanged: (zoomed) {
+                      if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+                    },
+                  ),
+                ),
+                Positioned(
+                  top: context.safe.top + Gaps.md,
+                  left: Gaps.lg,
+                  right: Gaps.lg,
+                  child: Row(
+                    children: [
+                      RoundIconButton(
+                        icon: Icons.close_rounded,
+                        iconSize: 20,
+                        label: 'Close',
+                        onTap: () => Navigator.of(context).maybePop(),
+                      ),
+                      const Spacer(),
+                      if (items.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0x8C000000),
+                            borderRadius: BorderRadius.circular(Radii.pill),
+                          ),
+                          child: Text(
+                            '${_index + 1} / ${items.length}'
+                            '${(widget.isLoading?.call() ?? false) ? '+' : ''}',
+                            style: AppText.label.copyWith(color: Colors.white),
+                          ),
+                        ),
+                      const Spacer(),
+                      if (current != null) ...[
+                        if (canDownload || (isSaved && current.remote != null))
+                          RoundIconButton(
+                            icon: isSaved
+                                ? Icons.download_done_rounded
+                                : Icons.download_rounded,
+                            iconSize: 20,
+                            label: isSaved ? 'Saved in Albums' : 'Download',
+                            onTap: () => _download(current),
+                          ),
+                        const SizedBox(width: Gaps.sm),
+                        RoundIconButton(
+                          icon: Icons.photo_library_outlined,
+                          iconSize: 20,
+                          label: 'Save to Photos',
+                          onTap: () => _share(current),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (_busy)
+                  const Positioned.fill(
+                    child: IgnorePointer(
+                      child: Center(child: Spinner(color: Colors.white)),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ZoomablePhoto extends StatefulWidget {
+  const _ZoomablePhoto({
+    super.key,
+    required this.item,
+    required this.onZoomChanged,
+  });
+
+  final ViewerItem item;
+  final ValueChanged<bool> onZoomChanged;
+
+  @override
+  State<_ZoomablePhoto> createState() => _ZoomablePhotoState();
+}
+
+class _ZoomablePhotoState extends State<_ZoomablePhoto> {
+  final TransformationController _controller = TransformationController();
+  Offset _doubleTapAt = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_report);
+  }
+
+  void _report() =>
+      widget.onZoomChanged(_controller.value.getMaxScaleOnAxis() > 1.02);
+
+  @override
+  void dispose() {
+    _controller.removeListener(_report);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggleZoom() {
+    if (_controller.value.getMaxScaleOnAxis() > 1.02) {
+      _controller.value = Matrix4.identity();
+      return;
+    }
+    const scale = 2.5;
+    final p = _doubleTapAt;
+    _controller.value = Matrix4(
+      scale,
+      0,
+      0,
+      0,
+      0,
+      scale,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      -p.dx * (scale - 1),
+      -p.dy * (scale - 1),
+      0,
+      1,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    return GestureDetector(
+      onDoubleTapDown: (details) => _doubleTapAt = details.localPosition,
+      onDoubleTap: _toggleZoom,
+      child: InteractiveViewer(
+        transformationController: _controller,
+        minScale: 1,
+        maxScale: 5,
+        child: Center(
+          child: Image(
+            image: item.full,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  Image(
+                    image: item.thumb,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                  const Spinner(color: Colors.white),
+                ],
+              );
+            },
+            errorBuilder: (context, error, stack) => Image(
+              image: item.thumb,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.broken_image_outlined,
+                color: Colors.white54,
+                size: 48,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

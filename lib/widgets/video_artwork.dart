@@ -1,0 +1,186 @@
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+
+import '../app_theme.dart';
+import '../download_store.dart';
+import '../models.dart';
+import '../reel_favorites.dart';
+import 'fade_in_thumbnail.dart';
+
+class VideoArtwork extends StatelessWidget {
+  const VideoArtwork({
+    super.key,
+    required this.video,
+    this.borderRadius = 0,
+    this.showLabel = true,
+    this.fit = BoxFit.cover,
+    this.transparentBackground = false,
+  });
+
+  final Video video;
+
+  final double borderRadius;
+
+  final bool showLabel;
+
+  /// Controls how the thumbnail is fitted inside its available bounds.
+  /// Details use [BoxFit.contain] to avoid unexpectedly cropping the artwork.
+  final BoxFit fit;
+
+  /// Leaves letterboxed areas transparent, useful when the artwork sits over
+  /// a blurred version of itself.
+  final bool transparentBackground;
+
+  static Map<String, String>? _headersFor(Video video) {
+    // Saved reels have no web page; their CDN wants the reel API referer.
+    if ((video.pageUrl ?? '').isEmpty && video.id.startsWith('reel_')) {
+      return kReelMediaHeaders;
+    }
+    final page = Uri.tryParse(video.pageUrl ?? '');
+    if (page == null ||
+        (page.scheme != 'http' && page.scheme != 'https') ||
+        page.host.isEmpty ||
+        page.userInfo.isNotEmpty) {
+      return null;
+    }
+    return <String, String>{'Referer': '${page.origin}/'};
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+
+    Widget content = LayoutBuilder(
+      builder: (context, constraints) {
+        final saved = DownloadStore.instance.thumbPath(video.id);
+        if (saved != null) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(
+                color: transparentBackground
+                    ? Colors.transparent
+                    : AppColors.surfaceHigh,
+              ),
+              FadeInThumbnail(
+                identity: 'file:$saved',
+                image: ResizeImage.resizeIfNeeded(
+                  constraints.maxWidth.isFinite
+                      ? (constraints.maxWidth * dpr)
+                          .round()
+                          .clamp(128, 1280)
+                          .toInt()
+                      : null,
+                  null,
+                  FileImage(File(saved)),
+                ),
+                fit: fit,
+                errorBuilder: (context, error, stackTrace) =>
+                    _Placeholder(video: video, showLabel: showLabel),
+              ),
+            ],
+          );
+        }
+
+        final url = video.thumbnailUrl?.trim() ?? '';
+        final uri = Uri.tryParse(url);
+        final valid = uri != null &&
+            (uri.scheme == 'http' || uri.scheme == 'https') &&
+            uri.host.isNotEmpty &&
+            uri.userInfo.isEmpty;
+
+        if (!valid) return _Placeholder(video: video, showLabel: showLabel);
+
+        int? cacheWidth;
+        if (constraints.maxWidth.isFinite) {
+          final px = constraints.maxWidth * dpr;
+          cacheWidth = (((px + 63) ~/ 64) * 64).clamp(128, 1280).toInt();
+        }
+
+        final provider = CachedNetworkImageProvider(
+          url,
+          headers: _headersFor(video),
+        );
+        final ImageProvider<Object> imageProvider = ResizeImage.resizeIfNeeded(
+          cacheWidth,
+          null,
+          provider,
+        );
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: transparentBackground
+                  ? Colors.transparent
+                  : AppColors.surfaceHigh,
+            ),
+            FadeInThumbnail(
+              identity: url,
+              image: imageProvider,
+              fit: fit,
+              filterQuality: FilterQuality.medium,
+              errorBuilder: (context, error, stackTrace) =>
+                  _Placeholder(video: video, showLabel: showLabel),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (borderRadius > 0) {
+      content = ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: content,
+      );
+    }
+    return content;
+  }
+}
+
+class _Placeholder extends StatelessWidget {
+  const _Placeholder({required this.video, required this.showLabel});
+
+  final Video video;
+  final bool showLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF30356F), Color(0xFF151B2D)],
+        ),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.play_circle_outline_rounded,
+                size: 36,
+                color: Colors.white24,
+              ),
+              if (showLabel) ...[
+                const SizedBox(height: 6),
+                Text(
+                  video.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: AppText.caption.copyWith(color: Colors.white38),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

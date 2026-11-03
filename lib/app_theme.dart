@@ -1,0 +1,423 @@
+import 'package:flutter/cupertino.dart'
+    show CupertinoPageRoute, CupertinoPageTransitionsBuilder;
+import 'package:flutter/material.dart';
+
+abstract final class OnDark {
+  static const Color background = Color(0xFF0C1020);
+  static const Color surface = Color(0xFF151B2D);
+  static const Color surfaceHigh = Color(0xFF202943);
+  static const Color outline = Color(0x1FFFFFFF);
+  static const Color textPrimary = Color(0xFFFFFFFF);
+  static const Color textSecondary = Color(0xFFBBC4DA);
+  static const Color textTertiary = Color(0xFF8996B7);
+  static const Color accentSoft = Color(0xFF292B55);
+  static const Color error = Color(0xFFFF8A80);
+}
+
+class Palette {
+  const Palette({
+    required this.brightness,
+    required this.background,
+    required this.surface,
+    required this.surfaceHigh,
+    required this.outline,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textTertiary,
+    required this.accentSoft,
+    required this.error,
+  });
+
+  final Brightness brightness;
+  final Color background;
+  final Color surface;
+  final Color surfaceHigh;
+  final Color outline;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color textTertiary;
+  final Color accentSoft;
+  final Color error;
+
+  static const Palette dark = Palette(
+    brightness: Brightness.dark,
+    background: OnDark.background,
+    surface: OnDark.surface,
+    surfaceHigh: OnDark.surfaceHigh,
+    outline: OnDark.outline,
+    textPrimary: OnDark.textPrimary,
+    textSecondary: OnDark.textSecondary,
+    textTertiary: OnDark.textTertiary,
+    accentSoft: OnDark.accentSoft,
+    error: OnDark.error,
+  );
+
+  static const Palette light = Palette(
+    brightness: Brightness.light,
+    background: Color(0xFFF5F6F8),
+    surface: Color(0xFFFFFFFF),
+    surfaceHigh: Color(0xFFF0F1F5),
+    outline: Color(0x16000000),
+    textPrimary: Color(0xFF171A2B),
+    textSecondary: Color(0xFF454C60),
+    textTertiary: Color(0xFF626B80),
+    accentSoft: Color(0xFFECEEF5),
+    error: Color(0xFFD93025),
+  );
+}
+
+abstract final class AppColors {
+  static Palette palette = Palette.dark;
+
+  static Color get background => palette.background;
+  static Color get surface => palette.surface;
+  static Color get surfaceHigh => palette.surfaceHigh;
+  static Color get outline => palette.outline;
+  static Color get textPrimary => palette.textPrimary;
+  static Color get textSecondary => palette.textSecondary;
+  static Color get textTertiary => palette.textTertiary;
+  static Color get accentSoft => palette.accentSoft;
+  static Color get error => palette.error;
+
+  static const Color accent = Color(0xFF8585FF);
+
+  static Color get accentStrong => palette.brightness == Brightness.light
+      ? const Color(0xFF555FB8)
+      : const Color(0xFF5968D8);
+  static Color get accentForeground =>
+      palette.brightness == Brightness.light ? accentStrong : accent;
+  static const Color accentBlue = Color(0xFF7695FF);
+  static const Color accentViolet = Color(0xFF9A86FF);
+  static const Color accentIndigo = Color(0xFF777EF5);
+  static const Color accentMuted = Color(0xFF8795C8);
+
+  static const Color star = Color(0xFFFFC857);
+}
+
+abstract final class Gaps {
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 24;
+  static const double xxl = 32;
+}
+
+abstract final class Radii {
+  static const double card = 22;
+  static const double button = 16;
+  static const double field = 16;
+  static const double pill = 999;
+
+  /// Radius scale for new/adjusted surfaces: small controls, medium cards,
+  /// large cards and the Featured hero.
+  static const double small = 12;
+  static const double medium = 22;
+  static const double large = 26;
+  static const double hero = 28;
+}
+
+abstract final class Motion {
+  static const Duration quick = Duration(milliseconds: 120);
+  static const Duration normal = Duration(milliseconds: 220);
+  static const Duration fade = Duration(milliseconds: 320);
+  static const Duration scroll = Duration(milliseconds: 260);
+  static const Curve curve = Curves.easeOutCubic;
+}
+
+extension UiScale on BuildContext {
+  bool get isPhone => MediaQuery.sizeOf(this).shortestSide < 600;
+
+  double get uiScale =>
+      (MediaQuery.sizeOf(this).shortestSide / 390).clamp(0.9, 1.25).toDouble();
+
+  double s(double value) => value * uiScale;
+
+  double get hMargin => isPhone ? 16 : 24;
+
+  EdgeInsets get safe => MediaQuery.viewPaddingOf(this);
+}
+
+int videoGridColumns(BuildContext context) => context.isPhone ? 2 : 3;
+
+class TextSet {
+  const TextSet(this.palette);
+
+  final Palette palette;
+
+  TextStyle get display => TextStyle(
+        fontSize: 28,
+        height: 1.12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.4,
+        color: palette.textPrimary,
+      );
+
+  TextStyle get headline => TextStyle(
+        fontSize: 21,
+        height: 1.18,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+        color: palette.textPrimary,
+      );
+
+  TextStyle get title => TextStyle(
+        fontSize: 16,
+        height: 1.25,
+        fontWeight: FontWeight.w600,
+        color: palette.textPrimary,
+      );
+
+  TextStyle get cardTitle => TextStyle(
+        fontSize: 13.5,
+        height: 1.25,
+        fontWeight: FontWeight.w600,
+        color: palette.textPrimary,
+      );
+
+  TextStyle get body => TextStyle(
+        fontSize: 14,
+        height: 1.4,
+        fontWeight: FontWeight.w400,
+        color: palette.textSecondary,
+      );
+
+  TextStyle get label => TextStyle(
+        fontSize: 14,
+        height: 1.2,
+        fontWeight: FontWeight.w600,
+        color: palette.textPrimary,
+      );
+
+  TextStyle get caption => TextStyle(
+        fontSize: 12,
+        height: 1.3,
+        fontWeight: FontWeight.w500,
+        color: palette.textTertiary,
+      );
+
+  TextStyle get overline => TextStyle(
+        fontSize: 11,
+        height: 1.2,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.4,
+        color: AppColors.accentForeground,
+      );
+}
+
+abstract final class AppText {
+  static TextSet get _set => TextSet(AppColors.palette);
+
+  static TextStyle get display => _set.display;
+  static TextStyle get headline => _set.headline;
+  static TextStyle get title => _set.title;
+  static TextStyle get cardTitle => _set.cardTitle;
+  static TextStyle get body => _set.body;
+  static TextStyle get label => _set.label;
+  static TextStyle get caption => _set.caption;
+  static TextStyle get overline => _set.overline;
+}
+
+const TextSet darkText = TextSet(Palette.dark);
+
+ThemeData buildAppTheme(Brightness brightness) {
+  final p = brightness == Brightness.dark ? Palette.dark : Palette.light;
+  final base = ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    scaffoldBackgroundColor: p.background,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: AppColors.accent,
+      brightness: brightness,
+      surface: p.surface,
+    ),
+    splashFactory: NoSplash.splashFactory,
+    visualDensity: VisualDensity.standard,
+    iconTheme: const IconThemeData(size: 20, opticalSize: 20),
+  );
+
+  return base.copyWith(
+    textTheme: base.textTheme.apply(
+      bodyColor: p.textPrimary,
+      displayColor: p.textPrimary,
+    ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: p.background,
+      foregroundColor: p.textPrimary,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        color: p.textPrimary,
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.3,
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        minimumSize: const WidgetStatePropertyAll(Size(44, 44)),
+        iconSize: const WidgetStatePropertyAll(20),
+        shape: const WidgetStatePropertyAll(CircleBorder()),
+        overlayColor: WidgetStatePropertyAll(
+          AppColors.accent.withValues(alpha: 0.10),
+        ),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      isDense: true,
+      fillColor: p.surfaceHigh,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      hintStyle: TextStyle(color: p.textTertiary),
+      labelStyle: TextStyle(color: p.textSecondary),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.outline),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.outline),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.error),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(Radii.field),
+        borderSide: BorderSide(color: p.error, width: 1.4),
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: p.surface,
+      surfaceTintColor: Colors.transparent,
+      showDragHandle: true,
+      dragHandleColor: p.textTertiary.withValues(alpha: 0.5),
+      modalBackgroundColor: p.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: p.surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 14,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: p.outline),
+      ),
+    ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: AppColors.accent,
+      selectionColor: AppColors.accent.withValues(alpha: 0.24),
+      selectionHandleColor: AppColors.accentStrong,
+    ),
+    dividerTheme: DividerThemeData(color: p.outline, thickness: 1, space: 1),
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: AppColors.accent,
+      linearTrackColor: Color(0x263D4770),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith<Color?>(
+        (states) => states.contains(WidgetState.selected)
+            ? AppColors.accentStrong
+            : null,
+      ),
+      trackColor: WidgetStateProperty.resolveWith<Color?>(
+        (states) => states.contains(WidgetState.selected)
+            ? AppColors.accent.withValues(alpha: 0.35)
+            : null,
+      ),
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: AppColors.accent,
+      thumbColor: AppColors.accentStrong,
+      overlayColor: AppColors.accent.withValues(alpha: 0.12),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.fuchsia: ZoomPageTransitionsBuilder(),
+      },
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: p.brightness == Brightness.dark
+          ? OnDark.surfaceHigh
+          : const Color(0xFF292F49),
+      contentTextStyle: const TextStyle(fontSize: 14, color: Colors.white),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.button),
+      ),
+    ),
+  );
+}
+
+/// Uses the interactive iOS edge-swipe route on Apple platforms while keeping
+/// the standard Material route on Android and desktop platforms.
+Route<T> adaptivePageRoute<T>(
+  BuildContext context, {
+  required WidgetBuilder builder,
+  RouteSettings? settings,
+}) {
+  final platform = Theme.of(context).platform;
+  if (platform == TargetPlatform.iOS || platform == TargetPlatform.macOS) {
+    return CupertinoPageRoute<T>(builder: builder, settings: settings);
+  }
+  return MaterialPageRoute<T>(builder: builder, settings: settings);
+}
+
+class FadePageRoute<T> extends PageRouteBuilder<T> {
+  FadePageRoute({required WidgetBuilder builder})
+      : super(
+          pageBuilder: (context, _, __) => builder(context),
+          transitionDuration: const Duration(milliseconds: 380),
+          reverseTransitionDuration: const Duration(milliseconds: 300),
+          transitionsBuilder: (context, animation, _, child) => FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOut,
+              reverseCurve: Curves.easeIn,
+            ),
+            child: child,
+          ),
+        );
+}
+
+/// Scroll physics tuned to the platform's native feel.
+ScrollPhysics nativeScrollPhysics(
+  BuildContext context, {
+  bool alwaysScrollable = false,
+}) {
+  final platform = Theme.of(context).platform;
+  final isCupertino =
+      platform == TargetPlatform.iOS || platform == TargetPlatform.macOS;
+  if (!alwaysScrollable) {
+    return isCupertino
+        ? const BouncingScrollPhysics()
+        : const ClampingScrollPhysics();
+  }
+  return isCupertino
+      ? const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics())
+      : const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics());
+}
+
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) =>
+      child;
+}

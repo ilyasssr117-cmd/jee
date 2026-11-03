@@ -149,7 +149,9 @@ class PhotoStore extends ChangeNotifier {
   PhotoStore._();
 
   @visibleForTesting
-  PhotoStore.forTesting({required this._root, this._client});
+  PhotoStore.forTesting({required Directory root, http.Client? client})
+    : _root = root,
+      _client = client;
 
   static final PhotoStore instance = PhotoStore._();
 

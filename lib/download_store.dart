@@ -134,7 +134,7 @@ class DownloadStore extends ChangeNotifier {
     final dir = Directory('${documents.path}/downloads');
     if (!await dir.exists()) await dir.create(recursive: true);
     if (!await dir.exists()) {
-      throw FileSystemException('Could not create the downloads directory.');
+      throw const FileSystemException('Could not create the downloads directory.');
     }
     _dir = dir;
 

@@ -42,7 +42,9 @@ String decodeHtmlResponseBytes(Uint8List bytes, String? contentType) {
   final encoding = charset == null || charset.isEmpty
       ? utf8
       : Encoding.getByName(charset) ?? utf8;
-  return encoding.decode(bytes, allowMalformed: true);
+  return encoding == utf8
+      ? utf8.decode(bytes, allowMalformed: true)
+      : encoding.decode(bytes);
 }
 
 class ScraperConfig {

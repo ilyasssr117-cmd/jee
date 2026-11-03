@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../models.dart';
 import 'app_button.dart';
-import 'glass.dart';
 import 'state_views.dart';
 import 'video_artwork.dart';
 import 'video_meta.dart';
@@ -115,12 +114,13 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     // A plain translucent pill: a BackdropFilter here forced the whole hero
     // image to be re-blurred on every frame of a scroll or pull-to-refresh.
-    return GlassSurface(
-      blur: false,
-      shadow: false,
-      borderRadius: 17,
-      tint: const Color(0x80151A31),
+    return Container(
       padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
+      decoration: BoxDecoration(
+        color: const Color(0x99151A31),
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -242,9 +242,8 @@ class _HeroDetails extends StatelessWidget {
           showCategory: true,
         ),
         const SizedBox(height: Gaps.lg),
-        Wrap(
-          spacing: Gaps.sm,
-          runSpacing: Gaps.sm,
+        Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             AppButton(
               label: playLabel,
@@ -253,6 +252,7 @@ class _HeroDetails extends StatelessWidget {
               onDark: true,
               onPressed: onPlay,
             ),
+            const SizedBox(width: Gaps.sm),
             AppButton(
               label: 'Details',
               icon: Icons.info_outline_rounded,

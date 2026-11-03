@@ -141,4 +141,65 @@ void main() {
     expect(refreshed.title, 'Fresh title');
     expect(refreshed.modelName, 'Model');
   });
+  test(
+    'Select all loads every album page before selecting photos',
+    () async {
+      final loader = AlbumLoader(
+        _album,
+        fetchPage: (_, {required chunk}) async {
+          if (chunk == 10) {
+            return const AlbumPhotosPage(photos: <AlbumPhoto>[]);
+          }
+          return AlbumPhotosPage(
+            photos: List<AlbumPhoto>.generate(
+              100,
+              (index) => _photo(chunk * 100 + index),
+            ),
+            totalCount: 1000,
+          );
+        },
+      );
+      final selection = PhotoSelection()..start();
+      addTearDown(loader.dispose);
+      addTearDown(selection.dispose);
+
+      final completed = await selectAllAlbumPhotos(loader, selection);
+
+      expect(completed, isTrue);
+      expect(loader.finished, isTrue);
+      expect(loader.photos, hasLength(1000));
+      expect(selection.ids, hasLength(1000));
+    },
+  );
+
+  test(
+    'cancelling Select all stops before selecting partially loaded photos',
+    () async {
+      var continueLoading = true;
+      final loader = AlbumLoader(
+        _album,
+        fetchPage: (_, {required chunk}) async {
+          continueLoading = false;
+          return AlbumPhotosPage(
+            photos: List<AlbumPhoto>.generate(100, _photo),
+            totalCount: 1000,
+          );
+        },
+      );
+      final selection = PhotoSelection()..start('keep-this-selection');
+      addTearDown(loader.dispose);
+      addTearDown(selection.dispose);
+
+      final completed = await selectAllAlbumPhotos(
+        loader,
+        selection,
+        shouldContinue: () => continueLoading,
+      );
+
+      expect(completed, isFalse);
+      expect(loader.photos, hasLength(100));
+      expect(selection.ids, <String>{'keep-this-selection'});
+    },
+  );
 }
+

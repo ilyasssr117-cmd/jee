@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -6,6 +9,22 @@ import 'package:vxtube_final/scraper.dart';
 import 'package:vxtube_final/video_repository.dart';
 
 void main() {
+  test('HTML response decoder respects Windows-1252 charset', () {
+    final decoded = decodeHtmlResponseBytes(
+      Uint8List.fromList(<int>[0x63, 0x61, 0x66, 0xE9, 0x20, 0x80]),
+      'text/html; charset=windows-1252',
+    );
+    expect(decoded, 'café €');
+  });
+
+  test('HTML response decoder keeps UTF-8 content intact', () {
+    final bytes = Uint8List.fromList(utf8.encode('café — VXTube'));
+    expect(
+      decodeHtmlResponseBytes(bytes, 'text/html; charset=utf-8'),
+      'café — VXTube',
+    );
+  });
+
   test('app catalogue always uses the HTML scraper repository', () {
     expect(videoRepository, isA<HtmlScraperVideoRepository>());
   });

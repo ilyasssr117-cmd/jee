@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import '../app_theme.dart';
 import '../touch.dart';
 import 'bottom_bar.dart';
-import 'glass.dart';
 
 Future<bool> confirmDialog(
   BuildContext context, {
@@ -126,21 +125,27 @@ class _ToastViewState extends State<_ToastView>
               ).animate(CurvedAnimation(parent: _fade, curve: Curves.easeOut)),
               child: Material(
                 color: Colors.transparent,
-                child: GlassSurface(
-                  borderRadius: 22,
-                  sigma: 20,
-                  tint: const Color(0x8C14171F),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xEB1C1F2A),
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x4D000000), blurRadius: 14),
+                    ],
                   ),
-                  child: Text(
-                    widget.message,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      widget.message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),

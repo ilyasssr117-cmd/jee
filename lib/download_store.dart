@@ -82,14 +82,18 @@ class DownloadStore extends ChangeNotifier {
   final Set<String> _pausing = <String>{};
   final Set<String> _sizeRejected = <String>{};
   final Map<String, String> _thumbs = <String, String>{};
-  final Set<String> _verifiedLocalPaths = <String>{};
+  final Set<String> _pendingEnqueueIds = <String>{};
 
   final Map<String, String> _directUrls = <String, String>{};
   final http.Client _thumbClient = http.Client();
   Directory? _dir;
   bool _running = false;
   bool _initialized = false;
-  Future<void> _downloaderReady = Future<void>.value();
+  Future<void>? _initialization;
+  bool _downloaderInitialized = false;
+  bool _downloaderConfigured = false;
+  bool _downloaderCallbacksRegistered = false;
+  Future<void>? _downloaderInitialization;
 
   List<DownloadItem> get items => _view;
 
@@ -109,24 +113,39 @@ class DownloadStore extends ChangeNotifier {
 
   Future<void> init() async {
     if (_initialized) return;
-    _initialized = true;
-    try {
-      final documents = await getApplicationDocumentsDirectory();
-      final dir = Directory('${documents.path}/downloads');
-      if (!await dir.exists()) await dir.create(recursive: true);
-      _dir = dir;
-    } catch (error) {
-      debugPrint('[DOWNLOADS] Storage unavailable: ${error.runtimeType}');
+    final pending = _initialization;
+    if (pending != null) {
+      await pending;
+      return;
     }
+
+    late final Future<void> operation;
+    operation = _initializeStorage().whenComplete(() {
+      if (identical(_initialization, operation)) _initialization = null;
+    });
+    _initialization = operation;
+    await operation;
+  }
+
+  Future<void> _initializeStorage() async {
+    // Do not mark the store initialized until the directory is available.
+    // A transient platform/storage failure can then be retried later.
+    final documents = await getApplicationDocumentsDirectory();
+    final dir = Directory('${documents.path}/downloads');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    if (!await dir.exists()) {
+      throw FileSystemException('Could not create the downloads directory.');
+    }
+    _dir = dir;
 
     for (final old in _items) {
       old.bytes.dispose();
     }
     _items.clear();
     _tasks.clear();
-    _directUrls.clear();
+    if (_pendingEnqueueIds.isEmpty) _directUrls.clear();
     _thumbs.clear();
-    final dir = _dir;
+
     for (final raw in LocalStore.readList(_key).take(_maxQueueItems * 3)) {
       try {
         final decoded = jsonDecode(raw);
@@ -170,7 +189,7 @@ class DownloadStore extends ChangeNotifier {
             entry.bytes.dispose();
             continue;
           }
-        } else if (dir != null && fileName != null) {
+        } else if (fileName != null) {
           final part = File('${dir.path}/$fileName.part');
           final partialBytes = await part.exists() ? await part.length() : 0;
           if (partialBytes > _maxVideoBytes) {
@@ -187,7 +206,6 @@ class DownloadStore extends ChangeNotifier {
         final thumb = entry.thumbName;
         if (thumb != null &&
             _isSafeFileName(thumb) &&
-            dir != null &&
             await File('${dir.path}/$thumb').exists()) {
           _thumbs[video.id] = '${dir.path}/$thumb';
         } else {
@@ -209,37 +227,63 @@ class DownloadStore extends ChangeNotifier {
         unawaited(_deleteFiles(old));
       }
     }
+
+    _initialized = true;
     unawaited(_cleanOrphans());
-    _downloaderReady = _initDownloader();
-    unawaited(_downloaderReady);
+    unawaited(_ensureDownloaderReady().catchError((Object error) {
+      debugPrint(
+        '[DOWNLOADS] Startup downloader setup failed; it will retry on demand: ${error.runtimeType}',
+      );
+    }));
+  }
+
+  Future<void> _ensureDownloaderReady() {
+    if (_downloaderInitialized) return Future<void>.value();
+    final pending = _downloaderInitialization;
+    if (pending != null) return pending;
+
+    late final Future<void> operation;
+    operation = _initDownloader().whenComplete(() {
+      if (identical(_downloaderInitialization, operation)) {
+        _downloaderInitialization = null;
+      }
+    });
+    _downloaderInitialization = operation;
+    return operation;
   }
 
   Future<void> _initDownloader() async {
     try {
       final downloader = FileDownloader();
-      await downloader.configure(
-        globalConfig: <(String, dynamic)>[
-          (Config.holdingQueue, (2, null, null)),
-        ],
-        androidConfig: <(String, dynamic)>[
-          (Config.runInForeground, Config.always),
-        ],
-      );
-      downloader.configureNotificationForGroup(
-        FileDownloader.defaultGroup,
-        running: const TaskNotification(
-          'Downloading {progress}',
-          '{displayName}',
-        ),
-        complete: const TaskNotification('Download complete', '{displayName}'),
-        error: const TaskNotification('Download failed', '{displayName}'),
-        paused: const TaskNotification('Download paused', '{displayName}'),
-        progressBar: true,
-      );
-      downloader.registerCallbacks(
-        taskStatusCallback: _onStatus,
-        taskProgressCallback: _onProgress,
-      );
+      if (!_downloaderConfigured) {
+        await downloader.configure(
+          globalConfig: <(String, dynamic)>[
+            (Config.holdingQueue, (2, null, null)),
+          ],
+          androidConfig: <(String, dynamic)>[
+            (Config.runInForeground, Config.always),
+          ],
+        );
+        _downloaderConfigured = true;
+      }
+      if (!_downloaderCallbacksRegistered) {
+        downloader.configureNotificationForGroup(
+          FileDownloader.defaultGroup,
+          running: const TaskNotification(
+            'Downloading {progress}',
+            '{displayName}',
+          ),
+          complete: const TaskNotification('Download complete', '{displayName}'),
+          error: const TaskNotification('Download failed', '{displayName}'),
+          paused: const TaskNotification('Download paused', '{displayName}'),
+          progressBar: true,
+        );
+        downloader.registerCallbacks(
+          taskStatusCallback: _onStatus,
+          taskProgressCallback: _onProgress,
+        );
+        _downloaderCallbacksRegistered = true;
+      }
       await downloader.trackTasks();
 
       for (final entry in List<DownloadItem>.of(_items)) {
@@ -271,13 +315,65 @@ class DownloadStore extends ChangeNotifier {
       }
       await downloader.resumeFromBackground();
       await downloader.rescheduleKilledTasks();
+      _downloaderInitialized = true;
       _persist();
       notifyListeners();
     } catch (error) {
       debugPrint(
         '[DOWNLOADS] Background downloader unavailable: ${error.runtimeType}',
       );
+      rethrow;
     }
+  }
+
+  Future<void> _enqueueAfterInitialization(Video video) async {
+    final id = video.id;
+    try {
+      await init();
+    } catch (error) {
+      debugPrint(
+        '[DOWNLOADS] Storage initialization retry failed: ${error.runtimeType}',
+      );
+      _pendingEnqueueIds.remove(id);
+      final existing = item(id);
+      if (existing != null) {
+        existing
+          ..status = DownloadStatus.failed
+          ..error = 'Storage unavailable. Tap resume to retry.';
+      } else if (_items.length < _maxQueueItems) {
+        _items.insert(
+          0,
+          DownloadItem(
+            video: video.copyWith(streamUrl: ''),
+            status: DownloadStatus.failed,
+            error: 'Storage unavailable. Tap resume to retry.',
+          ),
+        );
+      }
+      _persist();
+      notifyListeners();
+      return;
+    }
+
+    _pendingEnqueueIds.remove(id);
+    final existing = item(id);
+    if (existing != null) {
+      if (existing.status == DownloadStatus.failed ||
+          existing.status == DownloadStatus.paused) {
+        existing
+          ..status = DownloadStatus.queued
+          ..error = null;
+        _persist();
+        notifyListeners();
+        unawaited(_pump());
+      }
+      return;
+    }
+    if (_items.length >= _maxQueueItems) return;
+    _items.insert(0, DownloadItem(video: video.copyWith(streamUrl: '')));
+    _persist();
+    notifyListeners();
+    unawaited(_pump());
   }
 
   String _legacyTaskId(DownloadItem entry) {
@@ -343,7 +439,6 @@ class DownloadStore extends ChangeNotifier {
       ..status = DownloadStatus.done
       ..bytesTotal = size
       ..error = null;
-    _verifiedLocalPaths.add(file.path);
     entry.bytes.value = size;
   }
 
@@ -555,9 +650,7 @@ class DownloadStore extends ChangeNotifier {
       return null;
     }
     final path = '${dir.path}/$name';
-    if (_verifiedLocalPaths.contains(path)) return path;
     if (!File(path).existsSync()) return null;
-    _verifiedLocalPaths.add(path);
     return path;
   }
 
@@ -571,7 +664,6 @@ class DownloadStore extends ChangeNotifier {
     }
     final path = '${dir.path}/$name';
     if (!await File(path).exists()) return null;
-    _verifiedLocalPaths.add(path);
     return path;
   }
 
@@ -627,6 +719,12 @@ class DownloadStore extends ChangeNotifier {
       return true;
     }
     if (_items.length >= _maxQueueItems) return false;
+    if (!_initialized) {
+      if (_pendingEnqueueIds.add(video.id)) {
+        unawaited(_enqueueAfterInitialization(video));
+      }
+      return true;
+    }
     _items.insert(0, DownloadItem(video: video.copyWith(streamUrl: '')));
     _persist();
     notifyListeners();
@@ -642,7 +740,13 @@ class DownloadStore extends ChangeNotifier {
       return;
     }
     _sizeRejected.remove(id);
-    final task = _tasks[id];
+    if (!_initialized) {
+      if (_pendingEnqueueIds.add(id)) {
+        unawaited(_enqueueAfterInitialization(entry.video));
+      }
+      return;
+    }
+    final task = _downloaderInitialized ? _tasks[id] : null;
     if (entry.status == DownloadStatus.paused && task != null) {
       unawaited(() async {
         var resumed = false;
@@ -845,9 +949,18 @@ class DownloadStore extends ChangeNotifier {
 
       await _ensureNotificationPermission();
       if (_stopPreparationIfNeeded(id, entry)) return;
-      // The downloader plugin is initialized asynchronously after the first
-      // frame; wait here so a fast user tap cannot race its configuration.
-      await _downloaderReady;
+      // Initialization is lazy and retryable. A failed native/plugin setup
+      // must not be treated as ready; resume will attempt initialization again.
+      try {
+        await _ensureDownloaderReady().timeout(const Duration(seconds: 40));
+      } catch (error) {
+        debugPrint(
+          '[DOWNLOADS] Downloader setup retryable failure: ${error.runtimeType}',
+        );
+        throw const _DownloadFailure(
+          'Background downloads are unavailable. Tap resume to retry.',
+        );
+      }
       if (_stopPreparationIfNeeded(id, entry)) return;
 
       final task = DownloadTask(
@@ -1022,7 +1135,6 @@ class DownloadStore extends ChangeNotifier {
       if (!_isSafeFileName(name)) continue;
       try {
         final file = File('${dir.path}/$name');
-        _verifiedLocalPaths.remove(file.path);
         if (await file.exists()) await file.delete();
       } catch (_) {}
     }

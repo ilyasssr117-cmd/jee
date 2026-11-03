@@ -11,6 +11,40 @@ import 'package:http/http.dart' as http;
 import 'models.dart';
 import 'request_cache.dart';
 
+/// Decodes an HTTP HTML response using its declared charset when supported.
+/// Unsupported declarations safely fall back to UTF-8 with replacement chars;
+/// interpreting arbitrary bytes as Unicode code points corrupts non-UTF-8 text.
+String decodeHtmlResponseBytes(Uint8List bytes, String? contentType) {
+  final match = RegExp(
+    r'''charset\s*=\s*[\"']?([^;\s\"']+)''',
+    caseSensitive: false,
+  ).firstMatch(contentType ?? '');
+  final charset = match?.group(1)?.trim().toLowerCase();
+
+  if (charset == 'windows-1252' ||
+      charset == 'cp1252' ||
+      charset == 'x-cp1252') {
+    const windows1252 = <int>[
+      0x20AC, 0xFFFD, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+      0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0xFFFD, 0x017D, 0xFFFD,
+      0xFFFD, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+      0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0xFFFD, 0x017E, 0x0178,
+    ];
+    final codeUnits = <int>[];
+    for (final byte in bytes) {
+      codeUnits.add(byte >= 0x80 && byte <= 0x9F
+          ? windows1252[byte - 0x80]
+          : byte);
+    }
+    return String.fromCharCodes(codeUnits);
+  }
+
+  final encoding = charset == null || charset.isEmpty
+      ? utf8
+      : Encoding.getByName(charset) ?? utf8;
+  return encoding.decode(bytes, allowMalformed: true);
+}
+
 class ScraperConfig {
   const ScraperConfig({
     required this.baseUrl,
@@ -311,13 +345,8 @@ class Scraper {
           bodyBuilder.add(chunk);
         }
         final bodyBytes = bodyBuilder.takeBytes();
-        final contentType =
-            response.headers['content-type']?.toLowerCase() ?? '';
-        final declaresOther =
-            contentType.contains('charset') && !contentType.contains('utf-8');
-        final body = declaresOther
-            ? String.fromCharCodes(bodyBytes)
-            : utf8.decode(bodyBytes, allowMalformed: true);
+        final contentType = response.headers['content-type'];
+        final body = decodeHtmlResponseBytes(bodyBytes, contentType);
         if (body.trim().isEmpty) {
           throw const ScraperException('The source returned an empty page.');
         }

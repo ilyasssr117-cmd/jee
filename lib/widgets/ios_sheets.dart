@@ -3,7 +3,6 @@ import 'package:flutter/material.dart' show Material, Colors, Divider;
 
 import '../app_theme.dart';
 import '../touch.dart';
-import 'glass.dart';
 
 /// One column of a wheel picker (like UIPickerView's component).
 class WheelColumn {
@@ -96,15 +95,13 @@ class _WheelSheetState extends State<_WheelSheet> {
         alignment: Alignment.bottomCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: GlassSurface(
-              borderRadius: 28,
-              sigma: 24,
-              tint: surface.withValues(alpha: dark ? 0.72 : 0.80),
-              child: Material(
-                color: Colors.transparent,
-                child: Column(
+          child: Material(
+            color: surface,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(14),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Toolbar --------------------------------------------------
@@ -238,9 +235,6 @@ class _WheelSheetState extends State<_WheelSheet> {
                 ),
                 SizedBox(height: bottom + 8),
               ],
-            ),
-          
-              ),
             ),
           ),
         ),

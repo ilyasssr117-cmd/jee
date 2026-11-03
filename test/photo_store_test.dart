@@ -242,4 +242,59 @@ void main() {
       expect(store.album(_album.id)?.photos, hasLength(1));
     },
   );
+  test(
+    'saves and restores a 1,000-photo album without truncating metadata',
+    () async {
+      final store = PhotoStore.forTesting(root: root, client: okClient());
+      final photos = List<AlbumPhoto>.generate(
+        1000,
+        (index) => _photo(index + 1),
+      );
+
+      final saved = await store.savePhotos(_album, photos);
+
+      expect(saved, 1000);
+      expect(store.album(_album.id)!.photos, hasLength(1000));
+
+      final restored = PhotoStore.forTesting(root: root);
+      restored.load();
+      expect(restored.album(_album.id)!.photos, hasLength(1000));
+    },
+  );
+
+  test(
+    'an album can continue saving after it grows beyond the old 80 MB cap',
+    () async {
+      final store = PhotoStore.forTesting(root: root, client: okClient());
+      expect(await store.savePhotos(_album, <AlbumPhoto>[_photo(1)]), 1);
+
+      final album = store.album(_album.id)!;
+      final folder = Directory('${root.path}/${album.dir}');
+      final filler = File('${folder.path}/existing-large-file.bin');
+      final handle = await filler.open(mode: FileMode.write);
+      await handle.truncate(90 * 1024 * 1024);
+      await handle.close();
+
+      expect(await store.savePhotos(_album, <AlbumPhoto>[_photo(2)]), 1);
+      expect(store.album(_album.id)!.photos, hasLength(2));
+    },
+  );
+
+  test('saved album metadata preserves more than 200 photo records', () {
+    final raw = <String, Object?>{
+      'id': 'album',
+      'title': 'Album',
+      'url': 'https://example.test/album',
+      'dir': 'album_folder',
+      'photos': List<Map<String, Object?>>.generate(
+        1000,
+        (index) => <String, Object?>{
+          'id': 'photo-$index',
+          'file': 'photo_$index.jpg',
+        },
+      ),
+    };
+
+    expect(SavedAlbum.fromJson(raw)!.photos, hasLength(1000));
+  });
 }

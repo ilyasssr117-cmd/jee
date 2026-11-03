@@ -88,12 +88,10 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
             opacity: inline,
             child: ClipRect(
               child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+                filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: background.withValues(
-                      alpha: brightness == Brightness.dark ? 0.62 : 0.72,
-                    ),
+                    color: background.withValues(alpha: 0.78),
                     border: Border(
                       bottom: BorderSide(color: outline, width: 0.5),
                     ),

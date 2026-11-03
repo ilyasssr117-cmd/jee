@@ -412,10 +412,10 @@ class SearchOverlayState extends State<SearchOverlay> {
               final focused = _fieldNode.hasFocus;
               return AnimatedContainer(
                 duration: Motion.normal,
-                height: 44,
+                height: 42,
                 decoration: BoxDecoration(
                   color: AppColors.surfaceHigh,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: BorderRadius.circular(Radii.field),
                   border: Border.all(
                     color: focused
                         ? AppColors.accent.withValues(alpha: 0.8)
@@ -442,7 +442,7 @@ class SearchOverlayState extends State<SearchOverlay> {
                         maxLines: 1,
                         textAlignVertical: TextAlignVertical.center,
                         textInputAction: TextInputAction.search,
-                        keyboardAppearance: AppColors.palette.brightness,
+                        keyboardAppearance: Theme.of(context).brightness,
                         onChanged: _onChanged,
                         onSubmitted: (_) => _submit(),
                         cursorColor: AppColors.accent,

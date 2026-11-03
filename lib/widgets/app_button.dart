@@ -5,41 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../touch.dart';
-import 'glass.dart';
 
 enum AppButtonStyle { primary, secondary, tertiary }
-
-/// A label that never wraps and never breaks inside a word. When the space is
-/// tight it scales down smoothly instead (like UIKit's adjustsFontSizeToFitWidth),
-/// so "Download" can no longer split into "Downloa" + "d".
-class FitLabel extends StatelessWidget {
-  const FitLabel(
-    this.text, {
-    super.key,
-    this.style,
-    this.textAlign = TextAlign.center,
-  });
-
-  final String text;
-  final TextStyle? style;
-  final TextAlign textAlign;
-
-  @override
-  Widget build(BuildContext context) {
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.center,
-      child: Text(
-        text,
-        maxLines: 1,
-        softWrap: false,
-        textAlign: textAlign,
-        overflow: TextOverflow.visible,
-        style: style,
-      ),
-    );
-  }
-}
 
 double appChipTapHeight(BuildContext context) {
   final scale = MediaQuery.textScalerOf(context).scale(13) / 13;
@@ -126,16 +93,7 @@ class AppButton extends StatelessWidget {
           color: background,
           borderRadius: BorderRadius.circular(Radii.button),
           border: Border.all(color: border),
-          gradient: primary
-              ? LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.18),
-                    Colors.white.withValues(alpha: 0.0),
-                  ],
-                )
-              : null,
+          boxShadow: const [],
         ),
         child: Row(
           mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
@@ -148,8 +106,12 @@ class AppButton extends StatelessWidget {
             if ((loading || icon != null) && label.isNotEmpty)
               const SizedBox(width: 6),
             Flexible(
-              child: FitLabel(
+              child: Text(
                 label,
+                maxLines: singleLine ? 1 : 2,
+                softWrap: !singleLine,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
                 style: AppText.label.copyWith(color: foreground),
               ),
             ),
@@ -205,8 +167,11 @@ class AppChip extends StatelessWidget {
                     : (onDark ? const Color(0x1FFFFFFF) : AppColors.outline),
               ),
             ),
-            child: FitLabel(
+            child: Text(
               label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
               style: AppText.label.copyWith(
                 fontSize: 13,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
@@ -235,11 +200,7 @@ class RoundIconButton extends StatelessWidget {
     this.background = const Color(0x8C000000),
     this.color = Colors.white,
     this.haptic = Haptic.light,
-    this.glass = false,
   });
-
-  /// Uses a live Liquid Glass blur behind the button. Keep to a few per screen.
-  final bool glass;
 
   final IconData icon;
   final VoidCallback onTap;
@@ -264,33 +225,16 @@ class RoundIconButton extends StatelessWidget {
         width: box,
         height: box,
         child: Center(
-          child: glass
-              ? SizedBox(
-                  width: size,
-                  height: size,
-                  child: GlassSurface(
-                    borderRadius: size / 2,
-                    sigma: 16,
-                    shadow: false,
-                    tint: const Color(0x38000000),
-                    child: Center(
-                      child: Icon(icon, size: iconSize ?? 22, color: color),
-                    ),
-                  ),
-                )
-              : Container(
-                  width: size,
-                  height: size,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: background,
-                    border: Border.all(
-                      color: const Color(0x40FFFFFF),
-                      width: 0.8,
-                    ),
-                  ),
-                  child: Icon(icon, size: iconSize ?? 22, color: color),
-                ),
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: background,
+              border: Border.all(color: const Color(0x26FFFFFF)),
+            ),
+            child: Icon(icon, size: iconSize ?? 22, color: color),
+          ),
         ),
       ),
     );

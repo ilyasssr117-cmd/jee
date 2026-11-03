@@ -45,6 +45,11 @@ class SavedPhoto {
 }
 
 class SavedAlbum {
+  /// Maximum number of photo records retained for one saved album.
+  /// Keep this above the UI's supported large-album size so metadata survives
+  /// app restarts instead of silently truncating at the first 200 entries.
+  static const int maxPhotosPerAlbum = 5000;
+
   SavedAlbum({
     required this.id,
     required this.title,
@@ -102,7 +107,7 @@ class SavedAlbum {
     final photos = <SavedPhoto>[];
     final list = raw['photos'];
     if (list is List) {
-      for (final entry in list.take(5000)) {
+      for (final entry in list.take(maxPhotosPerAlbum)) {
         final photo = SavedPhoto.fromJson(entry);
         if (photo != null) photos.add(photo);
       }
@@ -151,10 +156,12 @@ class PhotoStore extends ChangeNotifier {
   static const String _key = 'photo_albums_v1';
   static const int _parallel = 2;
   static const int _maxGlobalParallel = 4;
-  static const int _maxPhotosPerAlbum = 5000;
-  static const int _maxSavedAlbums = 200;
-  static const int _maxPhotoBytes = 30 * 1024 * 1024;
-  static const int _maxAlbumBytes = 2 * 1024 * 1024 * 1024;
+  static const int _maxPhotosPerAlbum = SavedAlbum.maxPhotosPerAlbum;
+  static const int _maxSavedAlbums = 40;
+  // High-resolution originals can exceed 8 MB. These limits remain bounded,
+  // but no longer make ordinary 1,000-photo albums fail around image 100.
+  static const int _maxPhotoBytes = 40 * 1024 * 1024;
+  static const int _maxAlbumBytes = 3 * 1024 * 1024 * 1024;
   int _activeTransfers = 0;
   final Queue<Completer<void>> _transferWaiters = Queue<Completer<void>>();
 
@@ -189,13 +196,12 @@ class PhotoStore extends ChangeNotifier {
 
   void load() {
     _albums.clear();
-    _idIndex.clear();
     final raw = LocalStore.readString(_key);
-    if (raw != null && raw.isNotEmpty && raw.length <= 48 * 1024 * 1024) {
+    if (raw != null && raw.isNotEmpty && raw.length <= 4 * 1024 * 1024) {
       try {
         final decoded = jsonDecode(raw);
         if (decoded is List) {
-          for (final entry in decoded.take(200)) {
+          for (final entry in decoded.take(100)) {
             final album = SavedAlbum.fromJson(entry);
             if (album == null) continue;
             album.photos.removeWhere((p) => !_fileOf(album, p).existsSync());
@@ -243,17 +249,9 @@ class PhotoStore extends ChangeNotifier {
     return null;
   }
 
-  final Map<String, Set<String>> _idIndex = <String, Set<String>>{};
-
   bool isSaved(String albumId, String photoId) {
-    var ids = _idIndex[albumId];
-    if (ids == null) {
-      final saved = album(albumId);
-      if (saved == null) return false;
-      ids = <String>{for (final p in saved.photos) p.id};
-      _idIndex[albumId] = ids;
-    }
-    return ids.contains(photoId);
+    final saved = album(albumId);
+    return saved != null && saved.photos.any((p) => p.id == photoId);
   }
 
   int savedCount(String albumId, Iterable<AlbumPhoto> photos) =>
@@ -385,7 +383,6 @@ class PhotoStore extends ChangeNotifier {
               return;
             }
             saved!.photos.add(SavedPhoto(id: photo.id, file: name));
-            _idIndex[album.id]?.add(photo.id);
             ok++;
           } catch (_) {
             reservedBytes -= heldReservation;
@@ -399,9 +396,7 @@ class PhotoStore extends ChangeNotifier {
         } finally {
           _releaseTransfer();
           job.done++;
-          // Checkpoint so an interrupted download keeps what it already saved.
-          if (job.done % 40 == 0) _persist();
-          _notifyProgress();
+          notifyListeners();
         }
       }
     }
@@ -423,19 +418,6 @@ class PhotoStore extends ChangeNotifier {
       if (!completion.isCompleted) completion.complete();
     }
     return ok;
-  }
-
-  DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// Photo workers finish many times per second on a big album. Rebuilding the
-  /// whole grid for each one wastes battery, so progress is coalesced.
-  void _notifyProgress() {
-    final now = DateTime.now();
-    if (now.difference(_lastNotify) < const Duration(milliseconds: 160)) {
-      return;
-    }
-    _lastNotify = now;
-    notifyListeners();
   }
 
   void cancel(String albumId) => _jobs[albumId]?.cancelled = true;
@@ -659,7 +641,6 @@ class PhotoStore extends ChangeNotifier {
       if (await file.exists()) await file.delete();
     } catch (_) {}
     saved.photos.remove(photo);
-    _idIndex.remove(albumId);
     if (saved.photos.isEmpty) {
       _albums.remove(saved);
       unawaited(_deleteDir(Directory('${_root?.path ?? ''}/${saved.dir}')));
@@ -677,7 +658,6 @@ class PhotoStore extends ChangeNotifier {
     final saved = album(albumId);
     if (saved == null) return;
     _albums.remove(saved);
-    _idIndex.remove(albumId);
     await _deleteDir(Directory('${_root?.path ?? ''}/${saved.dir}'));
     _persist();
     notifyListeners();

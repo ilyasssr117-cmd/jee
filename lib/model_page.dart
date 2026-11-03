@@ -456,7 +456,7 @@ class _ModelPageState extends State<ModelPage> {
                       ),
                   ],
                   SliverToBoxAdapter(
-                    child: SizedBox(height: Gaps.xl + context.safe.bottom + 120),
+                    child: SizedBox(height: Gaps.xl + context.safe.bottom),
                   ),
                 ],
               ),

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
@@ -20,9 +19,18 @@ import 'touch.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
-import 'widgets/glass.dart';
 import 'widgets/state_views.dart';
-import 'widgets/video_artwork.dart';
+
+/// Returns a safe restore position for a refreshed video stream.
+/// A small end-of-stream buffer avoids seeking exactly to the final frame.
+Duration? safePlaybackRestorePosition(Duration target, Duration duration) {
+  if (target <= Duration.zero || duration <= Duration.zero) return null;
+  final safeEnd = duration > const Duration(milliseconds: 250)
+      ? duration - const Duration(milliseconds: 250)
+      : Duration.zero;
+  if (safeEnd <= Duration.zero) return null;
+  return target > safeEnd ? safeEnd : target;
+}
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
@@ -428,8 +436,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         return;
       }
       await fresh.setLooping(false);
-      final target = old.value.position;
-      if (target > Duration.zero) await fresh.seekTo(target);
+      // A refreshed stream can point to a shorter rendition. Never seek past
+      // its duration (some platform players reject out-of-range seeks).
+      final safeTarget = safePlaybackRestorePosition(
+        old.value.position,
+        fresh.value.duration,
+      );
+      if (safeTarget != null) await fresh.seekTo(safeTarget);
       if (_speed != 1.0) await fresh.setPlaybackSpeed(_speed);
       if (wasPlaying) await fresh.play();
       if (cancelled()) {
@@ -1274,54 +1287,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Poster behind the spinner: a blurred cover layer fills the
-              // screen while the sharp thumbnail keeps its own aspect ratio.
-              ...[
-                RepaintBoundary(
-                  child: ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(
-                      sigmaX: 28,
-                      sigmaY: 28,
-                      tileMode: TileMode.clamp,
-                    ),
-                    child: VideoArtwork(
-                      video: _video,
-                      showLabel: false,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-                const ColoredBox(color: Color(0x66000000)),
-                Center(
-                  child: VideoArtwork(
-                    video: _video,
-                    showLabel: false,
-                    fit: BoxFit.contain,
-                    transparentBackground: true,
-                  ),
-                ),
-                const ColoredBox(color: Color(0x40000000)),
-              ],
               Center(
-                child: GlassSurface(
-                  borderRadius: 22,
-                  sigma: 20,
-                  tint: const Color(0x66000000),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: Gaps.xl,
-                    vertical: Gaps.lg,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Spinner(size: 32, color: Colors.white),
-                      const SizedBox(height: Gaps.md),
-                      Text(
-                        text,
-                        style: darkText.body.copyWith(color: Colors.white),
-                      ),
-                    ],
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Spinner(size: 36, color: Colors.white),
+                    const SizedBox(height: Gaps.lg),
+                    Text(text, style: darkText.body),
+                  ],
                 ),
               ),
               Positioned(
@@ -1734,20 +1707,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               child: Container(
                 height: 38,
                 margin: const EdgeInsets.only(right: 3),
-                child: GlassSurface(
-                  blur: false,
-                  shadow: false,
-                  borderRadius: 19,
-                  tint: const Color(0x66000000),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Center(
-                    widthFactor: 1,
-                    child: Text(
-                      _speedLabel(_speed),
-                      maxLines: 1,
-                      style: darkText.label.copyWith(fontSize: 13),
-                    ),
-                  ),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0x8C000000),
+                  borderRadius: BorderRadius.circular(19),
+                  border: Border.all(color: const Color(0x26FFFFFF)),
+                ),
+                child: Text(
+                  _speedLabel(_speed),
+                  style: darkText.label.copyWith(fontSize: 13),
                 ),
               ),
             ),
@@ -1825,13 +1794,15 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassSurface(
-      blur: false,
-      shadow: false,
-      borderRadius: Radii.pill,
-      tint: const Color(0x99000000),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: child,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xB3000000),
+        borderRadius: BorderRadius.circular(Radii.pill),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: child,
+      ),
     );
   }
 }

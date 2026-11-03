@@ -1,11 +1,11 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 import '../touch.dart';
-import 'app_button.dart' show FitLabel;
-import 'glass.dart';
 
 enum AppTab { home, search, reels, library, settings }
 
@@ -13,7 +13,8 @@ const double kBottomBarHeight = 74;
 
 double appDockHeight(BuildContext context) {
   final scale = MediaQuery.textScalerOf(context).scale(11) / 11;
-  final labelHeight = 11 * scale.clamp(1.0, 1.65).toDouble() * 1.1;
+  final lines = scale > 1.65 ? 2 : 1;
+  final labelHeight = 11 * scale * 1.1 * lines;
   return math.max(66, 42 + labelHeight).toDouble();
 }
 
@@ -142,14 +143,32 @@ class _AppBottomBarState extends State<AppBottomBar> {
         alignment: Alignment.bottomCenter,
         child: Padding(
           padding: EdgeInsets.only(bottom: bottom),
-          child: SizedBox(
-            width: width,
-            height: dockHeight,
-            child: GlassSurface(
-              borderRadius: 27,
-              sigma: 22,
-              padding: const EdgeInsets.all(5),
-              child: LayoutBuilder(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(27),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+              child: Container(
+                width: width,
+                height: dockHeight,
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: AppColors.palette.brightness == Brightness.dark
+                      ? const Color(0xD21A2040)
+                      : const Color(0xE8F5F6F8),
+                  borderRadius: BorderRadius.circular(27),
+                  border: Border.all(
+                    color: AppColors.outline,
+                    width: 0.7,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: LayoutBuilder(
                   builder: (context, constraints) {
                     final itemWidth = constraints.maxWidth / _tabs.length;
                     final selectedLeft =
@@ -215,6 +234,7 @@ class _AppBottomBarState extends State<AppBottomBar> {
                     );
                   },
                 ),
+              ),
             ),
           ),
         ),
@@ -298,14 +318,31 @@ class _TabItem extends StatelessWidget {
                 letterSpacing: 0.1,
                 color: active ? AppColors.textPrimary : AppColors.textTertiary,
               ),
-              child: FitLabel(
-                label,
-                style: null,
+              child: Text(
+                _accessibleLabel(
+                  label,
+                  MediaQuery.textScalerOf(context).scale(11) / 11,
+                ),
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.visible,
               ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  String _accessibleLabel(String value, double scale) {
+    if (scale <= 1.65) return value;
+    return switch (value) {
+      'Home' => 'Ho\nme',
+      'Search' => 'Sea\nrch',
+      'Reels' => 'Re\nels',
+      'Library' => 'Lib\nrary',
+      'Settings' => 'Set\ntings',
+      _ => value,
+    };
   }
 }

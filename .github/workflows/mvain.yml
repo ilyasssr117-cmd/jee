@@ -1,4 +1,5 @@
-name: Build TV Tube iOS IPA
+
+name: Build VXTUBE iOS IPA
 
 on:
   workflow_dispatch:
@@ -30,14 +31,25 @@ jobs:
           flutter --version
           dart --version
 
-      - name: Get dependencies
+      - name: Clean Previous Build
+        run: flutter clean
+
+      - name: Get Dependencies
         run: flutter pub get
+
+      - name: Regenerate App Icons
+        run: dart run flutter_launcher_icons
+
+      - name: Verify Updated iOS Icon
+        run: |
+          echo "Checking iOS App Icon..."
+          ls -lah ios/Runner/Assets.xcassets/AppIcon.appiconset/
 
       - name: Install CocoaPods
         working-directory: ios
         run: pod install --repo-update
 
-      - name: Analyze Dart code
+      - name: Analyze Dart Code
         continue-on-error: true
         run: flutter analyze
 
@@ -52,19 +64,20 @@ jobs:
           test -d build/ios/iphoneos/Runner.app
 
           rm -rf Payload
-          rm -f TV-Tube.ipa
+          rm -f VXTUBE.ipa
 
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
 
-          /usr/bin/zip -qry TV-Tube.ipa Payload
-          test -s TV-Tube.ipa
+          /usr/bin/zip -qry VXTUBE.ipa Payload
 
-          ls -lh TV-Tube.ipa
+          test -s VXTUBE.ipa
+
+          ls -lh VXTUBE.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: TV-Tube-IPA
-          path: TV-Tube.ipa
+          name: VXTUBE-IPA
+          path: VXTUBE.ipa
           if-no-files-found: error

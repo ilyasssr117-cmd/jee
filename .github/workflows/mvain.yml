@@ -112,3 +112,34 @@ jobs:
           name: TV-Tube-APK
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.8"
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        continue-on-error: true
+        run: flutter analyze
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Upload Windows application bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: VXTUBE-Windows-x64
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error

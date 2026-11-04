@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart'
     show CupertinoPageRoute, CupertinoPageTransitionsBuilder;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 
 abstract final class OnDark {
@@ -412,6 +413,12 @@ ScrollPhysics nativeScrollPhysics(
 
 class AppScrollBehavior extends MaterialScrollBehavior {
   const AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => <PointerDeviceKind>{
+        ...super.dragDevices,
+        PointerDeviceKind.mouse,
+      };
 
   @override
   Widget buildOverscrollIndicator(

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 import 'app_theme.dart';
@@ -33,6 +34,11 @@ void main() {
 
 Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (defaultTargetPlatform == TargetPlatform.windows) {
+    try {
+      await windowManager.ensureInitialized();
+    } catch (_) {}
+  }
 
   FlutterError.onError = (details) {
     if (kDebugMode) FlutterError.presentError(details);
@@ -223,6 +229,24 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
     return MaterialApp(
       title: 'VXTUBEFinal',
       navigatorKey: rootNavigatorKey,
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.escape): _DesktopBackIntent(),
+        SingleActivator(LogicalKeyboardKey.f11): _ToggleFullscreenIntent(),
+      },
+      actions: <Type, Action<Intent>>{
+        _DesktopBackIntent: CallbackAction<_DesktopBackIntent>(
+          onInvoke: (_) {
+            unawaited(_handleDesktopBack());
+            return null;
+          },
+        ),
+        _ToggleFullscreenIntent: CallbackAction<_ToggleFullscreenIntent>(
+          onInvoke: (_) {
+            unawaited(_toggleDesktopFullscreen());
+            return null;
+          },
+        ),
+      },
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(_brightness),
       scrollBehavior: const AppScrollBehavior(),
@@ -284,5 +308,27 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
       },
       home: const HomePage(),
     );
+  }
+}
+
+class _DesktopBackIntent extends Intent {
+  const _DesktopBackIntent();
+}
+
+class _ToggleFullscreenIntent extends Intent {
+  const _ToggleFullscreenIntent();
+}
+
+Future<void> _handleDesktopBack() async {
+  await rootNavigatorKey.currentState?.maybePop();
+}
+
+Future<void> _toggleDesktopFullscreen() async {
+  if (defaultTargetPlatform != TargetPlatform.windows) return;
+  try {
+    final isFullscreen = await windowManager.isFullScreen();
+    await windowManager.setFullScreen(!isFullscreen);
+  } catch (error) {
+    if (kDebugMode) debugPrint('[WINDOW] Fullscreen toggle failed: $error');
   }
 }

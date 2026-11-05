@@ -1040,10 +1040,10 @@ class _WindowsNavigationRail extends StatelessWidget {
 
   static const _tabs = <({AppTab tab, IconData icon, String label})>[
     (tab: AppTab.home, icon: Icons.home_rounded, label: 'Home'),
-    (tab: AppTab.search, icon: Icons.search, label: 'Search'),
+    (tab: AppTab.search, icon: Icons.search_rounded, label: 'Search'),
     (tab: AppTab.reels, icon: Icons.play_arrow_rounded, label: 'Reels'),
-    (tab: AppTab.library, icon: Icons.video_library_rounded, label: 'Library'),
-    (tab: AppTab.settings, icon: Icons.settings_rounded, label: 'Settings'),
+    (tab: AppTab.library, icon: Icons.video_library_outlined, label: 'Library'),
+    (tab: AppTab.settings, icon: Icons.settings_outlined, label: 'Settings'),
   ];
 
   @override

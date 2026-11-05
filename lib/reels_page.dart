@@ -322,6 +322,32 @@ class _WindowsReelsBrowser {
   }
 }
 
+/// Android WebView sends the Reels request through Chromium rather than
+/// Dart's native HTTP stack, which can be rejected by the video service.
+class _AndroidReelsBrowser {
+  static const MethodChannel _channel =
+      MethodChannel('com.tv.watch_tube/reels_browser');
+
+  static Future<List<ReelItem>> fetch(Uri uri) async {
+    final body = await _channel.invokeMethod<String>('fetchReels', {
+      'url': uri.toString(),
+      'headers': const {
+        'Accept': 'application/json',
+        'Origin': 'https://tik.porn',
+        'Referer': 'https://tik.porn/',
+      },
+    }).timeout(const Duration(seconds: 28));
+    if (body == null || body.isEmpty) {
+      throw const HttpException('Android browser returned an empty response.');
+    }
+    final decoded = jsonDecode(body);
+    if (decoded is Map && decoded['code'] != null && decoded['code'] != 200) {
+      throw const FormatException('Reels service returned an error response.');
+    }
+    return parseReels(decoded);
+  }
+}
+
 class _ReelsMethodNotAllowed implements Exception {
   const _ReelsMethodNotAllowed();
 }
@@ -376,6 +402,7 @@ class ReelsRepository {
 
   Future<List<ReelItem>> _getOnce() async {
     if (Platform.isWindows) return _WindowsReelsBrowser.fetch(_api);
+    if (Platform.isAndroid) return _AndroidReelsBrowser.fetch(_api);
     final req = http.Request('GET', _api)
       ..headers.addAll(const {
         'User-Agent': _kUserAgent,

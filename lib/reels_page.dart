@@ -22,6 +22,7 @@ import 'package:video_player/video_player.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import 'app_theme.dart';
+import 'analytics_service.dart';
 import 'download_store.dart';
 import 'error_text.dart';
 import 'favorites_store.dart';
@@ -639,6 +640,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   final List<ReelItem> _items = <ReelItem>[];
   final Map<int, VideoPlayerController> _controllers = {};
   final Map<int, _ReelPlaybackState> _reelStates = <int, _ReelPlaybackState>{};
+  final Map<int, DateTime> _analyticsWatchStarted = <int, DateTime>{};
+  final Set<String> _analyticsPlayedReels = <String>{};
   final Map<VideoPlayerController, VoidCallback> _controllerListeners = {};
   final Map<VideoPlayerController, Future<void>> _initializations = {};
   Future<void> _disposeTail = Future<void>.value();
@@ -701,6 +704,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   /// Leaving the Reels section: silence the current reel and free the spare
   /// decoder so the rest of the app has the memory back.
   void _pauseForLeaving() {
+    _stopReelAnalytics(_current);
     for (final entry in _controllers.entries.toList()) {
       final controller = entry.value;
       if (controller.value.isInitialized) {
@@ -849,9 +853,41 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                 : value.isPlaying
                     ? _ReelPlaybackState.playing
                     : _ReelPlaybackState.paused;
+    if (index == _current) {
+      if (next == _ReelPlaybackState.playing &&
+          !_analyticsWatchStarted.containsKey(index)) {
+        final id = _items[index].id;
+        final resumed = !_analyticsPlayedReels.add(id);
+        _analyticsWatchStarted[index] = DateTime.now();
+        if (resumed) {
+          AnalyticsService.instance.trackVideoResume(id, source: 'reels');
+        } else {
+          AnalyticsService.instance.trackVideoPlay(id, source: 'reels');
+        }
+      } else if (next == _ReelPlaybackState.paused &&
+          _analyticsWatchStarted.containsKey(index)) {
+        _stopReelAnalytics(index);
+      }
+    }
     if (next == previous) return;
     _reelStates[index] = next;
     setState(() {});
+  }
+
+  void _stopReelAnalytics(int index) {
+    if (index < 0 || index >= _items.length) return;
+    final startedAt = _analyticsWatchStarted.remove(index);
+    if (startedAt == null) return;
+    final id = _items[index].id;
+    AnalyticsService.instance.trackVideoPause(id, source: 'reels');
+    final watched = DateTime.now().difference(startedAt);
+    if (watched >= const Duration(seconds: 1)) {
+      AnalyticsService.instance.trackVideoWatchDuration(
+        id,
+        watched,
+        source: 'reels',
+      );
+    }
   }
 
   Future<void> _disposeReelController(VideoPlayerController controller) {
@@ -1012,6 +1048,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void _onPageChanged(int index) {
     if (!widget.active) return;
     final previous = _current;
+    _stopReelAnalytics(previous);
     _current = index;
     _syncPending = true;
 

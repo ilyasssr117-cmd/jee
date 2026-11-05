@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
 import 'app_theme.dart';
+import 'analytics_service.dart';
 import 'download_store.dart';
 import 'favorites_store.dart';
 import 'model_page.dart';
@@ -62,6 +63,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.instance.trackVideoDetailsOpen(widget.video.id);
     _relatedFuture = _loadRelated();
     _modelsFuture = _loadModels();
     _watchModels(_modelsFuture);

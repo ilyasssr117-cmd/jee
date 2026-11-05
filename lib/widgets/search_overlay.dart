@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
+import '../analytics_service.dart';
 import '../app_theme.dart';
 import '../error_text.dart';
 import '../models.dart';
@@ -66,6 +67,7 @@ class SearchOverlayState extends State<SearchOverlay> {
   bool _awaiting = false;
   int _page = 0;
   int _generation = 0;
+  int _analyticsTrackedSearchGeneration = -1;
   int _emptyPages = 0;
   bool _loading = false;
   bool _hasMore = false;
@@ -220,6 +222,12 @@ class SearchOverlayState extends State<SearchOverlay> {
         _people = result;
         _peopleLoading = false;
       });
+      _trackSearchOnce(
+        generation,
+        text,
+        result.models.length + result.albums.length,
+        searchType: 'people',
+      );
     } catch (error) {
       if (!mounted || generation != _generation) return;
       setState(() {
@@ -282,6 +290,7 @@ class SearchOverlayState extends State<SearchOverlay> {
 
     final offline = reset ? OfflineListingCache.read(cacheKey) : null;
     if (offline != null) {
+      _trackSearchOnce(generation, searchText, offline.length);
       setState(() {
         _videos
           ..clear()
@@ -314,6 +323,14 @@ class SearchOverlayState extends State<SearchOverlay> {
       );
       if (!mounted || generation != _generation) return;
       OfflineListingCache.write(cacheKey, result);
+      if (reset) {
+        _trackSearchOnce(
+          generation,
+          searchText,
+          result.length,
+          searchType: 'videos',
+        );
+      }
 
       final seen = _videos.map((video) => video.id).toSet();
       final fresh = <Video>[];
@@ -343,6 +360,21 @@ class SearchOverlayState extends State<SearchOverlay> {
         _error = describeError(error, subject: 'search results');
       });
     }
+  }
+
+  void _trackSearchOnce(
+    int generation,
+    String query,
+    int resultCount, {
+    String searchType = 'videos',
+  }) {
+    if (_analyticsTrackedSearchGeneration == generation) return;
+    _analyticsTrackedSearchGeneration = generation;
+    AnalyticsService.instance.trackSearch(
+      query,
+      resultCount: resultCount,
+      searchType: searchType,
+    );
   }
 
   Future<void> _revalidateOfflineSearch({

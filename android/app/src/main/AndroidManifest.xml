@@ -17,6 +17,10 @@
         android:hardwareAccelerated="true"
         android:supportsRtl="true">
 
+        <meta-data
+            android:name="com.posthog.posthog.AUTO_INIT"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

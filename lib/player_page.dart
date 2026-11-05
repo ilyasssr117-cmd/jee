@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import 'app_settings.dart';
+import 'analytics_service.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'history_store.dart';
@@ -134,6 +135,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int _autoRetries = 0;
   bool _reconnecting = false;
   bool _manualReload = false;
+  bool _analyticsIsPlaying = false;
+  String? _analyticsPlayingId;
+  final Set<String> _analyticsPlayedIds = <String>{};
+  DateTime? _analyticsWatchStartedAt;
 
   bool _portrait = false;
   bool _orientationForced = false;
@@ -158,6 +163,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   Future<void> _initializePlayer({bool refreshSource = false}) async {
     if (_isLeaving) return;
+    _stopAnalyticsPlayback();
     final generation = ++_initializationGeneration;
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
@@ -654,6 +660,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<bool> _releaseControllerBeforeExit() async {
+    _stopAnalyticsPlayback();
     _isLeaving = true;
     ++_initializationGeneration;
     _hideTimer?.cancel();
@@ -770,6 +777,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final atEnd = value.isInitialized &&
         value.duration > Duration.zero &&
         value.position >= value.duration - const Duration(milliseconds: 800);
+    if (value.isInitialized) {
+      if (atEnd && !value.isPlaying) {
+        _stopAnalyticsPlayback(emitPause: false);
+      } else {
+        _syncAnalyticsPlayback(value.isPlaying);
+      }
+    }
 
     _playing.value = value.isPlaying;
 
@@ -808,10 +822,48 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         }
       });
       if (finished) {
+        AnalyticsService.instance.trackVideoComplete(_video.id);
+        _stopAnalyticsPlayback(emitPause: false);
         _startAutoplay();
       } else {
         _autoplayTimer?.cancel();
         _countdown.value = null;
+      }
+    }
+  }
+
+  void _syncAnalyticsPlayback(bool isPlaying) {
+    if (isPlaying) {
+      if (_analyticsIsPlaying && _analyticsPlayingId == _video.id) return;
+      if (_analyticsIsPlaying) _stopAnalyticsPlayback();
+      final wasPlayed = !_analyticsPlayedIds.add(_video.id);
+      _analyticsIsPlaying = true;
+      _analyticsPlayingId = _video.id;
+      _analyticsWatchStartedAt = DateTime.now();
+      if (wasPlayed) {
+        AnalyticsService.instance.trackVideoResume(_video.id);
+      } else {
+        AnalyticsService.instance.trackVideoPlay(_video.id);
+      }
+      return;
+    }
+    if (_analyticsIsPlaying && _analyticsPlayingId == _video.id) {
+      _stopAnalyticsPlayback();
+    }
+  }
+
+  void _stopAnalyticsPlayback({bool emitPause = true}) {
+    final contentId = _analyticsPlayingId;
+    final startedAt = _analyticsWatchStartedAt;
+    if (!_analyticsIsPlaying || contentId == null) return;
+    _analyticsIsPlaying = false;
+    _analyticsPlayingId = null;
+    _analyticsWatchStartedAt = null;
+    if (emitPause) AnalyticsService.instance.trackVideoPause(contentId);
+    if (startedAt != null) {
+      final watched = DateTime.now().difference(startedAt);
+      if (watched >= const Duration(seconds: 1)) {
+        AnalyticsService.instance.trackVideoWatchDuration(contentId, watched);
       }
     }
   }
@@ -1163,6 +1215,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopAnalyticsPlayback();
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
     _stallTimer?.cancel();

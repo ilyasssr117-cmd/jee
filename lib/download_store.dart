@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'analytics_service.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -134,7 +135,8 @@ class DownloadStore extends ChangeNotifier {
     final dir = Directory('${documents.path}/downloads');
     if (!await dir.exists()) await dir.create(recursive: true);
     if (!await dir.exists()) {
-      throw const FileSystemException('Could not create the downloads directory.');
+      throw const FileSystemException(
+          'Could not create the downloads directory.');
     }
     _dir = dir;
 
@@ -273,7 +275,8 @@ class DownloadStore extends ChangeNotifier {
             'Downloading {progress}',
             '{displayName}',
           ),
-          complete: const TaskNotification('Download complete', '{displayName}'),
+          complete:
+              const TaskNotification('Download complete', '{displayName}'),
           error: const TaskNotification('Download failed', '{displayName}'),
           paused: const TaskNotification('Download paused', '{displayName}'),
           progressBar: true,
@@ -350,6 +353,7 @@ class DownloadStore extends ChangeNotifier {
           ),
         );
       }
+      AnalyticsService.instance.trackDownload('failed', id);
       _persist();
       notifyListeners();
       return;
@@ -460,6 +464,7 @@ class DownloadStore extends ChangeNotifier {
     final entry = _itemForTask(update.task);
     if (entry == null) return;
     final id = entry.video.id;
+    final previousStatus = entry.status;
     switch (update.status) {
       case TaskStatus.enqueued:
       case TaskStatus.running:
@@ -528,6 +533,13 @@ class DownloadStore extends ChangeNotifier {
                     : 'Download failed. Tap resume.';
           if (sizeRejected) unawaited(_deleteFiles(entry));
         }
+    }
+    if (entry.status == DownloadStatus.done &&
+        previousStatus != DownloadStatus.done) {
+      AnalyticsService.instance.trackDownload('completed', id);
+    } else if (entry.status == DownloadStatus.failed &&
+        previousStatus != DownloadStatus.failed) {
+      AnalyticsService.instance.trackDownload('failed', id);
     }
     _persist();
     notifyListeners();
@@ -721,10 +733,12 @@ class DownloadStore extends ChangeNotifier {
     if (_items.length >= _maxQueueItems) return false;
     if (!_initialized) {
       if (_pendingEnqueueIds.add(video.id)) {
+        AnalyticsService.instance.trackDownload('started', video.id);
         unawaited(_enqueueAfterInitialization(video));
       }
       return true;
     }
+    AnalyticsService.instance.trackDownload('started', video.id);
     _items.insert(0, DownloadItem(video: video.copyWith(streamUrl: '')));
     _persist();
     notifyListeners();
@@ -739,6 +753,7 @@ class DownloadStore extends ChangeNotifier {
             entry.status != DownloadStatus.failed)) {
       return;
     }
+    AnalyticsService.instance.trackDownload('started', id);
     _sizeRejected.remove(id);
     if (!_initialized) {
       if (_pendingEnqueueIds.add(id)) {

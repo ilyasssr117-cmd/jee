@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
+import 'analytics_service.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'error_text.dart';
@@ -618,6 +619,9 @@ class _HomePageState extends State<HomePage>
 
   void _changeCategory(String value) {
     if (value == _category) return;
+    if (value != 'All') {
+      AnalyticsService.instance.trackCategoryOpen(value);
+    }
     setState(() => _category = value);
     _loadPage(reset: true);
   }

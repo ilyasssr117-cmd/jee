@@ -9,6 +9,7 @@ import 'package:video_player_media_kit/video_player_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'analytics_service.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'favorites_store.dart';
@@ -35,6 +36,7 @@ void main() {
 
 Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AnalyticsService.instance.initialize();
   if (defaultTargetPlatform == TargetPlatform.windows) {
     VideoPlayerMediaKit.ensureInitialized(windows: true);
     try {
@@ -175,6 +177,11 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
 
   @override
   void didChangePlatformBrightness() => _onSettings();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    AnalyticsService.instance.onLifecycleState(state);
+  }
 
   @override
   void didHaveMemoryPressure() {

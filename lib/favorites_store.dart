@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'analytics_service.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'video_json.dart';
@@ -52,6 +53,7 @@ class FavoritesStore extends ChangeNotifier {
 
   void add(Video video) {
     if (!_ids.add(video.id)) return;
+    AnalyticsService.instance.trackFavorite(video.id, added: true);
     _items.insert(0, video.copyWith(streamUrl: ''));
     while (_items.length > _maxItems) {
       _ids.remove(_items.removeLast().id);
@@ -62,15 +64,16 @@ class FavoritesStore extends ChangeNotifier {
 
   void remove(String id) {
     if (!_ids.remove(id)) return;
+    AnalyticsService.instance.trackFavorite(id, added: false);
     _items.removeWhere((video) => video.id == id);
     _persist();
     notifyListeners();
   }
 
   void _persist() => LocalStore.writeList(
-    _key,
-    _items.map((video) => jsonEncode(_encode(video))).toList(),
-  );
+        _key,
+        _items.map((video) => jsonEncode(_encode(video))).toList(),
+      );
 
   static Map<String, dynamic> _encode(Video video) => videoToJson(video);
 

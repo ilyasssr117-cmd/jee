@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
@@ -598,7 +600,10 @@ class _HomePageState extends State<HomePage>
     final margin = context.hMargin;
     // The body extends behind the translucent tab bar; keep a scroll inset so
     // the last card can still be brought fully above the glass surface.
-    final bottomInset = appBottomBarHeight(context) + context.safe.bottom;
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
+    final bottomInset = windowsDesktop
+        ? 24.0
+        : appBottomBarHeight(context) + context.safe.bottom;
     final featured = _featured;
     final showCategories = _categories.length > 1;
     final firstLoad = _videos.isEmpty && _loading;
@@ -729,7 +734,25 @@ class _HomePageState extends State<HomePage>
               body: Stack(
                 fit: StackFit.expand,
                 children: [
-                  page!,
+                  if (windowsDesktop)
+                    Row(
+                      children: [
+                        _WindowsNavigationRail(
+                          selected: searchOpen
+                              ? AppTab.search
+                              : switch (_dragTarget ?? _section) {
+                                  _Section.home => AppTab.home,
+                                  _Section.reels => AppTab.reels,
+                                  _Section.library => AppTab.library,
+                                  _Section.settings => AppTab.settings,
+                                },
+                          onSelect: _onTabSelect,
+                        ),
+                        Expanded(child: page!),
+                      ],
+                    )
+                  else
+                    page!,
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 160),
                     child: searchOpen
@@ -748,25 +771,28 @@ class _HomePageState extends State<HomePage>
               // Keep the navigation dock in a stable layout slot and animate
               // opacity only. Collapsing its height or translating it vertically
               // makes it appear to rise from the bottom when leaving Reels.
-              bottomNavigationBar: IgnorePointer(
-                ignoring: !searchOpen && _section == _Section.reels,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 280),
-                  curve: Curves.easeInOutCubic,
-                  opacity: searchOpen || _section != _Section.reels ? 1 : 0,
-                  child: _RidingTabBar(
-                    selected: searchOpen
-                        ? AppTab.search
-                        : switch (_dragTarget ?? _section) {
-                            _Section.home => AppTab.home,
-                            _Section.reels => AppTab.reels,
-                            _Section.library => AppTab.library,
-                            _Section.settings => AppTab.settings,
-                          },
-                    onSelect: _onTabSelect,
-                  ),
-                ),
-              ),
+              bottomNavigationBar: windowsDesktop
+                  ? null
+                  : IgnorePointer(
+                      ignoring: !searchOpen && _section == _Section.reels,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeInOutCubic,
+                        opacity:
+                            searchOpen || _section != _Section.reels ? 1 : 0,
+                        child: _RidingTabBar(
+                          selected: searchOpen
+                              ? AppTab.search
+                              : switch (_dragTarget ?? _section) {
+                                  _Section.home => AppTab.home,
+                                  _Section.reels => AppTab.reels,
+                                  _Section.library => AppTab.library,
+                                  _Section.settings => AppTab.settings,
+                                },
+                          onSelect: _onTabSelect,
+                        ),
+                      ),
+                    ),
             ),
           ),
         );
@@ -997,6 +1023,63 @@ class _RidingTabBar extends StatelessWidget {
             onSelect: onSelect,
             bottomGap: 0,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WindowsNavigationRail extends StatelessWidget {
+  const _WindowsNavigationRail({
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final AppTab selected;
+  final ValueChanged<AppTab> onSelect;
+
+  static const _tabs = <({AppTab tab, IconData icon, String label})>[
+    (tab: AppTab.home, icon: Icons.home_outlined, label: 'Home'),
+    (tab: AppTab.search, icon: Icons.search, label: 'Search'),
+    (tab: AppTab.reels, icon: Icons.play_circle_outline, label: 'Reels'),
+    (tab: AppTab.library, icon: Icons.video_library_outlined, label: 'Library'),
+    (tab: AppTab.settings, icon: Icons.settings_outlined, label: 'Settings'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedIndex = _tabs.indexWhere((tab) => tab.tab == selected);
+    return Material(
+      color: AppColors.surface,
+      child: SizedBox(
+        width: 78,
+        child: Column(
+          children: [
+            const SizedBox(height: 18),
+            const Icon(Icons.play_arrow_rounded, size: 28),
+            const SizedBox(height: 18),
+            const Divider(height: 1, indent: 12, endIndent: 12),
+            const SizedBox(height: 8),
+            Expanded(
+              child: NavigationRail(
+                backgroundColor: Colors.transparent,
+                selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
+                onDestinationSelected: (index) => onSelect(_tabs[index].tab),
+                labelType: NavigationRailLabelType.all,
+                minWidth: 76,
+                groupAlignment: -0.85,
+                destinations: [
+                  for (final tab in _tabs)
+                    NavigationRailDestination(
+                      icon: Icon(tab.icon),
+                      selectedIcon: Icon(tab.icon),
+                      label: Text(tab.label),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );

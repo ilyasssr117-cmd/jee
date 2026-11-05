@@ -15,6 +15,7 @@ import 'package:flutter/cupertino.dart'
         showCupertinoModalPopup;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
@@ -554,6 +555,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   final ReelsRepository _repo = ReelsRepository();
   final http.Client _media = _makeClient();
   final PageController _pager = PageController(viewportFraction: 1.0);
+  final FocusNode _keyboardFocus = FocusNode(debugLabel: 'Reels keyboard');
   final List<ReelItem> _items = <ReelItem>[];
   final Map<int, VideoPlayerController> _controllers = {};
   final Map<int, _ReelPlaybackState> _reelStates = <int, _ReelPlaybackState>{};
@@ -573,6 +575,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _clear = false;
   String? _error;
   int _current = 0;
+  int? _pendingKeyboardPage;
 
   @override
   void initState() {
@@ -580,6 +583,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _clear = LocalStore.readBool(_kClearKey, fallback: false);
     if (widget.active) {
+      _focusForKeyboard();
       _claimPlayback();
       unawaited(_loadMore(first: true));
     }
@@ -595,6 +599,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active == widget.active) return;
     if (widget.active) {
+      _focusForKeyboard();
       _claimPlayback();
       if (_items.isEmpty && !_loading && !_exhausted) {
         unawaited(_loadMore(first: true));
@@ -604,6 +609,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     } else {
       _pauseForLeaving();
     }
+  }
+
+  void _focusForKeyboard() {
+    if (defaultTargetPlatform != TargetPlatform.windows) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.active) _keyboardFocus.requestFocus();
+    });
   }
 
   /// Leaving the Reels section: silence the current reel and free the spare
@@ -630,6 +642,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
     _controllers.clear();
     _pager.dispose();
+    _keyboardFocus.dispose();
     _repo.dispose();
     _media.close();
     _saving.dispose();
@@ -697,12 +710,28 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       } else {
         _ensureNeighbors();
       }
+      final pendingPage = _pendingKeyboardPage;
+      if (pendingPage != null) {
+        if (pendingPage < _items.length && widget.active) {
+          _pendingKeyboardPage = null;
+          unawaited(
+            _pager.animateToPage(
+              pendingPage,
+              duration: Motion.scroll,
+              curve: Motion.curve,
+            ),
+          );
+        } else if (_exhausted) {
+          _pendingKeyboardPage = null;
+        }
+      }
     } catch (e) {
       if (kDebugMode) debugPrint('[REELS] load failed: ${e.runtimeType}');
       if (!mounted) return;
       setState(() {
         _error = describeError(e, subject: 'reels').message;
         _loading = false;
+        _pendingKeyboardPage = null;
       });
     }
   }
@@ -856,10 +885,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   void _syncControllers(int index) {
     if (!widget.active) return;
-    final keep = <int>{
-      index,
-      index + 1,
-    }.where((i) => i >= 0 && i < _items.length).toSet();
+    final keep = <int>{index};
+    // A second Windows video decoder competes with the active texture for
+    // hardware resources and causes visible frame drops. Load neighbors on
+    // mobile, where preloading improves swipe transitions without that cost.
+    if (defaultTargetPlatform != TargetPlatform.windows) {
+      keep.add(index + 1);
+    }
+    keep.removeWhere((i) => i < 0 || i >= _items.length);
     for (final i in _controllers.keys.toList()) {
       if (!keep.contains(i)) _evictController(i);
     }
@@ -905,7 +938,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     // Keep the outgoing texture through the transition. PageView can still
     // expose part of that page after onPageChanged fires at the midpoint.
     // ScrollEnd sync releases it before another neighbor is preloaded.
-    final keep = <int>{previous, index};
+    final keep = defaultTargetPlatform == TargetPlatform.windows
+        ? <int>{index}
+        : <int>{previous, index};
     for (final oldIndex in _controllers.keys.toList()) {
       if (!keep.contains(oldIndex)) _evictController(oldIndex);
     }
@@ -930,6 +965,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     final target = _current + direction;
     if (target < 0) return;
     if (target >= _items.length) {
+      if (defaultTargetPlatform == TargetPlatform.windows && !_exhausted) {
+        _pendingKeyboardPage = target;
+      }
       if (!_loading && !_exhausted) unawaited(_loadMore());
       return;
     }
@@ -1190,176 +1228,139 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final top = context.safe.top;
     final bottom = widget.bottomInset;
-    return ColoredBox(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (_items.isNotEmpty)
-            NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: PageView.builder(
-                controller: _pager,
-                scrollDirection: Axis.vertical,
-                pageSnapping: true,
-                physics: const PageScrollPhysics(
-                  parent: ClampingScrollPhysics(),
+    return Focus(
+      focusNode: _keyboardFocus,
+      onKeyEvent: (node, event) {
+        if (!widget.active ||
+            defaultTargetPlatform != TargetPlatform.windows ||
+            event is! KeyDownEvent) {
+          return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _movePage(1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          _movePage(-1);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_items.isNotEmpty)
+              NotificationListener<ScrollNotification>(
+                onNotification: _onScrollNotification,
+                child: PageView.builder(
+                  controller: _pager,
+                  scrollDirection: Axis.vertical,
+                  pageSnapping: true,
+                  physics: const PageScrollPhysics(
+                    parent: ClampingScrollPhysics(),
+                  ),
+                  padEnds: false,
+                  clipBehavior: Clip.hardEdge,
+                  itemCount: _items.length,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, i) {
+                    final item = _items[i];
+                    return RepaintBoundary(
+                      child: _ReelView(
+                        key: ValueKey(item.id),
+                        item: item,
+                        controller: _controllers[i],
+                        playbackState:
+                            _reelStates[i] ?? _ReelPlaybackState.idle,
+                        isActive: widget.active && i == _current,
+                        muted: _muted,
+                        saving: _saving,
+                        bottomInset: bottom,
+                        clear: _clear,
+                        onMute: _toggleMute,
+                        onSaveMenu: () => _showSaveMenu(item),
+                        onRetry: () => _retry(i),
+                        onToggleLike: () => _toggleLike(item),
+                        onDoubleTapLike: () => _likeFromDoubleTap(item),
+                      ),
+                    );
+                  },
                 ),
-                padEnds: false,
-                clipBehavior: Clip.hardEdge,
-                itemCount: _items.length,
-                onPageChanged: _onPageChanged,
-                itemBuilder: (context, i) {
-                  final item = _items[i];
-                  return RepaintBoundary(
-                    child: _ReelView(
-                      key: ValueKey(item.id),
-                      item: item,
-                      controller: _controllers[i],
-                      playbackState: _reelStates[i] ?? _ReelPlaybackState.idle,
-                      isActive: widget.active && i == _current,
-                      muted: _muted,
-                      saving: _saving,
-                      bottomInset: bottom,
-                      clear: _clear,
-                      onMute: _toggleMute,
-                      onSaveMenu: () => _showSaveMenu(item),
-                      onRetry: () => _retry(i),
-                      onToggleLike: () => _toggleLike(item),
-                      onDoubleTapLike: () => _likeFromDoubleTap(item),
-                    ),
-                  );
-                },
+              )
+            else if (_loading)
+              const Center(
+                child: CupertinoActivityIndicator(
+                    radius: 14, color: Colors.white70),
+              )
+            else if (_error != null)
+              _ErrorView(
+                  message: _error!, onRetry: () => _loadMore(first: true))
+            else
+              Center(
+                child: Text(
+                  'No videos right now.',
+                  style: AppText.body.copyWith(color: Colors.white70),
+                ),
               ),
-            )
-          else if (_loading)
-            const Center(
-              child:
-                  CupertinoActivityIndicator(radius: 14, color: Colors.white70),
-            )
-          else if (_error != null)
-            _ErrorView(message: _error!, onRetry: () => _loadMore(first: true))
-          else
-            Center(
-              child: Text(
-                'No videos right now.',
-                style: AppText.body.copyWith(color: Colors.white70),
-              ),
-            ),
-          // Soft top/bottom scrims keep the white UI readable on bright clips.
-          IgnorePointer(
-            child: AnimatedOpacity(
-              duration: Motion.normal,
-              opacity: _clear ? 0 : 1,
-              child: Stack(
-                children: [
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: top + 110,
-                    child: const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0x8C000000), Color(0x00000000)],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: bottom + 230,
-                    child: const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0x00000000), Color(0xB3000000)],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_error != null && _items.isNotEmpty)
-            Positioned(
-              bottom: bottom + 70,
-              left: 16,
-              right: 16,
-              child: _ErrorView(message: _error!, onRetry: _loadMore),
-            ),
-          Positioned(
-            top: top + 4,
-            left: 8,
-            right: 8,
-            child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
-          ),
-          if (defaultTargetPlatform == TargetPlatform.windows &&
-              _items.isNotEmpty)
-            Positioned(
-              right: 12,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+            // Soft top/bottom scrims keep the white UI readable on bright clips.
+            IgnorePointer(
+              child: AnimatedOpacity(
+                duration: Motion.normal,
+                opacity: _clear ? 0 : 1,
+                child: Stack(
                   children: [
-                    _ReelNavigationButton(
-                      tooltip: 'Previous reel',
-                      icon: CupertinoIcons.chevron_up,
-                      enabled: _current > 0,
-                      onPressed: () => _movePage(-1),
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: top + 110,
+                      child: const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0x8C000000), Color(0x00000000)],
+                          ),
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    _ReelNavigationButton(
-                      tooltip: 'Next reel',
-                      icon: CupertinoIcons.chevron_down,
-                      enabled: _current < _items.length - 1 || !_exhausted,
-                      onPressed: () => _movePage(1),
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: bottom + 230,
+                      child: const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0x00000000), Color(0xB3000000)],
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-        ],
+            if (_error != null && _items.isNotEmpty)
+              Positioned(
+                bottom: bottom + 70,
+                left: 16,
+                right: 16,
+                child: _ErrorView(message: _error!, onRetry: _loadMore),
+              ),
+            Positioned(
+              top: top + 4,
+              left: 8,
+              right: 8,
+              child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
+            ),
+          ],
+        ),
       ),
-    );
-  }
-}
-
-class _ReelNavigationButton extends StatelessWidget {
-  const _ReelNavigationButton({
-    required this.tooltip,
-    required this.icon,
-    required this.enabled,
-    required this.onPressed,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton.filled(
-      tooltip: tooltip,
-      onPressed: enabled ? onPressed : null,
-      style: IconButton.styleFrom(
-        backgroundColor: const Color(0x99000000),
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: const Color(0x55000000),
-        disabledForegroundColor: Colors.white38,
-        fixedSize: const Size(44, 44),
-        padding: EdgeInsets.zero,
-      ),
-      icon: Icon(icon, size: 22),
     );
   }
 }

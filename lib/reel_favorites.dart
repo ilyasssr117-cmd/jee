@@ -11,7 +11,7 @@ const String kReelUserAgent =
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7 '
     'Mobile/15E148 Safari/604.1';
 
-const String kReelMediaOrigin = 'https://apiv2.tik.porn';
+const String kReelMediaOrigin = 'https://tik.porn';
 
 const Map<String, String> kReelMediaHeaders = {
   'User-Agent': kReelUserAgent,

@@ -255,8 +255,8 @@ class ReelsRepository {
     'User-Agent': _kUserAgent,
     'Accept': 'application/json',
     'Content-Type': 'application/json',
-    'Origin': 'https://apiv2.tik.porn',
-    'Referer': 'https://apiv2.tik.porn/',
+    'Origin': 'https://tik.porn',
+    'Referer': 'https://tik.porn/',
   };
 
   Future<List<ReelItem>> _post(int amount) async {
@@ -280,8 +280,8 @@ class ReelsRepository {
       ..headers.addAll(const {
         'User-Agent': _kUserAgent,
         'Accept': 'application/json',
-        'Origin': 'https://apiv2.tik.porn',
-        'Referer': 'https://apiv2.tik.porn/',
+        'Origin': 'https://tik.porn',
+        'Referer': 'https://tik.porn/',
       });
     return _decode(await _sendBounded(req));
   }
@@ -358,13 +358,19 @@ class ReelsRepository {
   }
 
   Future<List<ReelItem>> _fetch(int amount) async {
+    // The API's GET endpoint returns the resolved mp4/hls URLs used by the
+    // player. Use it first; POST is retained as a compatibility fallback.
+    try {
+      final resolved = await _getOnce();
+      if (resolved.isNotEmpty) return resolved;
+    } catch (_) {}
+
     const retryableStatuses = <int>{408, 425, 429, 500, 502, 503, 504};
     for (var attempt = 0; attempt < 2; attempt++) {
       Duration? retryAfter;
       try {
         return await _post(amount);
       } on _ReelsMethodNotAllowed {
-        // Only fall back to GET when the endpoint explicitly rejects POST.
         return _getOnce();
       } on _ReelsHttpFailure catch (error) {
         if (!retryableStatuses.contains(error.statusCode) || attempt == 1) {

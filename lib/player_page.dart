@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -1222,7 +1224,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                           aspectRatio: live.value.aspectRatio > 0
                               ? live.value.aspectRatio
                               : 16 / 9,
-                          child: VideoPlayer(live),
+                          child: RepaintBoundary(child: VideoPlayer(live)),
                         ),
                       ),
                     ),
@@ -1533,32 +1535,54 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final safe = context.safe;
     final visible = _showControls && !_completed;
     final gap = context.isPhone ? 18.0 : 28.0;
+    final fadeDuration = defaultTargetPlatform == TargetPlatform.windows
+        ? Duration.zero
+        : Duration(milliseconds: visible ? 260 : 420);
+    final height = MediaQuery.sizeOf(context).height;
 
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !visible,
         child: AnimatedOpacity(
           opacity: visible ? 1 : 0,
-          duration: Duration(milliseconds: visible ? 260 : 420),
+          duration: fadeDuration,
           curve: Curves.easeInOut,
           child: Stack(
             fit: StackFit.expand,
             children: [
-              const IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Color(0xB3000000),
-                        Color(0x14000000),
-                        Color(0xD9000000),
-                      ],
-                      stops: [0, 0.45, 1],
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: (safe.top + height * 0.28).clamp(100.0, height * 0.42),
+                child: const IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xB3000000), Colors.transparent],
+                      ),
                     ),
                   ),
-                  child: SizedBox.expand(),
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height:
+                    (safe.bottom + height * 0.34).clamp(120.0, height * 0.48),
+                child: const IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Color(0xD9000000)],
+                      ),
+                    ),
+                  ),
                 ),
               ),
               Positioned(

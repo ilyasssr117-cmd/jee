@@ -460,6 +460,19 @@ class ReelsRepository {
   Future<List<ReelItem>> _fetch(int amount) async {
     // The API's GET endpoint returns the resolved mp4/hls URLs used by the
     // player. Use it first; POST is retained as a compatibility fallback.
+    // curl.exe is tried first on Windows so the request does not depend on
+    // WebView2's profile, runtime initialization, or an offscreen window.
+    if (Platform.isWindows) {
+      try {
+        final resolved = await _getWithWindowsCurl();
+        if (resolved.isNotEmpty) return resolved;
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint(
+              '[REELS] Windows curl fallback failed: ${error.runtimeType}');
+        }
+      }
+    }
     try {
       final resolved = await _getOnce();
       if (resolved.isNotEmpty) return resolved;
@@ -491,6 +504,46 @@ class ReelsRepository {
       );
     }
     return _post(amount);
+  }
+
+  Future<List<ReelItem>> _getWithWindowsCurl() async {
+    final result = await Process.run(
+      'curl.exe',
+      [
+        '--fail',
+        '--location',
+        '--silent',
+        '--show-error',
+        '--max-time',
+        '20',
+        '--max-filesize',
+        '${6 * 1024 * 1024}',
+        '-H',
+        'User-Agent: $_kUserAgent',
+        '-H',
+        'Accept: application/json',
+        '-H',
+        'Origin: https://tik.porn',
+        '-H',
+        'Referer: https://tik.porn/',
+        _api.toString(),
+      ],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    ).timeout(const Duration(seconds: 22));
+
+    if (result.exitCode != 0) {
+      throw HttpException('curl.exe exited with code ${result.exitCode}.');
+    }
+    final body = result.stdout as String;
+    if (utf8.encode(body).length > 6 * 1024 * 1024) {
+      throw const FormatException('Reels response is too large.');
+    }
+    final decoded = jsonDecode(body);
+    if (decoded is Map && decoded['code'] != null && decoded['code'] != 200) {
+      throw const FormatException('Reels service returned an error response.');
+    }
+    return parseReels(decoded);
   }
 
   Future<List<ReelItem>> nextBatch(int amount) async {

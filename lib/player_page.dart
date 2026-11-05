@@ -1233,11 +1233,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTapUp: (details) => _onScreenTap(details, width),
-                    onVerticalDragEnd: (details) {
-                      if ((details.primaryVelocity ?? 0) > 700) {
-                        unawaited(_minimize());
-                      }
-                    },
+                    onVerticalDragEnd:
+                        defaultTargetPlatform == TargetPlatform.windows
+                            ? null
+                            : (details) {
+                                if ((details.primaryVelocity ?? 0) > 700) {
+                                  unawaited(_minimize());
+                                }
+                              },
                     onLongPressStart: (_) => _startBoost(),
                     onLongPressEnd: (_) => _endBoost(),
                     onLongPressCancel: _endBoost,
@@ -1684,6 +1687,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildTopBar() {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     return Row(
       children: [
         RoundIconButton(
@@ -1747,14 +1751,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             ),
           ),
         ),
-        RoundIconButton(
-          icon: Icons.keyboard_arrow_down_rounded,
-          label: 'Minimize',
-          tapSize: kMinTapSize,
-          onTap: () => unawaited(_minimize()),
-        ),
-        const SizedBox(width: 2),
-        if (NativeBridge.instance.pipSupported) ...[
+        if (!windowsDesktop) ...[
+          RoundIconButton(
+            icon: Icons.keyboard_arrow_down_rounded,
+            label: 'Minimize',
+            tapSize: kMinTapSize,
+            onTap: () => unawaited(_minimize()),
+          ),
+          const SizedBox(width: 2),
+        ],
+        if (!windowsDesktop && NativeBridge.instance.pipSupported) ...[
           const SizedBox(width: 2),
           RoundIconButton(
             icon: Icons.picture_in_picture_alt_rounded,

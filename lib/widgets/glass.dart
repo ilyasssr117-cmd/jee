@@ -1,5 +1,7 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -13,7 +15,9 @@ abstract final class Glass {
   static bool enabled = true;
 
   static bool isOpaque(BuildContext context) =>
-      !enabled || MediaQuery.highContrastOf(context);
+      !enabled ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      MediaQuery.highContrastOf(context);
 }
 
 /// A translucent "Liquid Glass" surface: background blur, a soft tint, a
@@ -58,10 +62,7 @@ class GlassSurface extends StatelessWidget {
 
     final Color fill = opaque
         ? (dark ? AppColors.surfaceHigh : AppColors.surface)
-        : (tint ??
-              (dark
-                  ? const Color(0x2EFFFFFF)
-                  : const Color(0xB8FFFFFF)));
+        : (tint ?? (dark ? const Color(0x2EFFFFFF) : const Color(0xB8FFFFFF)));
 
     Widget content = DecoratedBox(
       decoration: BoxDecoration(
@@ -86,9 +87,8 @@ class GlassSurface extends StatelessWidget {
           opaque: opaque,
           outline: AppColors.outline,
         ),
-        child: padding == null
-            ? child
-            : Padding(padding: padding!, child: child),
+        child:
+            padding == null ? child : Padding(padding: padding!, child: child),
       ),
     );
 

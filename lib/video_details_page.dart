@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
@@ -329,6 +331,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildHeader(double margin) {
     final video = widget.video;
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     final resume = PlaybackProgress.instance.resumePosition(video.id);
 
     final meta = VideoMetaLine(
@@ -363,57 +366,66 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    ColoredBox(color: AppColors.surfaceHigh),
-                    ImageFiltered(
-                      imageFilter: ui.ImageFilter.blur(
-                        sigmaX: 30,
-                        sigmaY: 30,
-                      ),
-                      child: VideoArtwork(
+                    if (windowsDesktop) ...[
+                      VideoArtwork(
                         video: video,
                         showLabel: false,
                         fit: BoxFit.cover,
                       ),
-                    ),
-                    ShaderMask(
-                      // Keep the crisp full-bleed image over the blurred copy.
-                      // The edge masks reveal the same image underneath,
-                      // avoiding visible image borders or empty side bands.
-                      blendMode: BlendMode.dstIn,
-                      shaderCallback: (bounds) => const LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black,
-                          Colors.black,
-                          Colors.transparent,
-                        ],
-                        stops: [0.0, 0.075, 0.925, 1.0],
-                      ).createShader(bounds),
-                      child: ShaderMask(
-                        // Let the clear artwork dissolve into its blurred
-                        // backdrop near the lower edge instead of ending as a
-                        // rectangular image above the title and controls.
-                        blendMode: BlendMode.dstIn,
-                        shaderCallback: (bounds) => const LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black,
-                            Colors.black,
-                            Colors.transparent,
-                          ],
-                          stops: [0.0, 0.44, 1.0],
-                        ).createShader(bounds),
+                      const ColoredBox(color: Color(0x66000000)),
+                    ] else ...[
+                      ColoredBox(color: AppColors.surfaceHigh),
+                      ImageFiltered(
+                        imageFilter: ui.ImageFilter.blur(
+                          sigmaX: 30,
+                          sigmaY: 30,
+                        ),
                         child: VideoArtwork(
                           video: video,
                           showLabel: false,
                           fit: BoxFit.cover,
-                          transparentBackground: true,
                         ),
                       ),
-                    ),
+                      ShaderMask(
+                        // Keep the crisp full-bleed image over the blurred copy.
+                        // The edge masks reveal the same image underneath,
+                        // avoiding visible image borders or empty side bands.
+                        blendMode: BlendMode.dstIn,
+                        shaderCallback: (bounds) => const LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black,
+                            Colors.black,
+                            Colors.transparent,
+                          ],
+                          stops: [0.0, 0.075, 0.925, 1.0],
+                        ).createShader(bounds),
+                        child: ShaderMask(
+                          // Let the clear artwork dissolve into its blurred
+                          // backdrop near the lower edge instead of ending as a
+                          // rectangular image above the title and controls.
+                          blendMode: BlendMode.dstIn,
+                          shaderCallback: (bounds) => const LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black,
+                              Colors.black,
+                              Colors.transparent,
+                            ],
+                            stops: [0.0, 0.44, 1.0],
+                          ).createShader(bounds),
+                          child: VideoArtwork(
+                            video: video,
+                            showLabel: false,
+                            fit: BoxFit.cover,
+                            transparentBackground: true,
+                          ),
+                        ),
+                      ),
+                    ],
                     const DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(

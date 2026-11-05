@@ -2803,6 +2803,7 @@ class _ReelErrorPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: Gaps.xl),
@@ -2810,66 +2811,81 @@ class _ReelErrorPanel extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 340),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(Radii.large),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xD91B1D25),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.12),
-                  ),
-                  borderRadius: BorderRadius.circular(Radii.large),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(Gaps.md),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        CupertinoIcons.exclamationmark_circle,
-                        color: Colors.white70,
-                        size: 22,
+            child: windowsDesktop
+                ? DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1B1D25),
+                      border: Border.all(
+                        color: const Color(0xFF454957),
                       ),
-                      const SizedBox(width: Gaps.md),
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Unable to load video',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            const Text(
-                              'Check your connection and try again.',
-                              style: TextStyle(
-                                color: Color(0xFFD1D3D9),
-                                fontSize: 12,
-                                height: 1.3,
-                              ),
-                            ),
-                            const SizedBox(height: Gaps.sm),
-                            AppButton(
-                              label: 'Retry',
-                              icon: CupertinoIcons.refresh,
-                              style: AppButtonStyle.secondary,
-                              onDark: true,
-                              onPressed: onRetry,
-                            ),
-                          ],
+                      borderRadius: BorderRadius.circular(Radii.large),
+                    ),
+                    child: _reelErrorContent(),
+                  )
+                : BackdropFilter(
+                    filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xD91B1D25),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12),
                         ),
+                        borderRadius: BorderRadius.circular(Radii.large),
                       ),
-                    ],
+                      child: _reelErrorContent(),
+                    ),
                   ),
-                ),
-              ),
-            ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _reelErrorContent() {
+    return Padding(
+      padding: const EdgeInsets.all(Gaps.md),
+      child: Row(
+        children: [
+          const Icon(
+            CupertinoIcons.exclamationmark_circle,
+            color: Colors.white70,
+            size: 22,
+          ),
+          const SizedBox(width: Gaps.md),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Unable to load video',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                const Text(
+                  'Check your connection and try again.',
+                  style: TextStyle(
+                    color: Color(0xFFD1D3D9),
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: Gaps.sm),
+                AppButton(
+                  label: 'Retry',
+                  icon: CupertinoIcons.refresh,
+                  style: AppButtonStyle.secondary,
+                  onDark: true,
+                  onPressed: onRetry,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

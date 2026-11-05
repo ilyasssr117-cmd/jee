@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
@@ -75,6 +77,7 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     final t = (shrinkOffset / largeExtent).clamp(0.0, 1.0).toDouble();
     // The inline title appears only once the large one has nearly left.
     final inline = ((t - 0.6) / 0.4).clamp(0.0, 1.0).toDouble();
@@ -86,19 +89,28 @@ class _LargeTitleDelegate extends SliverPersistentHeaderDelegate {
         if (barVisible)
           Opacity(
             opacity: inline,
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: background.withValues(alpha: 0.78),
-                    border: Border(
-                      bottom: BorderSide(color: outline, width: 0.5),
+            child: windowsDesktop
+                ? DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: background,
+                      border: Border(
+                        bottom: BorderSide(color: outline, width: 0.5),
+                      ),
+                    ),
+                  )
+                : ClipRect(
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: background.withValues(alpha: 0.78),
+                          border: Border(
+                            bottom: BorderSide(color: outline, width: 0.5),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
           ),
         Positioned(
           left: 0,

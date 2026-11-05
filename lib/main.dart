@@ -1,8 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kDebugMode;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
@@ -89,8 +88,10 @@ Future<void> _bootstrap() async {
   // Keep enough decoded, size-limited thumbnails for an album/video page to
   // survive ordinary scrolling and route changes without refetching them.
   // The cache remains bounded to avoid unbounded image memory growth.
-  imageCache.maximumSize = 96;
-  imageCache.maximumSizeBytes = 64 << 20;
+  imageCache.maximumSize =
+      defaultTargetPlatform == TargetPlatform.windows ? 72 : 96;
+  imageCache.maximumSizeBytes =
+      defaultTargetPlatform == TargetPlatform.windows ? 40 << 20 : 64 << 20;
 
   await applyBrowseOrientation();
 
@@ -295,7 +296,8 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
                   ),
                 ),
               ),
-              const MiniPlayerOverlay(),
+              if (defaultTargetPlatform != TargetPlatform.windows)
+                const MiniPlayerOverlay(),
               if (snapshot != null)
                 IgnorePointer(
                   child: FadeTransition(

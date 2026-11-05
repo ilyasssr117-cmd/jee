@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 
 import '../app_theme.dart';
 import '../models.dart';
@@ -112,14 +114,20 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     // A plain translucent pill: a BackdropFilter here forced the whole hero
     // image to be re-blurred on every frame of a scroll or pull-to-refresh.
     return Container(
       padding: const EdgeInsets.fromLTRB(7, 7, 13, 7),
       decoration: BoxDecoration(
-        color: const Color(0x99151A31),
+        color:
+            windowsDesktop ? const Color(0xFF151A31) : const Color(0x99151A31),
         borderRadius: BorderRadius.circular(17),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        border: Border.all(
+          color: windowsDesktop
+              ? const Color(0xFF454B64)
+              : Colors.white.withValues(alpha: 0.16),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

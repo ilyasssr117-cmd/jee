@@ -234,7 +234,11 @@ ThemeData buildAppTheme(Brightness brightness) {
     ),
     splashFactory: NoSplash.splashFactory,
     visualDensity: VisualDensity.standard,
-    iconTheme: const IconThemeData(size: 20, opticalSize: 20),
+    iconTheme: IconThemeData(
+      size: 20,
+      opticalSize: 20,
+      color: p.textSecondary,
+    ),
   );
 
   return base.copyWith(

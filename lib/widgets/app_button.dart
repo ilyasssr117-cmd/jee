@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 
@@ -64,6 +66,7 @@ class AppButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     final primary = style == AppButtonStyle.primary;
     final tertiary = style == AppButtonStyle.tertiary;
     final Color foreground =
@@ -71,13 +74,17 @@ class AppButton extends StatelessWidget {
     final Color background = primary
         ? AppColors.accentStrong
         : (tertiary
-            ? Colors.transparent
-            : (onDark ? const Color(0x2EFFFFFF) : AppColors.surfaceHigh));
+            ? (windowsDesktop ? AppColors.surfaceHigh : Colors.transparent)
+            : (onDark && !windowsDesktop
+                ? const Color(0x2EFFFFFF)
+                : AppColors.surfaceHigh));
     final Color border = primary
         ? Colors.transparent
         : (tertiary
-            ? Colors.transparent
-            : (onDark ? const Color(0x26FFFFFF) : AppColors.outline));
+            ? (windowsDesktop ? AppColors.outline : Colors.transparent)
+            : (onDark && !windowsDesktop
+                ? const Color(0x26FFFFFF)
+                : AppColors.outline));
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
     return Pressable(
       semanticLabel: semanticLabel ?? label,
@@ -139,6 +146,7 @@ class AppChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     final scale = MediaQuery.textScalerOf(context).scale(13) / 13;
     final chipHeight = math.max(36, 24 + 12 * scale).toDouble();
     final tapHeight = math.max(44, chipHeight).toDouble();
@@ -159,12 +167,16 @@ class AppChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: selected
                   ? AppColors.accentStrong
-                  : (onDark ? const Color(0x1FFFFFFF) : AppColors.surfaceHigh),
+                  : (onDark && !windowsDesktop
+                      ? const Color(0x1FFFFFFF)
+                      : AppColors.surfaceHigh),
               borderRadius: BorderRadius.circular(Radii.pill),
               border: Border.all(
                 color: selected
                     ? Colors.transparent
-                    : (onDark ? const Color(0x1FFFFFFF) : AppColors.outline),
+                    : (onDark && !windowsDesktop
+                        ? const Color(0x1FFFFFFF)
+                        : AppColors.outline),
               ),
             ),
             child: Text(
@@ -215,6 +227,7 @@ class RoundIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
     final box = math.max(size, tapSize);
     return Pressable(
       semanticLabel: label,
@@ -230,7 +243,7 @@ class RoundIconButton extends StatelessWidget {
             height: size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: background,
+              color: windowsDesktop ? const Color(0xFF252A3A) : background,
               border: Border.all(color: const Color(0x26FFFFFF)),
             ),
             child: Icon(icon, size: iconSize ?? 22, color: color),

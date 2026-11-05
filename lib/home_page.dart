@@ -1039,11 +1039,11 @@ class _WindowsNavigationRail extends StatelessWidget {
   final ValueChanged<AppTab> onSelect;
 
   static const _tabs = <({AppTab tab, IconData icon, String label})>[
-    (tab: AppTab.home, icon: Icons.home_outlined, label: 'Home'),
+    (tab: AppTab.home, icon: Icons.home_rounded, label: 'Home'),
     (tab: AppTab.search, icon: Icons.search, label: 'Search'),
-    (tab: AppTab.reels, icon: Icons.play_circle_outline, label: 'Reels'),
-    (tab: AppTab.library, icon: Icons.video_library_outlined, label: 'Library'),
-    (tab: AppTab.settings, icon: Icons.settings_outlined, label: 'Settings'),
+    (tab: AppTab.reels, icon: Icons.play_arrow_rounded, label: 'Reels'),
+    (tab: AppTab.library, icon: Icons.video_library_rounded, label: 'Library'),
+    (tab: AppTab.settings, icon: Icons.settings_rounded, label: 'Settings'),
   ];
 
   @override
@@ -1068,6 +1068,24 @@ class _WindowsNavigationRail extends StatelessWidget {
                 labelType: NavigationRailLabelType.all,
                 minWidth: 76,
                 groupAlignment: -0.85,
+                indicatorColor: AppColors.accentStrong,
+                selectedIconTheme: const IconThemeData(
+                  color: Colors.white,
+                  size: 24,
+                ),
+                unselectedIconTheme: IconThemeData(
+                  color: AppColors.textSecondary,
+                  size: 24,
+                ),
+                selectedLabelTextStyle: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                unselectedLabelTextStyle: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12,
+                ),
                 destinations: [
                   for (final tab in _tabs)
                     NavigationRailDestination(

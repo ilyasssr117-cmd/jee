@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
@@ -48,6 +50,9 @@ class PreviewManager {
   _LifecycleObserver? _observer;
 
   void requestPreview(Video video) {
+    // Background preview decoders make scrolling compete with foreground
+    // playback on modest Windows GPUs. Keep desktop thumbnails static.
+    if (defaultTargetPlatform == TargetPlatform.windows) return;
     // Do not start another decoder while the floating player is already active.
     // On older iPhones this avoids competing AVPlayer instances during browsing.
     if (MiniPlayer.instance.active) return;

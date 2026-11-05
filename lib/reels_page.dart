@@ -238,12 +238,33 @@ class _WindowsReelsBrowser {
     final result = Completer<List<ReelItem>>();
     _queue = _queue.then((_) async {
       try {
-        result.complete(await _fetch(uri));
+        try {
+          result.complete(await _fetch(uri));
+        } catch (_) {
+          // A newly launched WebView2 can occasionally remain on about:blank
+          // after its first navigation. Recreate it once before falling back
+          // to the native HTTP path.
+          await _reset();
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          result.complete(await _fetch(uri));
+        }
       } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('[REELS] Windows browser fetch failed: $error');
+        }
         result.completeError(error, stackTrace);
       }
     });
     return result.future;
+  }
+
+  static Future<void> _reset() async {
+    final controller = _controller;
+    _controller = null;
+    if (controller == null) return;
+    try {
+      await controller.dispose();
+    } catch (_) {}
   }
 
   static Future<List<ReelItem>> _fetch(Uri uri) async {
@@ -904,6 +925,23 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  void _movePage(int direction) {
+    if (!_pager.hasClients || _items.isEmpty) return;
+    final target = _current + direction;
+    if (target < 0) return;
+    if (target >= _items.length) {
+      if (!_loading && !_exhausted) unawaited(_loadMore());
+      return;
+    }
+    unawaited(
+      _pager.animateToPage(
+        target,
+        duration: Motion.scroll,
+        curve: Motion.curve,
+      ),
+    );
+  }
+
   bool _onScrollNotification(ScrollNotification n) {
     if (n is ScrollEndNotification && n.depth == 0) {
       if (_syncPending) {
@@ -1262,8 +1300,66 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             right: 8,
             child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
           ),
+          if (defaultTargetPlatform == TargetPlatform.windows &&
+              _items.isNotEmpty)
+            Positioned(
+              right: 12,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _ReelNavigationButton(
+                      tooltip: 'Previous reel',
+                      icon: CupertinoIcons.chevron_up,
+                      enabled: _current > 0,
+                      onPressed: () => _movePage(-1),
+                    ),
+                    const SizedBox(height: 12),
+                    _ReelNavigationButton(
+                      tooltip: 'Next reel',
+                      icon: CupertinoIcons.chevron_down,
+                      enabled: _current < _items.length - 1 || !_exhausted,
+                      onPressed: () => _movePage(1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
+    );
+  }
+}
+
+class _ReelNavigationButton extends StatelessWidget {
+  const _ReelNavigationButton({
+    required this.tooltip,
+    required this.icon,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton.filled(
+      tooltip: tooltip,
+      onPressed: enabled ? onPressed : null,
+      style: IconButton.styleFrom(
+        backgroundColor: const Color(0x99000000),
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: const Color(0x55000000),
+        disabledForegroundColor: Colors.white38,
+        fixedSize: const Size(44, 44),
+        padding: EdgeInsets.zero,
+      ),
+      icon: Icon(icon, size: 22),
     );
   }
 }

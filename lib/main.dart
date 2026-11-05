@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
+import 'package:video_player_media_kit/video_player_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
@@ -36,6 +37,7 @@ void main() {
 Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (defaultTargetPlatform == TargetPlatform.windows) {
+    VideoPlayerMediaKit.ensureInitialized(windows: true);
     try {
       await windowManager.ensureInitialized();
     } catch (_) {}
@@ -228,7 +230,7 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'VXTUBEFinal',
+      title: 'VXTUBE',
       navigatorKey: rootNavigatorKey,
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.escape): _DesktopBackIntent(),

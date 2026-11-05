@@ -255,6 +255,8 @@ class ReelsRepository {
     'User-Agent': _kUserAgent,
     'Accept': 'application/json',
     'Content-Type': 'application/json',
+    'Origin': 'https://apiv2.tik.porn',
+    'Referer': 'https://apiv2.tik.porn/',
   };
 
   Future<List<ReelItem>> _post(int amount) async {
@@ -278,6 +280,8 @@ class ReelsRepository {
       ..headers.addAll(const {
         'User-Agent': _kUserAgent,
         'Accept': 'application/json',
+        'Origin': 'https://apiv2.tik.porn',
+        'Referer': 'https://apiv2.tik.porn/',
       });
     return _decode(await _sendBounded(req));
   }

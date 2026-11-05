@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.tv" "\0"
-            VALUE "FileDescription", "watch_tube" "\0"
+            VALUE "FileDescription", "VXTUBE" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "watch_tube" "\0"
+            VALUE "InternalName", "vxtube" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.tv. All rights reserved." "\0"
-            VALUE "OriginalFilename", "watch_tube.exe" "\0"
-            VALUE "ProductName", "watch_tube" "\0"
+            VALUE "OriginalFilename", "vxtube.exe" "\0"
+            VALUE "ProductName", "VXTUBE" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

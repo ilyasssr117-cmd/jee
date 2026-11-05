@@ -1535,149 +1535,150 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final safe = context.safe;
     final visible = _showControls && !_completed;
     final gap = context.isPhone ? 18.0 : 28.0;
-    final fadeDuration = defaultTargetPlatform == TargetPlatform.windows
-        ? Duration.zero
-        : Duration(milliseconds: visible ? 260 : 420);
     final height = MediaQuery.sizeOf(context).height;
+
+    final controls = Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: (safe.top + height * 0.28).clamp(100.0, height * 0.42),
+          child: const IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xB3000000), Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: (safe.bottom + height * 0.34).clamp(120.0, height * 0.48),
+          child: const IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0xD9000000)],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: margin + safe.left,
+          right: margin + safe.right,
+          top: safe.top + 10,
+          child: _buildTopBar(),
+        ),
+        Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_previousVideo != null) ...[
+                RoundIconButton(
+                  icon: Icons.skip_previous_rounded,
+                  label: 'Previous video',
+                  size: 42,
+                  tapSize: kMinTapSize,
+                  iconSize: 26,
+                  onTap: () => unawaited(_playPrevious()),
+                ),
+                SizedBox(width: gap),
+              ],
+              RoundIconButton(
+                icon: Icons.replay_10_rounded,
+                label: 'Back 10 seconds',
+                size: 48,
+                iconSize: 30,
+                haptic: Haptic.selection,
+                onTap: () => _scrubBySeconds(-_seekStepSeconds),
+              ),
+              SizedBox(width: gap),
+              ValueListenableBuilder<bool>(
+                valueListenable: _reloading,
+                builder: (context, reloading, _) {
+                  if (reloading) {
+                    return _ReloadingButton(onTap: _cancelReload);
+                  }
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: _playing,
+                    builder: (context, playing, _) => RoundIconButton(
+                      icon: playing
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      label: playing ? 'Pause' : 'Play',
+                      size: 64,
+                      iconSize: 40,
+                      background: const Color(0x4DFFFFFF),
+                      onTap: () => unawaited(_togglePlayback()),
+                    ),
+                  );
+                },
+              ),
+              SizedBox(width: gap),
+              RoundIconButton(
+                icon: Icons.forward_10_rounded,
+                label: 'Forward 10 seconds',
+                size: 48,
+                iconSize: 30,
+                haptic: Haptic.selection,
+                onTap: () => _scrubBySeconds(_seekStepSeconds),
+              ),
+              if (_nextVideo != null) ...[
+                SizedBox(width: gap),
+                RoundIconButton(
+                  icon: Icons.skip_next_rounded,
+                  label: 'Next video',
+                  size: 42,
+                  tapSize: kMinTapSize,
+                  iconSize: 26,
+                  onTap: () => unawaited(_playNext()),
+                ),
+              ],
+            ],
+          ),
+        ),
+        Positioned(
+          left: margin + safe.left,
+          right: margin + safe.right,
+          bottom: safe.bottom + 12,
+          child: _ProgressRow(
+            controller: controller,
+            scrubTarget: _scrubTarget,
+            dragging: _dragging,
+            onSeekFraction: _scrubToFraction,
+            onDragStart: () {
+              _dragging.value = true;
+              Haptics.play(Haptic.selection);
+            },
+            onDragEnd: () => _dragging.value = false,
+          ),
+        ),
+      ],
+    );
+    final Widget controlsLayer = defaultTargetPlatform == TargetPlatform.windows
+        ? (visible ? controls : const SizedBox.shrink())
+        : AnimatedOpacity(
+            opacity: visible ? 1 : 0,
+            duration: Duration(milliseconds: visible ? 260 : 420),
+            curve: Curves.easeInOut,
+            child: controls,
+          );
 
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !visible,
-        child: AnimatedOpacity(
-          opacity: visible ? 1 : 0,
-          duration: fadeDuration,
-          curve: Curves.easeInOut,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: (safe.top + height * 0.28).clamp(100.0, height * 0.42),
-                child: const IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0xB3000000), Colors.transparent],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height:
-                    (safe.bottom + height * 0.34).clamp(120.0, height * 0.48),
-                child: const IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xD9000000)],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: margin + safe.left,
-                right: margin + safe.right,
-                top: safe.top + 10,
-                child: _buildTopBar(),
-              ),
-              Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_previousVideo != null) ...[
-                      RoundIconButton(
-                        icon: Icons.skip_previous_rounded,
-                        label: 'Previous video',
-                        size: 42,
-                        tapSize: kMinTapSize,
-                        iconSize: 26,
-                        onTap: () => unawaited(_playPrevious()),
-                      ),
-                      SizedBox(width: gap),
-                    ],
-                    RoundIconButton(
-                      icon: Icons.replay_10_rounded,
-                      label: 'Back 10 seconds',
-                      size: 48,
-                      iconSize: 30,
-                      haptic: Haptic.selection,
-                      onTap: () => _scrubBySeconds(-_seekStepSeconds),
-                    ),
-                    SizedBox(width: gap),
-                    ValueListenableBuilder<bool>(
-                      valueListenable: _reloading,
-                      builder: (context, reloading, _) {
-                        if (reloading) {
-                          return _ReloadingButton(onTap: _cancelReload);
-                        }
-                        return ValueListenableBuilder<bool>(
-                          valueListenable: _playing,
-                          builder: (context, playing, _) => RoundIconButton(
-                            icon: playing
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            label: playing ? 'Pause' : 'Play',
-                            size: 64,
-                            iconSize: 40,
-                            background: const Color(0x4DFFFFFF),
-                            onTap: () => unawaited(_togglePlayback()),
-                          ),
-                        );
-                      },
-                    ),
-                    SizedBox(width: gap),
-                    RoundIconButton(
-                      icon: Icons.forward_10_rounded,
-                      label: 'Forward 10 seconds',
-                      size: 48,
-                      iconSize: 30,
-                      haptic: Haptic.selection,
-                      onTap: () => _scrubBySeconds(_seekStepSeconds),
-                    ),
-                    if (_nextVideo != null) ...[
-                      SizedBox(width: gap),
-                      RoundIconButton(
-                        icon: Icons.skip_next_rounded,
-                        label: 'Next video',
-                        size: 42,
-                        tapSize: kMinTapSize,
-                        iconSize: 26,
-                        onTap: () => unawaited(_playNext()),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Positioned(
-                left: margin + safe.left,
-                right: margin + safe.right,
-                bottom: safe.bottom + 12,
-                child: _ProgressRow(
-                  controller: controller,
-                  scrubTarget: _scrubTarget,
-                  dragging: _dragging,
-                  onSeekFraction: _scrubToFraction,
-                  onDragStart: () {
-                    _dragging.value = true;
-                    Haptics.play(Haptic.selection);
-                  },
-                  onDragEnd: () => _dragging.value = false,
-                ),
-              ),
-            ],
-          ),
-        ),
+        child: RepaintBoundary(child: controlsLayer),
       ),
     );
   }

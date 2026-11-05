@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import 'app_theme.dart';
 import 'download_store.dart';
@@ -223,6 +224,82 @@ http.Client _makeClient() {
   return http.Client();
 }
 
+/// The Reels API rejects Windows' native HTTP fingerprint while accepting a
+/// normal browser request. Use WebView2 for the API navigation on Windows;
+/// its Chromium network stack matches the browser request that the service
+/// accepts. The controller is headless and shared to avoid starting a browser
+/// for each page of reels.
+class _WindowsReelsBrowser {
+  static WebviewController? _controller;
+  static Future<void>? _initializing;
+  static Future<void> _queue = Future<void>.value();
+
+  static Future<List<ReelItem>> fetch(Uri uri) {
+    final result = Completer<List<ReelItem>>();
+    _queue = _queue.then((_) async {
+      try {
+        result.complete(await _fetch(uri));
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    });
+    return result.future;
+  }
+
+  static Future<List<ReelItem>> _fetch(Uri uri) async {
+    var controller = _controller;
+    if (controller == null) {
+      final initializing = _initializing ??= () async {
+        final browser = WebviewController();
+        await browser.initialize();
+        await browser.setSize(const Size(1280, 720));
+        await browser.setDevToolsEnabled(false);
+        _controller = browser;
+      }();
+      try {
+        await initializing.timeout(const Duration(seconds: 20));
+      } finally {
+        if (identical(_initializing, initializing)) _initializing = null;
+      }
+      controller = _controller;
+    }
+    if (controller == null) {
+      throw const HttpException('Windows browser could not be initialized.');
+    }
+
+    await controller.loadUrl(uri.toString());
+    final deadline = DateTime.now().add(const Duration(seconds: 24));
+    while (DateTime.now().isBefore(deadline)) {
+      dynamic content;
+      try {
+        content = await controller.executeScript(
+          'document.body ? document.body.innerText : ""',
+        );
+      } catch (_) {
+        // Navigation may still be committing its document after loadUrl
+        // returns. Keep polling until WebView2 exposes the response body.
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        continue;
+      }
+      if (content is String) {
+        final text = content.trim();
+        if (text.startsWith('{') || text.startsWith('[')) {
+          final decoded = jsonDecode(text);
+          if (decoded is Map &&
+              decoded['code'] != null &&
+              decoded['code'] != 200) {
+            throw const FormatException(
+                'Reels service returned an error response.');
+          }
+          return parseReels(decoded);
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    throw TimeoutException('Windows browser timed out fetching Reels.');
+  }
+}
+
 class _ReelsMethodNotAllowed implements Exception {
   const _ReelsMethodNotAllowed();
 }
@@ -276,6 +353,7 @@ class ReelsRepository {
   }
 
   Future<List<ReelItem>> _getOnce() async {
+    if (Platform.isWindows) return _WindowsReelsBrowser.fetch(_api);
     final req = http.Request('GET', _api)
       ..headers.addAll(const {
         'User-Agent': _kUserAgent,

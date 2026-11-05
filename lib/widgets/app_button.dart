@@ -71,20 +71,30 @@ class AppButton extends StatelessWidget {
     final tertiary = style == AppButtonStyle.tertiary;
     final Color foreground =
         primary || onDark ? Colors.white : AppColors.textPrimary;
+    const desktopOnDarkBackground = Color(0xFF252A3A);
+    const desktopOnDarkOutline = Color(0xFF454B64);
     final Color background = primary
         ? AppColors.accentStrong
         : (tertiary
-            ? (windowsDesktop ? AppColors.surfaceHigh : Colors.transparent)
+            ? (windowsDesktop
+                ? (onDark ? desktopOnDarkBackground : AppColors.surfaceHigh)
+                : Colors.transparent)
             : (onDark && !windowsDesktop
                 ? const Color(0x2EFFFFFF)
-                : AppColors.surfaceHigh));
+                : onDark
+                    ? desktopOnDarkBackground
+                    : AppColors.surfaceHigh));
     final Color border = primary
         ? Colors.transparent
         : (tertiary
-            ? (windowsDesktop ? AppColors.outline : Colors.transparent)
+            ? (windowsDesktop
+                ? (onDark ? desktopOnDarkOutline : AppColors.outline)
+                : Colors.transparent)
             : (onDark && !windowsDesktop
                 ? const Color(0x26FFFFFF)
-                : AppColors.outline));
+                : onDark
+                    ? desktopOnDarkOutline
+                    : AppColors.outline));
     final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
     return Pressable(
       semanticLabel: semanticLabel ?? label,
@@ -169,14 +179,18 @@ class AppChip extends StatelessWidget {
                   ? AppColors.accentStrong
                   : (onDark && !windowsDesktop
                       ? const Color(0x1FFFFFFF)
-                      : AppColors.surfaceHigh),
+                      : onDark
+                          ? const Color(0xFF252A3A)
+                          : AppColors.surfaceHigh),
               borderRadius: BorderRadius.circular(Radii.pill),
               border: Border.all(
                 color: selected
                     ? Colors.transparent
                     : (onDark && !windowsDesktop
                         ? const Color(0x1FFFFFFF)
-                        : AppColors.outline),
+                        : onDark
+                            ? const Color(0xFF454B64)
+                            : AppColors.outline),
               ),
             ),
             child: Text(

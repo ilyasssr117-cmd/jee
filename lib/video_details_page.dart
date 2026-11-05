@@ -357,7 +357,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
         minHeight: _headerHeight(MediaQuery.sizeOf(context)),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(windowsDesktop ? 0 : 28),
         child: Stack(
           alignment: Alignment.bottomLeft,
           children: [

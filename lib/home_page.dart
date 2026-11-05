@@ -563,6 +563,33 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  KeyEventResult _onDesktopNavigationKey(FocusNode node, KeyEvent event) {
+    if (defaultTargetPlatform != TargetPlatform.windows ||
+        event is! KeyDownEvent ||
+        _searchOpen) {
+      return KeyEventResult.ignored;
+    }
+
+    // Let text inputs keep their normal caret movement. Arrow keys outside a
+    // text field provide predictable tab navigation throughout the desktop UI.
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext?.findAncestorWidgetOfExactType<EditableText>() != null) {
+      return KeyEventResult.ignored;
+    }
+
+    final delta = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowLeft => -1,
+      LogicalKeyboardKey.arrowRight => 1,
+      _ => 0,
+    };
+    if (delta == 0) return KeyEventResult.ignored;
+    final current = _sectionOrder.indexOf(_section);
+    final next = (current + delta).clamp(0, _sectionOrder.length - 1);
+    if (next == current) return KeyEventResult.handled;
+    _transitionToSection(_sectionOrder[next]);
+    return KeyEventResult.handled;
+  }
+
   Future<void> _resume(Video video) async {
     final error = await launchPlayer(
       context,
@@ -731,42 +758,46 @@ class _HomePageState extends State<HomePage>
               backgroundColor: AppColors.background,
               extendBody: true,
               resizeToAvoidBottomInset: false,
-              body: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (windowsDesktop)
-                    Row(
-                      children: [
-                        _WindowsNavigationRail(
-                          selected: searchOpen
-                              ? AppTab.search
-                              : switch (_dragTarget ?? _section) {
-                                  _Section.home => AppTab.home,
-                                  _Section.reels => AppTab.reels,
-                                  _Section.library => AppTab.library,
-                                  _Section.settings => AppTab.settings,
-                                },
-                          onSelect: _onTabSelect,
-                        ),
-                        Expanded(child: page!),
-                      ],
-                    )
-                  else
-                    page!,
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 160),
-                    child: searchOpen
-                        ? SearchOverlay(
-                            key: const ValueKey<String>('search'),
-                            bottomInset: bottomInset,
-                            onClose: _closeSearch,
-                            onOpen: _openDetails,
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey<String>('no-search'),
+              body: Focus(
+                autofocus: true,
+                onKeyEvent: _onDesktopNavigationKey,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (windowsDesktop)
+                      Row(
+                        children: [
+                          _WindowsNavigationRail(
+                            selected: searchOpen
+                                ? AppTab.search
+                                : switch (_dragTarget ?? _section) {
+                                    _Section.home => AppTab.home,
+                                    _Section.reels => AppTab.reels,
+                                    _Section.library => AppTab.library,
+                                    _Section.settings => AppTab.settings,
+                                  },
+                            onSelect: _onTabSelect,
                           ),
-                  ),
-                ],
+                          Expanded(child: page!),
+                        ],
+                      )
+                    else
+                      page!,
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 160),
+                      child: searchOpen
+                          ? SearchOverlay(
+                              key: const ValueKey<String>('search'),
+                              bottomInset: bottomInset,
+                              onClose: _closeSearch,
+                              onOpen: _openDetails,
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey<String>('no-search'),
+                            ),
+                    ),
+                  ],
+                ),
               ),
               // Keep the navigation dock in a stable layout slot and animate
               // opacity only. Collapsing its height or translating it vertically

@@ -231,6 +231,7 @@ Deno.serve(async (request) => {
     }
     return { items: (data ?? []) as Json[], total: count ?? 0, page: safePage };
   };
+  let lastMutationError = "";
   const mutate = async (payload: Json): Promise<boolean> => {
     try {
       const response = await fetch(
@@ -244,20 +245,28 @@ Deno.serve(async (request) => {
           body: JSON.stringify(payload),
         },
       );
-      const result: unknown = await response.json();
-      if (
-        !response.ok ||
-        !result ||
-        typeof result !== "object" ||
-        !(result as Json).ok
-      ) {
-        console.error(
-          `vxtube-admin ${String(payload.action)} failed (${response.status})`,
-        );
+      const raw = await response.text();
+      let result: Json = {};
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          result = parsed as Json;
+        }
+      } catch {
+        // Keep the diagnostic limited to HTTP status when the gateway returns non-JSON.
+      }
+      if (!response.ok || result.ok !== true) {
+        const reason = typeof result.error === "string" ? result.error : "Admin API rejected the request";
+        const code = typeof result.code === "string" ? ` [${result.code}]` : "";
+        const detail = typeof result.detail === "string" ? `: ${result.detail}` : "";
+        lastMutationError = `HTTP ${response.status}: ${reason}${code}${detail}`.slice(0, 350);
+        console.error(`vxtube-admin ${String(payload.action)} failed: ${lastMutationError}`);
         return false;
       }
+      lastMutationError = "";
       return true;
     } catch {
+      lastMutationError = "Network error calling vxtube-admin";
       console.error(`vxtube-admin ${String(payload.action)} request failed`);
       return false;
     }
@@ -514,7 +523,7 @@ Deno.serve(async (request) => {
           message_id: messageId,
           text: ok
             ? "Change applied."
-            : "Could not apply the change. Please refresh and try again.",
+            : `Could not apply the change. ${html(lastMutationError || "No diagnostic returned; refresh and retry.")}`,
           reply_markup: { inline_keyboard: navRows() },
         });
         if (!edit.ok)

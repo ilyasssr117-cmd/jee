@@ -108,13 +108,27 @@ Deno.serve(async (request) => {
       internal_reason: reason,
       banned_at: new Date().toISOString(),
     });
-    if (error) return json({ error: "Ban operation failed" }, 400);
+    if (error) {
+      console.error("Ban database operation failed", error.code ?? "unknown", error.message);
+      return json({
+        error: "Ban operation failed",
+        code: error.code ?? "unknown",
+        detail: error.message.slice(0, 220),
+      }, 400);
+    }
     return json({ ok: true });
   }
   if (body.action === "unban_installation") {
     const { error } = await admin.from("banned_installations")
       .delete().eq("installation_id", id);
-    if (error) return json({ error: "Unban operation failed" }, 400);
+    if (error) {
+      console.error("Unban database operation failed", error.code ?? "unknown", error.message);
+      return json({
+        error: "Unban operation failed",
+        code: error.code ?? "unknown",
+        detail: error.message.slice(0, 220),
+      }, 400);
+    }
     return json({ ok: true });
   }
   return json({ error: "Unknown action" }, 400);

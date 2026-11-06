@@ -330,7 +330,7 @@ Deno.serve(async (request) => {
         if (!/^[a-f0-9]{32}$/.test(id)) return [];
         const platform = typeof item.platform === "string" ? item.platform.toUpperCase() : "UNKNOWN";
         const version = typeof item.app_version === "string" ? item.app_version : "unknown";
-        return [[`${platform} | ${version}|instview:${id}:${pageIndex}`]];
+        return [[`${platform} — ${version}|instview:${id}:${pageIndex}`]];
       });
       const keyboard = buttons(keyboardRows);
       if (pageIndex > 0 || (pageIndex + 1) * INSTALLATION_PAGE_SIZE < result.total) {

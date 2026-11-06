@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'analytics_service.dart';
+import 'services/remote_config_service.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'native_bridge.dart';
@@ -699,6 +700,9 @@ class DownloadStore extends ChangeNotifier {
   }
 
   bool enqueueDirect(Video video, String url) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('downloads')) {
+      return false;
+    }
     final uri = Uri.tryParse(url);
     if (uri == null ||
         (uri.scheme != 'http' && uri.scheme != 'https') ||
@@ -722,6 +726,9 @@ class DownloadStore extends ChangeNotifier {
   }
 
   bool enqueue(Video video) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('downloads')) {
+      return false;
+    }
     final existing = item(video.id);
     if (existing != null) {
       if (existing.status == DownloadStatus.failed ||

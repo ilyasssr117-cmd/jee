@@ -7,6 +7,7 @@ import 'analytics_service.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'video_json.dart';
+import 'services/remote_config_service.dart';
 
 class FavoritesStore extends ChangeNotifier {
   FavoritesStore._();
@@ -43,6 +44,9 @@ class FavoritesStore extends ChangeNotifier {
   }
 
   bool toggle(Video video) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) {
+      return _ids.contains(video.id);
+    }
     if (_ids.contains(video.id)) {
       remove(video.id);
       return false;
@@ -52,6 +56,7 @@ class FavoritesStore extends ChangeNotifier {
   }
 
   void add(Video video) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) return;
     if (!_ids.add(video.id)) return;
     AnalyticsService.instance.trackFavorite(video.id, added: true);
     _items.insert(0, video.copyWith(streamUrl: ''));

@@ -27,6 +27,8 @@ import 'photo_store.dart';
 import 'playback_progress.dart';
 import 'preview_manager.dart';
 import 'search_history.dart';
+import 'services/remote_access_gate.dart';
+import 'services/remote_config_service.dart';
 
 void main() {
   runZonedGuarded<Future<void>>(_bootstrap, (error, stack) {
@@ -120,7 +122,19 @@ Future<void> _bootstrap() async {
   }
 
   runApp(const VXTUBEFinalApp());
+  unawaited(_startRemoteConfiguration());
   WidgetSync.instance.start();
+}
+
+Future<void> _startRemoteConfiguration() async {
+  try {
+    await RemoteConfigService.instance.initialize();
+    unawaited(RemoteConfigService.instance.start());
+  } catch (error) {
+    if (kDebugMode) {
+      debugPrint('[REMOTE] Startup unavailable: ${error.runtimeType}');
+    }
+  }
 }
 
 class VXTUBEFinalApp extends StatefulWidget {
@@ -181,6 +195,9 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     AnalyticsService.instance.onLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      unawaited(RemoteConfigService.instance.onForeground());
+    }
   }
 
   @override
@@ -298,7 +315,9 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
                     },
                     child: IconTheme.merge(
                       data: const IconThemeData(size: 20, opticalSize: 20),
-                      child: child ?? const SizedBox.shrink(),
+                      child: RemoteAccessGate(
+                        child: child ?? const SizedBox.shrink(),
+                      ),
                     ),
                   ),
                 ),

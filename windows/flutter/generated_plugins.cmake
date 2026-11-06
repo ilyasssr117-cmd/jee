@@ -3,12 +3,14 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  app_links
   connectivity_plus
   flutter_secure_storage_windows
   gal
   media_kit_libs_windows_video
   media_kit_video
   screen_retriever_windows
+  url_launcher_windows
   webview_flutter_windows
   window_manager
 )

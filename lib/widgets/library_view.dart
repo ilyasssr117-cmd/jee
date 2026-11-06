@@ -6,6 +6,7 @@ import '../download_store.dart';
 import '../favorites_store.dart';
 import '../history_store.dart';
 import '../models.dart';
+import '../services/remote_config_service.dart';
 import '../playback_launcher.dart';
 import '../playback_progress.dart';
 import '../preview_manager.dart';
@@ -44,15 +45,33 @@ class LibraryView extends StatefulWidget {
 }
 
 class _LibraryViewState extends State<LibraryView> {
-  late LibrarySegment _segment =
-      widget.segmentRequest?.segment ?? LibrarySegment.favorites;
+  late LibrarySegment _segment = _availableSegments.contains(
+    widget.segmentRequest?.segment ?? LibrarySegment.favorites,
+  )
+      ? (widget.segmentRequest?.segment ?? LibrarySegment.favorites)
+      : _availableSegments.first;
+
+  List<LibrarySegment> get _availableSegments {
+    final remote = RemoteConfigService.instance;
+    return LibrarySegment.values.where((segment) {
+      if (segment == LibrarySegment.favorites) {
+        return remote.isFeatureEnabled('favorites');
+      }
+      if (segment == LibrarySegment.downloads) {
+        return remote.isFeatureEnabled('downloads');
+      }
+      return true;
+    }).toList();
+  }
 
   @override
   void didUpdateWidget(LibraryView oldWidget) {
     super.didUpdateWidget(oldWidget);
     final request = widget.segmentRequest;
     if (request != null && request.token != oldWidget.segmentRequest?.token) {
-      _segment = request.segment;
+      _segment = _availableSegments.contains(request.segment)
+          ? request.segment
+          : _availableSegments.first;
     }
   }
 
@@ -67,6 +86,10 @@ class _LibraryViewState extends State<LibraryView> {
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
+    final availableSegments = _availableSegments;
+    final activeSegment = availableSegments.contains(_segment)
+        ? _segment
+        : availableSegments.first;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -80,7 +103,7 @@ class _LibraryViewState extends State<LibraryView> {
           child: Row(
             children: [
               Expanded(child: Text('Library', style: AppText.headline)),
-              if (_segment == LibrarySegment.history)
+              if (activeSegment == LibrarySegment.history)
                 ListenableBuilder(
                   listenable: HistoryStore.instance,
                   builder: (context, _) => HistoryStore.instance.items.isEmpty
@@ -99,10 +122,10 @@ class _LibraryViewState extends State<LibraryView> {
             scrollDirection: Axis.horizontal,
             padding: EdgeInsets.symmetric(horizontal: margin),
             children: [
-              for (final segment in LibrarySegment.values) ...[
+              for (final segment in availableSegments) ...[
                 AppChip(
                   label: _labels[segment]!,
-                  selected: segment == _segment,
+                  selected: segment == activeSegment,
                   onPressed: () => setState(() => _segment = segment),
                 ),
                 const SizedBox(width: Gaps.sm),
@@ -114,8 +137,8 @@ class _LibraryViewState extends State<LibraryView> {
           child: AnimatedSwitcher(
             duration: Motion.normal,
             child: KeyedSubtree(
-              key: ValueKey<LibrarySegment>(_segment),
-              child: switch (_segment) {
+              key: ValueKey<LibrarySegment>(activeSegment),
+              child: switch (activeSegment) {
                 LibrarySegment.favorites => _buildFavorites(margin),
                 LibrarySegment.history => _buildHistory(margin),
                 LibrarySegment.downloads => _buildDownloads(margin),

@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'favorites_store.dart';
+import 'services/remote_config_service.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'playback_source.dart';
@@ -64,19 +65,19 @@ class ReelItem {
   final List<String> tags;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'id': id,
-    'url': videoUrl,
-    'fallback': fallbackUrl,
-    'download': downloadUrl,
-    'title': title,
-    'thumb': thumbUrl,
-    'avatar': avatarUrl,
-    'author': author,
-    'views': views,
-    'likes': likes,
-    'duration': durationSec,
-    'tags': tags,
-  };
+        'id': id,
+        'url': videoUrl,
+        'fallback': fallbackUrl,
+        'download': downloadUrl,
+        'title': title,
+        'thumb': thumbUrl,
+        'avatar': avatarUrl,
+        'author': author,
+        'views': views,
+        'likes': likes,
+        'duration': durationSec,
+        'tags': tags,
+      };
 
   static ReelItem? fromJson(Map<String, dynamic> map) {
     final id = map['id'];
@@ -131,15 +132,15 @@ class ReelFavorites {
   static String videoId(String reelId) => 'reel_$reelId';
 
   static Video videoOf(ReelItem item) => Video(
-    id: videoId(item.id),
-    title: item.title.isEmpty
-        ? (item.author.isEmpty ? 'Reel' : 'Reel by @${item.author}')
-        : item.title,
-    thumbnailUrl: item.thumbUrl,
-    duration: reelClock(Duration(seconds: item.durationSec)),
-    views: item.views > 0 ? reelCompact(item.views) : '',
-    category: 'Reels',
-  );
+        id: videoId(item.id),
+        title: item.title.isEmpty
+            ? (item.author.isEmpty ? 'Reel' : 'Reel by @${item.author}')
+            : item.title,
+        thumbnailUrl: item.thumbUrl,
+        duration: reelClock(Duration(seconds: item.durationSec)),
+        views: item.views > 0 ? reelCompact(item.views) : '',
+        category: 'Reels',
+      );
 
   void _ensureLoaded() {
     if (_loaded) return;
@@ -155,15 +156,18 @@ class ReelFavorites {
   }
 
   void _persist() => LocalStore.writeList(
-    _key,
-    _items.values.map((item) => jsonEncode(item.toJson())).toList(),
-  );
+        _key,
+        _items.values.map((item) => jsonEncode(item.toJson())).toList(),
+      );
 
   bool isLiked(String reelId) =>
       FavoritesStore.instance.isFavorite(videoId(reelId));
 
   /// Adds the reel to favorites. Returns false when it was already there.
   bool like(ReelItem item) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) {
+      return false;
+    }
     _ensureLoaded();
     if (isLiked(item.id)) return false;
     _items.remove(item.id);
@@ -177,6 +181,7 @@ class ReelFavorites {
   }
 
   void unlike(String reelId) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) return;
     _ensureLoaded();
     FavoritesStore.instance.remove(videoId(reelId));
     if (_items.remove(reelId) != null) _persist();
@@ -184,6 +189,9 @@ class ReelFavorites {
 
   /// Returns the new liked state.
   bool toggle(ReelItem item) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) {
+      return isLiked(item.id);
+    }
     if (isLiked(item.id)) {
       unlike(item.id);
       return false;

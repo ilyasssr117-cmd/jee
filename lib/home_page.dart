@@ -34,6 +34,7 @@ import 'widgets/search_overlay.dart';
 import 'widgets/settings_view.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
+import 'services/remote_config_service.dart';
 
 enum _Section { home, reels, library, settings }
 
@@ -52,6 +53,12 @@ class _HomePageState extends State<HomePage>
     _Section.library,
     _Section.settings,
   ];
+
+  List<_Section> get _availableSections => _sectionOrder
+      .where((section) =>
+          section != _Section.reels ||
+          RemoteConfigService.instance.isFeatureEnabled('reels'))
+      .toList();
 
   static const int _pageSize = 12;
 
@@ -100,6 +107,7 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    RemoteConfigService.instance.addListener(_onRemoteConfigChanged);
     _scroll.addListener(_onScroll);
     _pageSettleController.addListener(() {
       final animation = _pageSettleAnimation;
@@ -145,6 +153,7 @@ class _HomePageState extends State<HomePage>
   }
 
   void _showDownloads() {
+    if (!RemoteConfigService.instance.isFeatureEnabled('downloads')) return;
     _libraryRequest = (
       segment: LibrarySegment.downloads,
       token: ++_requestToken,
@@ -155,6 +164,7 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    RemoteConfigService.instance.removeListener(_onRemoteConfigChanged);
     _offlineTimer?.cancel();
     _pageSettleController.dispose();
     _dragOffset.dispose();
@@ -163,6 +173,18 @@ class _HomePageState extends State<HomePage>
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
+  }
+
+  void _onRemoteConfigChanged() {
+    if (!mounted) return;
+    final remote = RemoteConfigService.instance;
+    if (_section == _Section.reels && !remote.isFeatureEnabled('reels')) {
+      _section = _Section.home;
+    }
+    if (_searchOpen && !remote.isFeatureEnabled('search')) {
+      _search.value = false;
+    }
+    setState(() {});
   }
 
   bool _heroVisible = true;
@@ -389,6 +411,7 @@ class _HomePageState extends State<HomePage>
   }
 
   void _openSearch() {
+    if (!RemoteConfigService.instance.isFeatureEnabled('search')) return;
     if (_searchOpen) return;
     PreviewManager.instance.stopNow(fade: false);
     _search.value = true;
@@ -439,9 +462,10 @@ class _HomePageState extends State<HomePage>
     if (physicalDelta.abs() < 0.5) return null;
     final rtl = Directionality.of(context) == TextDirection.rtl;
     final forward = (physicalDelta < 0) != rtl;
-    final next = _sectionOrder.indexOf(_section) + (forward ? 1 : -1);
-    if (next < 0 || next >= _sectionOrder.length) return null;
-    return _sectionOrder[next];
+    final sections = _availableSections;
+    final next = sections.indexOf(_section) + (forward ? 1 : -1);
+    if (next < 0 || next >= sections.length) return null;
+    return sections[next];
   }
 
   void _onHorizontalDragStart(DragStartDetails details) {
@@ -520,6 +544,7 @@ class _HomePageState extends State<HomePage>
   }
 
   void _transitionToSection(_Section destination) {
+    if (!_availableSections.contains(destination)) return;
     if (destination == _section) return;
     final width = MediaQuery.sizeOf(context).width;
     final currentIndex = _sectionOrder.indexOf(_section);
@@ -584,10 +609,11 @@ class _HomePageState extends State<HomePage>
       _ => 0,
     };
     if (delta == 0) return KeyEventResult.ignored;
-    final current = _sectionOrder.indexOf(_section);
-    final next = (current + delta).clamp(0, _sectionOrder.length - 1);
+    final sections = _availableSections;
+    final current = sections.indexOf(_section);
+    final next = (current + delta).clamp(0, sections.length - 1);
     if (next == current) return KeyEventResult.handled;
-    _transitionToSection(_sectionOrder[next]);
+    _transitionToSection(sections[next]);
     return KeyEventResult.handled;
   }
 
@@ -781,6 +807,7 @@ class _HomePageState extends State<HomePage>
                                     _Section.settings => AppTab.settings,
                                   },
                             onSelect: _onTabSelect,
+                            isTabEnabled: _isTabEnabled,
                           ),
                           Expanded(child: page!),
                         ],
@@ -825,6 +852,7 @@ class _HomePageState extends State<HomePage>
                                   _Section.settings => AppTab.settings,
                                 },
                           onSelect: _onTabSelect,
+                          isTabEnabled: _isTabEnabled,
                         ),
                       ),
                     ),
@@ -902,6 +930,15 @@ class _HomePageState extends State<HomePage>
         ],
       ),
     );
+  }
+
+  bool _isTabEnabled(AppTab tab) {
+    final remote = RemoteConfigService.instance;
+    return switch (tab) {
+      AppTab.search => remote.isFeatureEnabled('search'),
+      AppTab.reels => remote.isFeatureEnabled('reels'),
+      _ => true,
+    };
   }
 
   List<Widget> _contentSlivers(double margin) {
@@ -1033,10 +1070,15 @@ class _SectionHost extends StatelessWidget {
 }
 
 class _RidingTabBar extends StatelessWidget {
-  const _RidingTabBar({required this.selected, required this.onSelect});
+  const _RidingTabBar({
+    required this.selected,
+    required this.onSelect,
+    required this.isTabEnabled,
+  });
 
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
+  final bool Function(AppTab tab) isTabEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1056,6 +1098,7 @@ class _RidingTabBar extends StatelessWidget {
           child: AppBottomBar(
             selected: selected,
             onSelect: onSelect,
+            isTabEnabled: isTabEnabled,
             bottomGap: 0,
           ),
         ),
@@ -1068,10 +1111,12 @@ class _WindowsNavigationRail extends StatelessWidget {
   const _WindowsNavigationRail({
     required this.selected,
     required this.onSelect,
+    required this.isTabEnabled,
   });
 
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
+  final bool Function(AppTab tab) isTabEnabled;
 
   static const _tabs = <({AppTab tab, IconData icon, String label})>[
     (tab: AppTab.home, icon: Icons.home_rounded, label: 'Home'),
@@ -1083,7 +1128,8 @@ class _WindowsNavigationRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selectedIndex = _tabs.indexWhere((tab) => tab.tab == selected);
+    final tabs = _tabs.where((tab) => isTabEnabled(tab.tab)).toList();
+    final selectedIndex = tabs.indexWhere((tab) => tab.tab == selected);
     return Material(
       color: AppColors.surface,
       child: SizedBox(
@@ -1099,7 +1145,7 @@ class _WindowsNavigationRail extends StatelessWidget {
               child: NavigationRail(
                 backgroundColor: Colors.transparent,
                 selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
-                onDestinationSelected: (index) => onSelect(_tabs[index].tab),
+                onDestinationSelected: (index) => onSelect(tabs[index].tab),
                 labelType: NavigationRailLabelType.all,
                 minWidth: 76,
                 groupAlignment: -0.85,
@@ -1122,7 +1168,7 @@ class _WindowsNavigationRail extends StatelessWidget {
                   fontSize: 12,
                 ),
                 destinations: [
-                  for (final tab in _tabs)
+                  for (final tab in tabs)
                     NavigationRailDestination(
                       icon: Icon(tab.icon),
                       selectedIcon: Icon(tab.icon),

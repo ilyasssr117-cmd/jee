@@ -1,0 +1,7 @@
+project_id = "igoqkqbkctcubozyaxnx"
+
+[functions.vxtube-control]
+verify_jwt = false
+
+[functions.vxtube-admin]
+verify_jwt = false

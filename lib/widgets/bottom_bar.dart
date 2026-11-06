@@ -27,11 +27,13 @@ class AppBottomBar extends StatefulWidget {
     required this.selected,
     required this.onSelect,
     this.bottomGap,
+    this.isTabEnabled,
   });
 
   final AppTab selected;
   final ValueChanged<AppTab> onSelect;
   final double? bottomGap;
+  final bool Function(AppTab tab)? isTabEnabled;
 
   @override
   State<AppBottomBar> createState() => _AppBottomBarState();
@@ -70,6 +72,10 @@ class _AppBottomBarState extends State<AppBottomBar> {
   AppTab get _indicatorTab =>
       _dragging ? (_hovered ?? widget.selected) : widget.selected;
 
+  List<({AppTab tab, IconData icon, String label})> get _visibleTabs => _tabs
+      .where((item) => widget.isTabEnabled?.call(item.tab) ?? true)
+      .toList();
+
   void _beginDrag(AppTab tab) {
     final bar = _barKey.currentContext?.findRenderObject() as RenderBox?;
     final tabBox =
@@ -80,7 +86,9 @@ class _AppBottomBarState extends State<AppBottomBar> {
         Offset(tabBox.size.width / 2, tabBox.size.height / 2),
       );
       final localCenter = bar.globalToLocal(tabCenter);
-      final itemWidth = bar.size.width / _tabs.length;
+      final tabs = _visibleTabs;
+      if (tabs.isEmpty) return;
+      final itemWidth = bar.size.width / tabs.length;
       startLeft = (localCenter.dx - itemWidth / 2)
           .clamp(0.0, bar.size.width - itemWidth)
           .toDouble();
@@ -97,10 +105,12 @@ class _AppBottomBarState extends State<AppBottomBar> {
     final bar = _barKey.currentContext?.findRenderObject() as RenderBox?;
     if (bar == null || !bar.hasSize) return;
     final local = bar.globalToLocal(globalPosition);
-    final itemWidth = bar.size.width / _tabs.length;
+    final tabs = _visibleTabs;
+    if (tabs.isEmpty) return;
+    final itemWidth = bar.size.width / tabs.length;
     final index =
-        (local.dx / itemWidth).floor().clamp(0, _tabs.length - 1).toInt();
-    final next = _tabs[index].tab;
+        (local.dx / itemWidth).floor().clamp(0, tabs.length - 1).toInt();
+    final next = tabs[index].tab;
     final nextLeft = (local.dx - itemWidth / 2)
         .clamp(0.0, bar.size.width - itemWidth)
         .toDouble();
@@ -132,6 +142,8 @@ class _AppBottomBarState extends State<AppBottomBar> {
     final width =
         math.min(MediaQuery.sizeOf(context).width - 20, 420.0).toDouble();
     final dockHeight = appDockHeight(context);
+    final tabs = _visibleTabs;
+    if (tabs.isEmpty) return const SizedBox.shrink();
 
     // Scaffold gives bottomNavigationBar a loose height constraint. A bare
     // Center expands to that maximum and makes the dock appear mid-screen.
@@ -170,10 +182,11 @@ class _AppBottomBarState extends State<AppBottomBar> {
                 ),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final itemWidth = constraints.maxWidth / _tabs.length;
-                    final selectedLeft =
-                        _tabs.indexWhere((item) => item.tab == _indicatorTab) *
-                            itemWidth;
+                    final itemWidth = constraints.maxWidth / tabs.length;
+                    final selectedLeft = tabs
+                            .indexWhere((item) => item.tab == _indicatorTab)
+                            .clamp(0, tabs.length - 1) *
+                        itemWidth;
                     final indicatorLeft = _dragging
                         ? (_dragIndicatorLeft ?? selectedLeft)
                         : selectedLeft;
@@ -209,7 +222,7 @@ class _AppBottomBarState extends State<AppBottomBar> {
                             ),
                           Row(
                             children: [
-                              for (final item in _tabs)
+                              for (final item in tabs)
                                 SizedBox(
                                   key: _tabKeys[item.tab],
                                   width: itemWidth,

@@ -55,10 +55,17 @@ class RemoteAppConfig {
     }
     final features = <String, bool>{..._defaultFeatures};
     final rawFeatures = json['features'];
+    if (rawFeatures != null && rawFeatures is! Map) {
+      throw const FormatException('Invalid remote feature flags.');
+    }
     if (rawFeatures is Map) {
       for (final name in _defaultFeatures.keys) {
         final flag = rawFeatures[name];
-        if (flag is bool) features[name] = flag;
+        if (flag == null) continue;
+        if (flag is! bool) {
+          throw FormatException('Invalid remote feature flag: $name.');
+        }
+        features[name] = flag;
       }
     }
 
@@ -136,6 +143,8 @@ class RemoteConfigService extends ChangeNotifier {
   bool _supabaseReady = false;
   bool _banned = false;
   String? _updateUrl;
+  Future<void>? _refreshing;
+  bool _refreshQueued = false;
 
   RemoteAppConfig get config => _config;
   bool get isBanned => _banned;
@@ -199,7 +208,25 @@ class RemoteConfigService extends ChangeNotifier {
 
   Future<void> onForeground() => refresh();
 
-  Future<void> refresh() async {
+  Future<void> refresh() {
+    final active = _refreshing;
+    if (active != null) {
+      _refreshQueued = true;
+      return active;
+    }
+    late final Future<void> operation;
+    operation = _refreshOnce().whenComplete(() {
+      if (identical(_refreshing, operation)) _refreshing = null;
+      if (_refreshQueued) {
+        _refreshQueued = false;
+        unawaited(refresh());
+      }
+    });
+    _refreshing = operation;
+    return operation;
+  }
+
+  Future<void> _refreshOnce() async {
     final installationId = _installationId;
     if (!_initialized || installationId == null || !_supabaseReady) {
       return;
@@ -216,29 +243,57 @@ class RemoteConfigService extends ChangeNotifier {
       if (data is! Map) throw const FormatException('Invalid server response.');
       final result = Map<String, Object?>.from(data);
       final rawConfig = result['config'];
-      if (rawConfig != null) {
-        final validated = RemoteAppConfig.fromJson(rawConfig);
-        _config = validated;
-        await LocalStore.writeStringAsync(
-          _cacheKey,
-          jsonEncode(validated.toJson()),
-        );
+      final validated = RemoteAppConfig.fromJson(rawConfig);
+      final restricted = result['restricted'];
+      if (restricted is! bool) {
+        throw const FormatException('Missing installation status.');
       }
-      _banned = result['restricted'] == true;
-      await _secureStorage.write(
-        key: _restrictionCacheKey,
-        value: _banned ? 'true' : 'false',
-      );
       final updateUrl = result['update_url'];
+
+      // Publish fresh server state before best-effort local persistence. A
+      // secure-storage write failure must never leave the UI on stale config.
+      _config = validated;
+      _banned = restricted;
       _updateUrl = _validatedUrl(updateUrl);
       notifyListeners();
+      unawaited(_persistConfig(validated));
+      unawaited(_persistRestriction(restricted));
     } on TimeoutException {
-      debugPrint('[REMOTE] Request timed out; using cached state.');
+      debugPrint('[REMOTE] Bootstrap timed out; keeping the last valid state.');
     } catch (error) {
-      // Keep the last validated config and previous restriction state during
-      // transient network errors. Never fail open after a confirmed ban.
-      debugPrint('[REMOTE] Refresh unavailable: ${error.runtimeType}');
+      // Do not include response bodies, request headers, URLs, or keys here.
+      debugPrint(
+        '[REMOTE] Bootstrap rejected or failed (${error.runtimeType}); '
+        'keeping the last valid state.',
+      );
     }
+  }
+
+  Future<void> _persistConfig(RemoteAppConfig config) async {
+    try {
+      await LocalStore.writeStringAsync(_cacheKey, jsonEncode(config.toJson()));
+    } catch (error) {
+      debugPrint('[REMOTE] Config cache write failed (${error.runtimeType}).');
+    }
+  }
+
+  Future<void> _persistRestriction(bool restricted) async {
+    try {
+      await _secureStorage.write(
+        key: _restrictionCacheKey,
+        value: restricted ? 'true' : 'false',
+      );
+    } catch (error) {
+      debugPrint(
+        '[REMOTE] Restriction cache write failed (${error.runtimeType}).',
+      );
+    }
+  }
+
+  @visibleForTesting
+  void replaceConfigForTesting(RemoteAppConfig config) {
+    _config = config;
+    notifyListeners();
   }
 
   void disposeService() {
@@ -250,7 +305,10 @@ class RemoteConfigService extends ChangeNotifier {
       final raw = LocalStore.readString(_cacheKey);
       if (raw == null) return const RemoteAppConfig();
       return RemoteAppConfig.fromJson(jsonDecode(raw));
-    } catch (_) {
+    } catch (error) {
+      debugPrint(
+        '[REMOTE] Cached config rejected (${error.runtimeType}); using defaults.',
+      );
       return const RemoteAppConfig();
     }
   }

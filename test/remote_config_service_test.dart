@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vxtube_final/services/remote_config_service.dart';
+import 'package:vxtube_final/widgets/library_view.dart';
 
 void main() {
   group('RemoteAppConfig', () {
@@ -16,6 +18,7 @@ void main() {
       'features': <String, Object?>{
         'reels': false,
         'search': true,
+        'favorites': false,
         'unknown': false,
       },
     };
@@ -25,6 +28,7 @@ void main() {
 
       expect(config.features['reels'], isFalse);
       expect(config.features['search'], isTrue);
+      expect(config.features['favorites'], isFalse);
       expect(config.features['downloads'], isTrue);
       expect(config.features.containsKey('unknown'), isFalse);
       expect(config.downloadUrls, const <String, String>{
@@ -71,4 +75,46 @@ void main() {
       expect(restored.downloadUrls, config.downloadUrls);
     });
   });
+
+  testWidgets('Library hides Favorites when remote config disables it', (
+    tester,
+  ) async {
+    final remote = RemoteConfigService.instance;
+    remote.replaceConfigForTesting(_configWithFavorites(true));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LibraryView(
+            onOpen: (_, __) {},
+            onBrowse: () {},
+            bottomInset: 0,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Favorites'), findsOneWidget);
+
+    remote.replaceConfigForTesting(_configWithFavorites(false));
+    await tester.pumpAndSettle();
+    expect(find.text('Favorites'), findsNothing);
+    expect(find.text('Models'), findsOneWidget);
+  });
+}
+
+RemoteAppConfig _configWithFavorites(bool enabled) {
+  final json = <String, Object?>{
+    'maintenance_enabled': false,
+    'maintenance_message': 'Maintenance',
+    'force_update': false,
+    'latest_version': '',
+    'minimum_version': '',
+    'download_url': <String, String>{},
+    'features': <String, bool>{
+      'reels': true,
+      'search': true,
+      'downloads': true,
+      'favorites': enabled,
+    },
+  };
+  return RemoteAppConfig.fromJson(json);
 }

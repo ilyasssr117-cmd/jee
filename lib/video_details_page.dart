@@ -17,6 +17,7 @@ import 'models.dart';
 import 'playback_launcher.dart';
 import 'playback_progress.dart';
 import 'request_cache.dart';
+import 'services/remote_config_service.dart';
 import 'save_video_to_photos.dart';
 import 'touch.dart';
 import 'video_repository.dart';
@@ -691,7 +692,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
 
   Widget _buildFavoriteButton({required bool compact}) {
     return ListenableBuilder(
-      listenable: FavoritesStore.instance,
+      listenable: Listenable.merge(<Listenable>[
+        FavoritesStore.instance,
+        RemoteConfigService.instance,
+      ]),
       builder: (context, _) {
         final active = FavoritesStore.instance.isFavorite(widget.video.id);
         return AppButton(
@@ -704,6 +708,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
           expand: true,
           singleLine: true,
           onPressed: () {
+            if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) {
+              return;
+            }
             final nowFavorite = FavoritesStore.instance.toggle(widget.video);
             Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
           },

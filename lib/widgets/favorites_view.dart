@@ -4,6 +4,7 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import '../app_theme.dart';
 import '../favorites_store.dart';
 import '../models.dart';
+import '../services/remote_config_service.dart';
 import 'state_views.dart';
 import 'video_grid.dart';
 
@@ -22,75 +23,83 @@ class FavoritesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final margin = context.hMargin;
     return ListenableBuilder(
-      listenable: FavoritesStore.instance,
+      listenable: RemoteConfigService.instance,
       builder: (context, _) {
-        final items = FavoritesStore.instance.items;
-        return CustomScrollView(
-          scrollCacheExtent: ScrollCacheExtent.pixels(
-            MediaQuery.sizeOf(context).height,
-          ),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  margin,
-                  context.safe.top + Gaps.lg,
-                  margin,
-                  Gaps.md,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.star_rounded,
-                      size: 20,
-                      color: AppColors.star,
-                    ),
-                    const SizedBox(width: Gaps.sm),
-                    Flexible(
-                      child: Text(
-                        'Saved videos',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.headline,
-                      ),
-                    ),
-                    if (items.isNotEmpty) ...[
-                      const SizedBox(width: Gaps.sm),
-                      Text('${items.length}', style: AppText.body),
-                    ],
-                  ],
-                ),
+        if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) {
+          return const SizedBox.shrink();
+        }
+        final margin = context.hMargin;
+        return ListenableBuilder(
+          listenable: FavoritesStore.instance,
+          builder: (context, _) {
+            final items = FavoritesStore.instance.items;
+            return CustomScrollView(
+              scrollCacheExtent: ScrollCacheExtent.pixels(
+                MediaQuery.sizeOf(context).height,
               ),
-            ),
-            if (items.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Padding(
-                  padding: EdgeInsets.only(bottom: bottomInset),
-                  child: StatusView(
-                    icon: Icons.star_border_rounded,
-                    title: 'No favorites yet',
-                    message: 'Tap the star on any video to save it here.',
-                    actionLabel: 'Browse videos',
-                    actionIcon: Icons.home_rounded,
-                    onAction: onBrowse,
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      margin,
+                      context.safe.top + Gaps.lg,
+                      margin,
+                      Gaps.md,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 20,
+                          color: AppColors.star,
+                        ),
+                        const SizedBox(width: Gaps.sm),
+                        Flexible(
+                          child: Text(
+                            'Saved videos',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.headline,
+                          ),
+                        ),
+                        if (items.isNotEmpty) ...[
+                          const SizedBox(width: Gaps.sm),
+                          Text('${items.length}', style: AppText.body),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-              )
-            else
-              SliverVideoGrid(
-                videos: items,
-                padding: EdgeInsets.fromLTRB(
-                  margin,
-                  Gaps.xs,
-                  margin,
-                  Gaps.xl + bottomInset,
-                ),
-                onOpen: (video) => onOpen(video, List<Video>.of(items)),
-              ),
-          ],
+                if (items.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: bottomInset),
+                      child: StatusView(
+                        icon: Icons.star_border_rounded,
+                        title: 'No favorites yet',
+                        message: 'Tap the star on any video to save it here.',
+                        actionLabel: 'Browse videos',
+                        actionIcon: Icons.home_rounded,
+                        onAction: onBrowse,
+                      ),
+                    ),
+                  )
+                else
+                  SliverVideoGrid(
+                    videos: items,
+                    padding: EdgeInsets.fromLTRB(
+                      margin,
+                      Gaps.xs,
+                      margin,
+                      Gaps.xl + bottomInset,
+                    ),
+                    onOpen: (video) => onOpen(video, List<Video>.of(items)),
+                  ),
+              ],
+            );
+          },
         );
       },
     );

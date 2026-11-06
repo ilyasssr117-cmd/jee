@@ -32,6 +32,7 @@ import 'models.dart';
 import 'photo_saver.dart';
 import 'preview_manager.dart';
 import 'reel_favorites.dart';
+import 'services/remote_config_service.dart';
 import 'touch.dart';
 import 'widgets/app_button.dart';
 import 'widgets/dialogs.dart';
@@ -2392,9 +2393,14 @@ class _ActionRail extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         ListenableBuilder(
-          listenable: FavoritesStore.instance,
+          listenable: Listenable.merge(<Listenable>[
+            FavoritesStore.instance,
+            RemoteConfigService.instance,
+          ]),
           builder: (_, __) {
             final liked = ReelFavorites.instance.isLiked(item.id);
+            final enabled =
+                RemoteConfigService.instance.isFeatureEnabled('favorites');
             final count = item.likes;
             return _RailButton(
               icon: liked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
@@ -2403,7 +2409,7 @@ class _ActionRail extends StatelessWidget {
               label: _compact(count),
               pop: liked,
               haptic: Haptic.none,
-              onTap: onToggleLike,
+              onTap: enabled ? onToggleLike : null,
             );
           },
         ),
@@ -2578,7 +2584,7 @@ class _RailButton extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color iconColor;
   final double size;
   final double? progress;
@@ -2589,7 +2595,7 @@ class _RailButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final glyph = Icon(
       icon,
-      color: iconColor,
+      color: onTap == null ? Colors.white54 : iconColor,
       size: size,
       shadows: const [Shadow(blurRadius: 14, color: Color(0x80000000))],
     );

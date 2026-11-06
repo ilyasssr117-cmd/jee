@@ -68,6 +68,7 @@ class FavoritesStore extends ChangeNotifier {
   }
 
   void remove(String id) {
+    if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) return;
     if (!_ids.remove(id)) return;
     AnalyticsService.instance.trackFavorite(id, added: false);
     _items.removeWhere((video) => video.id == id);

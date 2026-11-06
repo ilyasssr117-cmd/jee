@@ -85,6 +85,13 @@ class _LibraryViewState extends State<LibraryView> {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: RemoteConfigService.instance,
+      builder: (context, _) => _buildLibrary(context),
+    );
+  }
+
+  Widget _buildLibrary(BuildContext context) {
     final margin = context.hMargin;
     final availableSegments = _availableSegments;
     final activeSegment = availableSegments.contains(_segment)

@@ -6,6 +6,7 @@ import '../favorites_store.dart';
 import '../models.dart';
 import '../playback_progress.dart';
 import '../preview_manager.dart';
+import '../services/remote_config_service.dart';
 import '../touch.dart';
 import 'video_artwork.dart';
 import 'video_meta.dart';
@@ -132,17 +133,24 @@ class _FavoriteButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = FavoritesStore.instance;
     return ListenableBuilder(
-      listenable: store,
+      listenable: Listenable.merge(<Listenable>[
+        store,
+        RemoteConfigService.instance,
+      ]),
       builder: (context, _) {
         final active = store.isFavorite(video.id);
+        final enabled =
+            RemoteConfigService.instance.isFeatureEnabled('favorites');
         return Pressable(
           semanticLabel: active ? 'Remove from favorites' : 'Add to favorites',
           haptic: Haptic.none,
           pressedScale: 0.8,
-          onTap: () {
-            final nowFavorite = store.toggle(video);
-            Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
-          },
+          onTap: enabled
+              ? () {
+                  final nowFavorite = store.toggle(video);
+                  Haptics.play(nowFavorite ? Haptic.medium : Haptic.light);
+                }
+              : null,
           child: SizedBox(
             width: 44,
             height: 44,

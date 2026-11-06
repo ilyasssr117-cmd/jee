@@ -100,12 +100,10 @@ Deno.serve(async (request) => {
     return json({ error: "Invalid installation ID" }, 400);
   }
   if (body.action === "ban_installation") {
-    const reason = typeof body.internal_reason === "string"
-      ? body.internal_reason.slice(0, 500)
-      : null;
+    // Keep the ban operation compatible with databases where the optional
+    // internal_reason column has not been applied yet.
     const { error } = await admin.from("banned_installations").upsert({
       installation_id: id,
-      internal_reason: reason,
       banned_at: new Date().toISOString(),
     });
     if (error) {

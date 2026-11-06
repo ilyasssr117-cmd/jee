@@ -638,7 +638,7 @@ Deno.serve(async (request) => {
               text: "Could not update force update. Please refresh and try again.",
             });
         }
-      } else if (/^instlist:\\d{1,4}$/.test(data) || /^instview:[a-f0-9]{32}:\\d{1,4}$/.test(data)) {
+      } else if (/^instlist:\d{1,4}$/.test(data) || /^instview:[a-f0-9]{32}:\d{1,4}$/.test(data)) {
         await show(chatId, data, messageId);
       } else {
         await tg("sendMessage", {

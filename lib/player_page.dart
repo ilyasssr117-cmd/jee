@@ -102,6 +102,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _adDone = true;
   bool _adWasAdopted = false;
   bool _resumeAdoptedAfterAd = false;
+  int _adPreparationGeneration = 0;
+  bool _adPreparedForCurrentOpen = false;
 
   String? _activeUrl;
   Map<String, String>? _activeHeaders;
@@ -169,35 +171,55 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (adopted != null) _speed = adopted.speed;
     _adWasAdopted = adopted != null;
     _resumeAdoptedAfterAd = adopted?.controller.value.isPlaying ?? false;
+    // Restoring an existing mini-player session is a continuation of the
+    // same video, not a newly opened video; do not consume another ad slot.
     final shouldCheckAd = _localPath == null &&
-        adopted?.isFile != true &&
+        adopted == null &&
         !widget.video.id.startsWith('reel_');
     _adChecked = !shouldCheckAd;
     _adDone = !shouldCheckAd;
-    if (shouldCheckAd) unawaited(_prepareAd());
+    if (shouldCheckAd) {
+      unawaited(_prepareAd());
+    } else {
+      debugPrint(
+        '[ADS] Skipping initial video ${widget.video.id}: local=${_localPath != null}, adopted=${adopted != null}, reel=${widget.video.id.startsWith('reel_')}.',
+      );
+    }
     _initializePlayer();
   }
 
   Future<void> _prepareAd() async {
+    final videoId = _video.id;
+    // Prevent duplicate ad checks for one video within this PlayerPage. This
+    // keeps one counter increment per opened video, even during rebuilds or
+    // rapid navigation callbacks.
+    if (_adPreparedForCurrentOpen) return;
+    _adPreparedForCurrentOpen = true;
+    final generation = ++_adPreparationGeneration;
     try {
-      if (_adWasAdopted && _resumeAdoptedAfterAd) {
-        final adoptedController = widget.adopted?.controller;
-        if (adoptedController != null) {
-          await _safeControllerAction(adoptedController.pause);
-        }
-      }
       if (!mounted || _isLeaving) return;
 
-      final ad = await getAdIfDue(context);
-      if (!mounted || _isLeaving) return;
+      final ad = await getAdIfDue(context, videoId: videoId);
+      if (!mounted ||
+          _isLeaving ||
+          generation != _adPreparationGeneration ||
+          videoId != _video.id) {
+        return;
+      }
       setState(() {
         _ad = ad;
         _adChecked = true;
         _adDone = ad == null;
       });
       if (ad == null) await _resumeMainVideoAfterAd();
-    } catch (_) {
-      if (!mounted || _isLeaving) return;
+    } catch (error) {
+      debugPrint('[ADS] Pre-roll preparation failed: ${error.runtimeType}.');
+      if (!mounted ||
+          _isLeaving ||
+          generation != _adPreparationGeneration ||
+          videoId != _video.id) {
+        return;
+      }
       setState(() {
         _ad = null;
         _adChecked = true;
@@ -987,6 +1009,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _countdown.value = null;
     _autoplayCancelled = false;
     _video = next;
+    ++_adPreparationGeneration;
+    _adPreparedForCurrentOpen = false;
     _localPath = DownloadStore.instance.localPath(next.id);
     _ad = null;
     _adWasAdopted = false;
@@ -995,7 +1019,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         _localPath == null && !_video.id.startsWith('reel_');
     _adChecked = !shouldCheckAd;
     _adDone = !shouldCheckAd;
-    if (shouldCheckAd) unawaited(_prepareAd());
+    if (shouldCheckAd) {
+      unawaited(_prepareAd());
+    } else {
+      debugPrint(
+        '[ADS] Skipping video ${_video.id}: local=${_localPath != null}, reel=${_video.id.startsWith('reel_')}.',
+      );
+    }
     _orientationForced = false;
     _lastPosition = Duration.zero;
     _autoRetries = 0;

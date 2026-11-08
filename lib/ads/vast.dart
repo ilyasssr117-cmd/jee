@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
@@ -27,6 +29,19 @@ bool _isHttpUrl(String value) {
       uri.userInfo.isEmpty;
 }
 
+Iterable<XmlElement> _elements(XmlDocument document, String localName) =>
+    document.descendants
+        .whereType<XmlElement>()
+        .where((element) => element.name.local == localName);
+
+String? _firstText(XmlDocument document, String localName) {
+  for (final element in _elements(document, localName)) {
+    final value = element.innerText.trim();
+    if (value.isNotEmpty) return value;
+  }
+  return null;
+}
+
 List<String> _urls(Iterable<XmlElement> elements) => elements
     .map((element) => element.innerText.trim())
     .where(_isHttpUrl)
@@ -34,7 +49,7 @@ List<String> _urls(Iterable<XmlElement> elements) => elements
 
 Map<String, List<String>> _trackingEvents(XmlDocument document) {
   final events = <String, List<String>>{};
-  for (final tracking in document.findAllElements('Tracking')) {
+  for (final tracking in _elements(document, 'Tracking')) {
     final name = tracking.getAttribute('event');
     final url = tracking.innerText.trim();
     if (name == null || name.isEmpty || !_isHttpUrl(url)) continue;
@@ -43,33 +58,61 @@ Map<String, List<String>> _trackingEvents(XmlDocument document) {
   return events;
 }
 
+Uri _cacheBusted(Uri uri) {
+  final parameters = <String, String>{
+    ...uri.queryParameters,
+    '_cb': DateTime.now().microsecondsSinceEpoch.toString(),
+  };
+  return uri.replace(queryParameters: parameters);
+}
+
 Future<VastAd?> fetchVast(String vastTagUrl, {int depth = 0}) async {
   if (depth > 3 || !_isHttpUrl(vastTagUrl)) return null;
-  try {
-    final tagUri = Uri.parse(vastTagUrl);
-    final response = await http.get(tagUri, headers: const {
-      'Accept': 'application/xml, text/xml'
-    }).timeout(const Duration(seconds: 6));
-    if (response.statusCode < 200 || response.statusCode >= 300) return null;
-    if (response.bodyBytes.length > 1024 * 1024) return null;
 
-    final document = XmlDocument.parse(response.body);
-    final wrapperUris = document.findAllElements('VASTAdTagURI');
-    final impressions = _urls(document.findAllElements('Impression'));
-    final clickTracking = _urls(document.findAllElements('ClickTracking'));
+  try {
+    final originalUri = Uri.parse(vastTagUrl);
+    // Prevent a proxy/URL cache from reusing a previous VAST response. The
+    // ExoClick zone ID and all existing query parameters remain unchanged.
+    final requestUri = _cacheBusted(originalUri);
+    final response = await http.get(
+      requestUri,
+      headers: const <String, String>{
+        'Accept': 'application/xml, text/xml, */*',
+        'Cache-Control': 'no-cache, no-store, max-age=0',
+        'Pragma': 'no-cache',
+      },
+    ).timeout(const Duration(seconds: 8));
+
+    debugPrint(
+      '[ADS][VAST] depth=$depth status=${response.statusCode} '
+      'bytes=${response.bodyBytes.length} '
+      'content-type=${response.headers['content-type'] ?? 'unknown'}',
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) return null;
+    if (response.bodyBytes.isEmpty || response.bodyBytes.length > 1024 * 1024) {
+      return null;
+    }
+
+    final xmlText = utf8.decode(response.bodyBytes, allowMalformed: true);
+    final document = XmlDocument.parse(xmlText);
+    final impressions = _urls(_elements(document, 'Impression'));
+    final clickTracking = _urls(_elements(document, 'ClickTracking'));
     final wrapperEvents = _trackingEvents(document);
 
-    if (wrapperUris.isNotEmpty) {
-      final wrapperUrl = wrapperUris.first.innerText.trim();
-      final nestedUri = tagUri.resolve(wrapperUrl);
+    final wrapperUrl = _firstText(document, 'VASTAdTagURI');
+    if (wrapperUrl != null) {
+      final nestedUri = originalUri.resolve(wrapperUrl);
       if (!_isHttpUrl(nestedUri.toString())) return null;
       final nested = await fetchVast(nestedUri.toString(), depth: depth + 1);
       if (nested == null) return null;
-      final mergedEvents = <String, List<String>>{
-        for (final entry in wrapperEvents.entries) entry.key: [...entry.value],
-        for (final entry in nested.events.entries)
-          entry.key: [...?wrapperEvents[entry.key], ...entry.value],
-      };
+
+      final mergedEvents = <String, List<String>>{};
+      for (final entry in wrapperEvents.entries) {
+        mergedEvents[entry.key] = [...entry.value];
+      }
+      for (final entry in nested.events.entries) {
+        mergedEvents.putIfAbsent(entry.key, () => <String>[]).addAll(entry.value);
+      }
       return VastAd(
         nested.videoUrl,
         nested.clickUrl,
@@ -80,21 +123,23 @@ Future<VastAd?> fetchVast(String vastTagUrl, {int depth = 0}) async {
     }
 
     String? videoUrl;
-    for (final mediaFile in document.findAllElements('MediaFile')) {
+    for (final mediaFile in _elements(document, 'MediaFile')) {
       final candidate = mediaFile.innerText.trim();
+      if (!_isHttpUrl(candidate)) continue;
       final type = (mediaFile.getAttribute('type') ?? '').toLowerCase();
-      final uri = Uri.tryParse(candidate);
-      if (_isHttpUrl(candidate) &&
-          (type.contains('mp4') ||
-              (uri?.path.toLowerCase().endsWith('.mp4') ?? false))) {
+      final path = Uri.parse(candidate).path.toLowerCase();
+      if (type.contains('mp4') || path.endsWith('.mp4')) {
         videoUrl = candidate;
         break;
       }
     }
-    if (videoUrl == null) return null;
+    if (videoUrl == null) {
+      debugPrint('[ADS][VAST] XML was valid but contained no supported MP4 MediaFile.');
+      return null;
+    }
 
     String? clickUrl;
-    for (final clickThrough in document.findAllElements('ClickThrough')) {
+    for (final clickThrough in _elements(document, 'ClickThrough')) {
       final candidate = clickThrough.innerText.trim();
       if (_isHttpUrl(candidate)) {
         clickUrl = candidate;
@@ -109,7 +154,8 @@ Future<VastAd?> fetchVast(String vastTagUrl, {int depth = 0}) async {
       clickTracking,
       wrapperEvents,
     );
-  } catch (_) {
+  } catch (error) {
+    debugPrint('[ADS][VAST] Parse/network failure: ${error.runtimeType}.');
     return null;
   }
 }
@@ -117,10 +163,8 @@ Future<VastAd?> fetchVast(String vastTagUrl, {int depth = 0}) async {
 void ping(List<String> urls) {
   for (final url in urls) {
     if (!_isHttpUrl(url)) continue;
-    unawaitedPing(url);
+    unawaited(
+      http.get(Uri.parse(url)).then<void>((_) {}, onError: (_) {}),
+    );
   }
-}
-
-void unawaitedPing(String url) {
-  unawaited(http.get(Uri.parse(url)).then<void>((_) {}, onError: (_) {}));
 }

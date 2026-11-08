@@ -29,6 +29,11 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInMedia</key>
+		<true/>
+	</dict>
 	<!-- Photos and Videos permissions -->
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save the photos and videos you choose to your Photos library.</string>

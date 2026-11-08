@@ -191,9 +191,9 @@ jobs:
           upload "$WIN" "$WIN_NAME" "application/zip"
 
           PUBLIC="${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}"
-          echo "android_url=$PUBLIC/$APK_NAME" >> "$GITHUB_OUTPUT"
-          echo "ios_url=$PUBLIC/$IPA_NAME" >> "$GITHUB_OUTPUT"
-          echo "windows_url=$PUBLIC/$WIN_NAME" >> "$GITHUB_OUTPUT"
+          echo "android_url=$PUBLIC/$APK_NAME?download=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "ios_url=$PUBLIC/$IPA_NAME?download=$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "windows_url=$PUBLIC/$WIN_NAME?download=$WIN_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Update links.js and Supabase version settings
         shell: bash

@@ -22,6 +22,9 @@ const List<String> kVastUrls = <String>[
 const Duration _kAdBudget = Duration(seconds: 10);
 const Duration _kPerNetworkBudget = Duration(seconds: 5);
 const int kAdEveryNVideos = 2;
+
+/// A full-screen ad is shown in Reels after every N reels the user swipes to.
+const int kReelAdEveryN = 5;
 const String _videoCountKey = 'video_count_v3';
 
 // Serialize increments so rapid transitions cannot read the same old value.
@@ -104,6 +107,22 @@ Future<VastAd?> getAdIfDue(
     return ad;
   } catch (error) {
     debugPrint('[ADS] Ad request failed safely: ${error.runtimeType}.');
+    return null;
+  }
+}
+
+/// Fetches an ad for the Reels feed (no video counter involved). Returns null
+/// when the user is under 18 / unconfirmed or no network has an ad; the reels
+/// simply continue in that case.
+Future<VastAd?> requestReelAd(BuildContext context) async {
+  try {
+    if (!context.mounted) return null;
+    if (!await confirmAge(context)) return null;
+    final ad = await fetchFirstAvailable();
+    debugPrint('[ADS] Reel ad ${ad == null ? 'not available' : 'ready'}.');
+    return ad;
+  } catch (error) {
+    debugPrint('[ADS] Reel ad request failed safely: ${error.runtimeType}.');
     return null;
   }
 }

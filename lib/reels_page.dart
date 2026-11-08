@@ -21,6 +21,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
+import 'ads/ad_manager.dart';
+import 'ads/pre_roll_ad.dart';
+import 'ads/vast.dart';
 import 'app_theme.dart';
 import 'analytics_service.dart';
 import 'download_store.dart';
@@ -661,6 +664,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   int _current = 0;
   int? _pendingKeyboardPage;
 
+  // Reel ads: a full-screen video ad every kReelAdEveryN reels. The ad is
+  // prefetched one reel early; if none is ready the reels simply continue.
+  VastAd? _reelAd;
+  VastAd? _readyReelAd;
+  bool _reelAdRequested = false;
+  int _reelsSinceAd = 0;
+  bool get _adShowing => _reelAd != null;
+
   @override
   void initState() {
     super.initState();
@@ -692,6 +703,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       }
     } else {
       _pauseForLeaving();
+      _dropReelAd();
     }
   }
 
@@ -741,7 +753,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       if (c != null &&
           c.value.isInitialized &&
           _resumeOnForeground &&
-          widget.active) {
+          widget.active &&
+          !_adShowing) {
         unawaited(c.play());
       }
       _resumeOnForeground = false;
@@ -945,9 +958,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         await controller.initialize().timeout(const Duration(seconds: 28));
         if (!_ownsController(index, controller)) return;
         await controller.setVolume(
-          index == _current && !_muted && widget.active ? 1 : 0,
+          index == _current && !_muted && widget.active && !_adShowing
+              ? 1
+              : 0,
         );
-        if (index == _current && widget.active) await controller.play();
+        if (index == _current && widget.active && !_adShowing) {
+          await controller.play();
+        }
         _syncControllerState(controller);
         if (mounted) setState(() {});
       } catch (error) {
@@ -1021,8 +1038,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       final controller = entry.value;
       if (!controller.value.isInitialized) continue;
       if (entry.key == index) {
-        unawaited(controller.setVolume(_muted || !widget.active ? 0 : 1));
-        if (widget.active) {
+        unawaited(
+          controller.setVolume(
+            _muted || !widget.active || _adShowing ? 0 : 1,
+          ),
+        );
+        if (widget.active && !_adShowing) {
           unawaited(controller.play());
         } else {
           unawaited(controller.pause());
@@ -1064,7 +1085,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
 
     final current = _controllerFor(index);
-    if (current.value.isInitialized && widget.active) {
+    if (current.value.isInitialized && widget.active && !_adShowing) {
       unawaited(current.setVolume(_muted ? 0 : 1));
       unawaited(current.play());
     }
@@ -1075,7 +1096,65 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       unawaited(entry.value.setPlaybackSpeed(1));
     }
     if (index >= _items.length - _kPreloadAhead) _loadMore();
+    _countReelForAds(previous, index);
     if (mounted) setState(() {});
+  }
+
+  // ------------------------------------------------------------- Reel ads
+
+  /// Counts forward swipes, prefetches an ad one reel before it is due, and
+  /// shows it full-screen every [kReelAdEveryN] reels.
+  void _countReelForAds(int previous, int index) {
+    if (index <= previous || _adShowing) return;
+    _reelsSinceAd++;
+    if (_reelsSinceAd >= kReelAdEveryN - 1 &&
+        _readyReelAd == null &&
+        !_reelAdRequested) {
+      unawaited(_prefetchReelAd());
+    }
+    if (_reelsSinceAd >= kReelAdEveryN && _readyReelAd != null) {
+      _showReelAd();
+    }
+  }
+
+  Future<void> _prefetchReelAd() async {
+    _reelAdRequested = true;
+    try {
+      final ad = await requestReelAd(context);
+      if (!mounted) return;
+      _readyReelAd = ad;
+      // No fill: wait a few more reels before asking the networks again.
+      if (ad == null) _reelsSinceAd = 0;
+    } catch (_) {
+      _readyReelAd = null;
+      _reelsSinceAd = 0;
+    } finally {
+      _reelAdRequested = false;
+    }
+  }
+
+  void _showReelAd() {
+    final ad = _readyReelAd;
+    if (ad == null || !widget.active || !mounted) return;
+    _readyReelAd = null;
+    _reelsSinceAd = 0;
+    for (final controller in _controllers.values) {
+      if (!controller.value.isInitialized) continue;
+      unawaited(controller.pause());
+      unawaited(controller.setVolume(0));
+    }
+    setState(() => _reelAd = ad);
+  }
+
+  void _finishReelAd() {
+    if (!mounted || _reelAd == null) return;
+    setState(() => _reelAd = null);
+    _syncControllers(_current);
+  }
+
+  void _dropReelAd() {
+    _reelAd = null;
+    _readyReelAd = null;
   }
 
   void _movePage(int direction) {
@@ -1392,7 +1471,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         controller: _controllers[i],
                         playbackState:
                             _reelStates[i] ?? _ReelPlaybackState.idle,
-                        isActive: widget.active && i == _current,
+                        isActive:
+                            widget.active && i == _current && !_adShowing,
                         muted: _muted,
                         saving: _saving,
                         bottomInset: bottom,
@@ -1476,6 +1556,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               right: 8,
               child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
             ),
+            if (_reelAd != null && widget.active)
+              Positioned.fill(
+                child: PreRollAd(
+                  key: ObjectKey(_reelAd),
+                  ad: _reelAd!,
+                  onFinished: _finishReelAd,
+                ),
+              ),
           ],
         ),
       ),

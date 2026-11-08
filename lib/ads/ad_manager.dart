@@ -7,7 +7,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'age_gate.dart';
 import 'vast.dart';
 
-const String kVastUrl = 'https://s.magsrv.com/v1/vast.php?idz=6083398';
+/// Ad networks, tried in order. The first one that returns a playable ad wins;
+/// if none does, the main video simply plays. Put the best-paying network first.
+const List<String> kVastUrls = <String>[
+  // 1) ExoClick (zone 6083398)
+  'https://s.magsrv.com/v1/vast.php?idz=6083398',
+  // 2) HilltopAds (zone 7609485)
+  'https://direct-league.com/d-mjFfzOd.GpN/vJZiGuUs/ceOmO9puLZxU/lskZPWTHcR2uMfDhkp0/OdDjUdtGNvzDYGwyOzTHQ/4MO-QC',
+  // 3) ClickAdilla (AD Code 471519, wrapper)
+  'https://vast.yomeno.xyz/vast?spot_id=1506531',
+];
+
+/// Total time the user may wait for an ad before the main video plays.
+const Duration _kAdBudget = Duration(seconds: 10);
+const Duration _kPerNetworkBudget = Duration(seconds: 5);
 const int kAdEveryNVideos = 2;
 const String _videoCountKey = 'video_count_v3';
 
@@ -31,6 +44,26 @@ Future<int> _incrementVideoCount(SharedPreferences preferences) async {
   } finally {
     release.complete();
   }
+}
+
+/// Tries each network in [kVastUrls] in order, within a total time budget.
+Future<VastAd?> fetchFirstAvailable() async {
+  final clock = Stopwatch()..start();
+  for (var i = 0; i < kVastUrls.length; i++) {
+    final remaining = _kAdBudget - clock.elapsed;
+    if (remaining <= Duration.zero) break;
+    final budget = remaining < _kPerNetworkBudget ? remaining : _kPerNetworkBudget;
+    final ad = await fetchVast(kVastUrls[i]).timeout(
+      budget,
+      onTimeout: () => null,
+    );
+    if (ad != null) {
+      debugPrint('[ADS] Ad received from network #${i + 1}.');
+      return ad;
+    }
+    debugPrint('[ADS] Network #${i + 1} had no ad; trying next.');
+  }
+  return null;
 }
 
 /// Requests an ad on normal online video opens #1, #3, #5, etc.
@@ -58,8 +91,8 @@ Future<VastAd?> getAdIfDue(
       return null;
     }
 
-    debugPrint('[ADS] Fetching ExoClick VAST for video #$count.');
-    final ad = await fetchVast(kVastUrl);
+    debugPrint('[ADS] Fetching VAST (waterfall) for video #$count.');
+    final ad = await fetchFirstAvailable();
     if (ad == null) {
       debugPrint(
         '[ADS] No playable VAST ad returned for video #$count; '

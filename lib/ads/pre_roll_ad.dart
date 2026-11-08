@@ -93,6 +93,11 @@ class _PreRollAdState extends State<PreRollAd>
     if (_firedEvents.add(name)) ping(widget.ad.events[name] ?? const []);
   }
 
+  void _skip() {
+    _track('skip');
+    _finish();
+  }
+
   void _finish() {
     if (_finished) return;
     _finished = true;
@@ -181,7 +186,7 @@ class _PreRollAdState extends State<PreRollAd>
             right: 12 + safe.right,
             bottom: 12 + safe.bottom,
             child: FilledButton(
-              onPressed: _secondsUntilSkip == 0 ? _finish : null,
+              onPressed: _secondsUntilSkip == 0 ? _skip : null,
               child: Text(
                 _secondsUntilSkip == 0 ? 'Skip' : 'Skip in $_secondsUntilSkip',
               ),

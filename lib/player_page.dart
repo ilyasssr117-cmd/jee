@@ -10,6 +10,9 @@ import 'package:video_player/video_player.dart';
 import 'app_settings.dart';
 import 'analytics_service.dart';
 import 'app_theme.dart';
+import 'ads/ad_manager.dart';
+import 'ads/pre_roll_ad.dart';
+import 'ads/vast.dart';
 import 'download_store.dart';
 import 'history_store.dart';
 import 'mini_player.dart';
@@ -94,6 +97,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool _pipBusy = false;
   MiniSession? _adopted;
 
+  VastAd? _ad;
+  bool _adChecked = true;
+  bool _adDone = true;
+  bool _adWasAdopted = false;
+  bool _resumeAdoptedAfterAd = false;
+
   String? _activeUrl;
   Map<String, String>? _activeHeaders;
   bool _activeIsFile = false;
@@ -158,7 +167,59 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _adopted = widget.adopted;
     final adopted = _adopted;
     if (adopted != null) _speed = adopted.speed;
+    _adWasAdopted = adopted != null;
+    _resumeAdoptedAfterAd = adopted?.controller.value.isPlaying ?? false;
+    final shouldCheckAd = _localPath == null &&
+        adopted?.isFile != true &&
+        !widget.video.id.startsWith('reel_');
+    _adChecked = !shouldCheckAd;
+    _adDone = !shouldCheckAd;
+    if (shouldCheckAd) unawaited(_prepareAd());
     _initializePlayer();
+  }
+
+  Future<void> _prepareAd() async {
+    try {
+      if (_adWasAdopted && _resumeAdoptedAfterAd) {
+        final adoptedController = widget.adopted?.controller;
+        if (adoptedController != null) {
+          await _safeControllerAction(adoptedController.pause);
+        }
+      }
+      if (!mounted || _isLeaving) return;
+
+      final ad = await getAdIfDue(context);
+      if (!mounted || _isLeaving) return;
+      setState(() {
+        _ad = ad;
+        _adChecked = true;
+        _adDone = ad == null;
+      });
+      if (ad == null) await _resumeMainVideoAfterAd();
+    } catch (_) {
+      if (!mounted || _isLeaving) return;
+      setState(() {
+        _ad = null;
+        _adChecked = true;
+        _adDone = true;
+      });
+      await _resumeMainVideoAfterAd();
+    }
+  }
+
+  Future<void> _finishPreRoll() async {
+    if (!mounted || _adDone) return;
+    setState(() => _adDone = true);
+    await _resumeMainVideoAfterAd();
+  }
+
+  Future<void> _resumeMainVideoAfterAd() async {
+    if (_adWasAdopted && !_resumeAdoptedAfterAd) return;
+    final controller = _controller ?? widget.adopted?.controller;
+    if (controller == null || !controller.value.isInitialized || _isLeaving) {
+      return;
+    }
+    await _safeControllerAction(controller.play);
   }
 
   Future<void> _initializePlayer({bool refreshSource = false}) async {
@@ -256,7 +317,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             limit > Duration.zero && startAt > limit ? limit : startAt;
         await controller.seekTo(target);
       }
-      await controller.play();
+      if (_adDone) await controller.play();
       if (_speed != 1.0) await controller.setPlaybackSpeed(_speed);
       if (!mounted || generation != _initializationGeneration || _isLeaving) {
         controller.removeListener(_onControllerChanged);
@@ -927,6 +988,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _autoplayCancelled = false;
     _video = next;
     _localPath = DownloadStore.instance.localPath(next.id);
+    _ad = null;
+    _adWasAdopted = false;
+    _resumeAdoptedAfterAd = false;
+    final shouldCheckAd =
+        _localPath == null && !_video.id.startsWith('reel_');
+    _adChecked = !shouldCheckAd;
+    _adDone = !shouldCheckAd;
+    if (shouldCheckAd) unawaited(_prepareAd());
     _orientationForced = false;
     _lastPosition = Duration.zero;
     _autoRetries = 0;
@@ -1310,6 +1379,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   child: _buildOverlay() ??
                       const SizedBox.shrink(key: ValueKey<String>('none')),
                 ),
+                if (_adChecked && _ad != null && !_adDone)
+                  Positioned.fill(
+                    child: PreRollAd(ad: _ad!, onFinished: _finishPreRoll),
+                  ),
               ],
             );
           },
@@ -1332,13 +1405,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Widget _buildLoading() {
+    final adWaiting = !_adChecked;
     final text = _reconnecting
         ? 'Reconnecting\u2026 ($_autoRetries/$_maxAutoRetries)'
         : (_manualReload ? 'Reloading\u2026' : 'Preparing video\u2026');
     return IgnorePointer(
-      ignoring: !_loading,
+      ignoring: !_loading && !adWaiting,
       child: AnimatedOpacity(
-        opacity: _loading ? 1 : 0,
+        opacity: _loading || adWaiting ? 1 : 0,
         duration: Motion.fade,
         child: ColoredBox(
           color: Colors.black,

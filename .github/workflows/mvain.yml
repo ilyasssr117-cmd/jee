@@ -259,10 +259,10 @@ jobs:
           set -euo pipefail
           git -C website config user.name "github-actions[bot]"
           git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C website pull --rebase origin main
           git -C website add links.js
           if ! git -C website diff --cached --quiet; then
             git -C website commit -m "chore(release): update VXTUBE links ${{ needs.validate.outputs.version_name }}"
+            git -C website pull --rebase origin main
             git -C website push origin HEAD:main
           else
             echo "No website link changes to commit."

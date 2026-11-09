@@ -167,7 +167,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== BUILD FILE SIZES (bytes and MiB) ==="
-          find dist -type f -exec bash -c 'for f do bytes=$(stat -c%s "$f"); mib=$(awk -v n="$bytes" "BEGIN { printf \"%.2f\", n/1048576 }"); printf \"%s | %s bytes | %s MiB\\n\" "$f" "$bytes" "$mib"; done' _ {} +
+          while IFS= read -r -d '' file; do
+            bytes=$(stat -c '%s' "$file")
+            mib=$(awk -v n="$bytes" 'BEGIN { printf "%.2f", n/1048576 }')
+            printf '%s | %s bytes | %s MiB\n' "$file" "$bytes" "$mib"
+          done < <(find dist -type f -print0)
 
       - name: Upload builds to Supabase Storage
         id: upload

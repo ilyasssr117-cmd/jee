@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths: [pubspec.yaml]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -160,6 +161,13 @@ jobs:
           ref: main
           token: ${{ secrets.WEBSITE_REPO_TOKEN }}
           path: website
+
+      - name: Check build file sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== BUILD FILE SIZES (bytes and MiB) ==="
+          find dist -type f -exec bash -c 'for f do bytes=$(stat -c%s "$f"); mib=$(awk -v n="$bytes" "BEGIN { printf \"%.2f\", n/1048576 }"); printf \"%s | %s bytes | %s MiB\\n\" "$f" "$bytes" "$mib"; done' _ {} +
 
       - name: Upload builds to Supabase Storage
         id: upload

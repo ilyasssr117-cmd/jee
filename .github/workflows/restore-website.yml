@@ -1,0 +1,43 @@
+name: Restore VXTUBE website
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/restore-website.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  restore-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation repository
+        uses: actions/checkout@v4
+
+      - name: Checkout website repository
+        uses: actions/checkout@v4
+        with:
+          repository: ilyasssr117-cmd/Web
+          ref: main
+          token: ${{ secrets.WEBSITE_REPO_TOKEN }}
+          path: website
+
+      - name: Restore previous website index
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C website fetch origin main
+          git -C website show 7ab37a51ca3b978f617866c33a4aa4406c4220a7:index.html > website/index.html
+          git -C website config user.name "github-actions[bot]"
+          git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C website add index.html
+          if git -C website diff --cached --quiet; then
+            echo "Website is already at the requested previous version."
+          else
+            git -C website commit -m "revert: restore website to previous layout"
+            git -C website pull --rebase origin main
+            git -C website push origin HEAD:main
+          fi

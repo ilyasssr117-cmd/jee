@@ -1,0 +1,145 @@
+
+name: Build VXTUBE iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.8"
+          channel: stable
+          architecture: arm64
+          cache: true
+
+      - name: Show Flutter and Dart versions
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Clean Previous Build
+        run: flutter clean
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Regenerate App Icons
+        run: dart run flutter_launcher_icons
+
+      - name: Verify Updated iOS Icon
+        run: |
+          echo "Checking iOS App Icon..."
+          ls -lah ios/Runner/Assets.xcassets/AppIcon.appiconset/
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Analyze Dart Code
+        continue-on-error: true
+        run: flutter analyze
+
+      - name: Build iOS
+        run: flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d build/ios/iphoneos/Runner.app
+
+          rm -rf Payload
+          rm -f VXTUBE.ipa
+
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+
+          /usr/bin/zip -qry VXTUBE.ipa Payload
+
+          test -s VXTUBE.ipa
+
+          ls -lh VXTUBE.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: VXTUBE-IPA
+          path: VXTUBE.ipa
+          if-no-files-found: error
+
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.8"
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        continue-on-error: true
+        run: flutter analyze
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-Tube-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.8"
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        continue-on-error: true
+        run: flutter analyze
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Upload Windows application bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: VXTUBE-Windows-x64
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error

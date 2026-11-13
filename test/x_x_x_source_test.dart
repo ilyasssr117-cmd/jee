@@ -263,6 +263,49 @@ void main() {
       scraper.close();
     });
 
+    test(
+      'removes generic Models/View Model links and shows the real model name',
+      () async {
+      final scraper = Scraper(
+        config,
+        client: MockClient((request) async => http.Response('''
+          <html><head>
+            <script type="application/ld+json">
+              {
+                "@context":"https://schema.org",
+                "@type":"VideoObject",
+                "author": {
+                  "@type":"Person",
+                  "name":"Zafira May",
+                  "url":"https://x-x-x.tube/models/zafira-may-mugur/"
+                }
+              }
+            </script>
+          </head><body>
+            <div class="media-models">
+              <a href="/models/">Models</a>
+              <a href="/models/zafira-may-mugur/">View Model</a>
+            </div>
+          </body></html>
+        ''', 200)),
+      );
+
+      const video = Video(
+        id: 'generic-model-links',
+        title: 'Sample',
+        pageUrl: 'https://x-x-x.tube/videos/2008589/sample-video/',
+      );
+      final models = await scraper.videoModels(video);
+      expect(models, hasLength(1));
+      expect(models.single.name, 'Zafira May');
+      expect(
+        models.single.url,
+        'https://x-x-x.tube/models/zafira-may-mugur/',
+      );
+        scraper.close();
+      },
+    );
+
     test('keeps the visible model name when JSON-LD has no author URL', () async {
       final scraper = Scraper(
         config,

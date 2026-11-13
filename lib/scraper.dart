@@ -479,17 +479,54 @@ class Scraper {
     final uri = config.baseUri.resolve(pageUrl);
     final document = html.parse(await _getDetailPage(uri, fresh: fresh));
     final models = <ModelRef>[];
-    final seen = <String>{};
+    final modelIndexByUrl = <String, int>{};
+    final modelNamePriorityByUrl = <String, int>{};
+    final isXxxSource = config.searchSpacesAsUnderscores;
 
-    void addModel(String? rawUrl, String? rawName) {
+    bool isGenericModelLabel(String value) {
+      final normalized = _collapse(value)
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+          .trim();
+      return const <String>{
+        'model',
+        'models',
+        'view model',
+        'view models',
+        'view profile',
+        'model profile',
+        'profile',
+      }.contains(normalized);
+    }
+
+    String modelNameFromSlug(Uri base) {
+      final segments = base.pathSegments.where((part) => part.isNotEmpty);
+      if (segments.length < 2) return '';
+      final slug = segments.elementAt(1);
+      return slug
+          .replaceAll(RegExp(r'[-_]+'), ' ')
+          .split(RegExp(r'\s+'))
+          .where((part) => part.isNotEmpty)
+          .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+          .join(' ');
+    }
+
+    void addModel(
+      String? rawUrl,
+      String? rawName, {
+      bool fromStructuredData = false,
+    }) {
       var name = _collapse(rawName ?? '');
+      final genericName = isGenericModelLabel(name);
       final target = _resolveHttp(rawUrl, uri);
       var base = target == null ? null : _modelBase(target);
 
-      // X-X-X sometimes supplies the Person name but omits author.url.
-      // Keep this fallback scoped to X-X-X (identified by its underscore
-      // search convention) so the other two sources retain their behaviour.
-      if (base == null && config.searchSpacesAsUnderscores && name.isNotEmpty) {
+      // X-X-X may expose a generic navigation label such as "Models" or
+      // "View Model". Do not manufacture /models/models/ from that label.
+      // If the link identifies a real profile, derive a temporary display name
+      // from its slug; VideoObject.author below will replace it with the real
+      // person name when available.
+      if (base == null && isXxxSource && name.isNotEmpty && !genericName) {
         final slug = name
             .toLowerCase()
             .replaceAll('&', ' and ')
@@ -497,13 +534,33 @@ class Scraper {
             .replaceAll(RegExp(r'^-+|-+$'), '');
         if (slug.isNotEmpty) base = config.baseUri.resolve('models/$slug/');
       }
-      if (base == null || !seen.add(base.toString())) return;
+      if (base == null) return;
 
-      if (name.isEmpty) {
-        name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ').trim();
-      }
+      final key = base.toString();
+      final usedSlugFallback = name.isEmpty || genericName;
+      if (usedSlugFallback) name = modelNameFromSlug(base);
       if (name.isEmpty) return;
-      models.add(ModelRef(name: name, url: base.toString()));
+
+      // Structured VideoObject.author data is the authoritative source of
+      // the model's name. It must be allowed to replace generic link labels
+      // (or slug-derived labels) already found for the same profile URL.
+      final priority = fromStructuredData && !isGenericModelLabel(name)
+          ? 3
+          : usedSlugFallback
+              ? 1
+              : 2;
+      final existingIndex = modelIndexByUrl[key];
+      if (existingIndex != null) {
+        if (priority > (modelNamePriorityByUrl[key] ?? 0)) {
+          models[existingIndex] = ModelRef(name: name, url: key);
+          modelNamePriorityByUrl[key] = priority;
+        }
+        return;
+      }
+
+      modelIndexByUrl[key] = models.length;
+      modelNamePriorityByUrl[key] = priority;
+      models.add(ModelRef(name: name, url: key));
     }
 
     // Prefer explicit model links where the source provides them.
@@ -534,7 +591,11 @@ class Scraper {
         final isPerson = type == 'Person' ||
             (type is List && type.contains('Person'));
         if (isPerson) {
-          addModel(node['url']?.toString(), node['name']?.toString());
+          addModel(
+            node['url']?.toString(),
+            node['name']?.toString(),
+            fromStructuredData: true,
+          );
         }
         for (final value in node.values) {
           visit(value);

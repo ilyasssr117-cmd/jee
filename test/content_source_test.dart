@@ -4,7 +4,7 @@ import 'package:vxtube_final/content_source.dart';
 void main() {
   test('catalog sources map to their requested domains', () {
     expect(ContentSource.fetish.baseUrl, 'https://x-fetish.tube');
-    expect(ContentSource.straight.baseUrl, 'https://x-video.tube');
+    expect(ContentSource.straight.baseUrl, 'https://x-x-x.tube');
     expect(ContentSource.trans.baseUrl, 'https://x-tg.tube');
   });
 

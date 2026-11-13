@@ -29,7 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git -C website fetch origin main
+          git -C website fetch --unshallow origin main || git -C website fetch origin main
+git -C website fetch origin 7ab37a51ca3b978f617866c33a4aa4406c4220a7
           git -C website show 7ab37a51ca3b978f617866c33a4aa4406c4220a7:index.html > website/index.html
           git -C website config user.name "github-actions[bot]"
           git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"

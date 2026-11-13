@@ -54,28 +54,26 @@ jobs:
                 .leaderboard-ad-container,.extra-ad-container{width:calc(100% - 20px)}
                 .leaderboard-ad-box ins iframe,.extra-ad-box ins iframe{max-width:100% !important}
               }"""
-          html = html[:css_start] + new_css + html[css_end:]
+          html = html[:css_start] + new_css + "\\n" + html[css_end:]
 
           marker = '    <!-- Additional ExoClick banner: Zone 6088898 -->'
           if marker not in html:
-              anchor = """    <!-- End ExoClick Leaderboard -->
-
-              <section id="audience">"""
-              insertion = """    <!-- End ExoClick Leaderboard -->
-
-              <!-- Additional ExoClick banner: Zone 6088898 -->
-              <section class="extra-ad-section" id="extra-banner-ad" aria-label="Advertisement">
-                <div class="extra-ad-container">
-                  <div class="extra-ad-box">
-                    <span class="extra-ad-label" data-ar="إعلان" data-en="Advertisement">إعلان</span>
-                    <ins class="eas6a97888e17" data-zoneid="6088898"></ins>
-                    <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
-                  </div>
-                </div>
-              </section>
-              <!-- End additional ExoClick banner -->
-
-              <section id="audience">"""
+              anchor = "    <!-- End ExoClick Leaderboard -->\\n\\n" + '    <section id="audience">'
+              insertion = (
+                  '    <!-- End ExoClick Leaderboard -->\\n\\n'
+                  '    <!-- Additional ExoClick banner: Zone 6088898 -->\\n'
+                  '    <section class="extra-ad-section" id="extra-banner-ad" aria-label="Advertisement">\\n'
+                  '      <div class="extra-ad-container">\\n'
+                  '        <div class="extra-ad-box">\\n'
+                  '          <span class="extra-ad-label" data-ar="إعلان" data-en="Advertisement">إعلان</span>\\n'
+                  '          <ins class="eas6a97888e17" data-zoneid="6088898"></ins>\\n'
+                  '          <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>\\n'
+                  '        </div>\\n'
+                  '      </div>\\n'
+                  '    </section>\\n'
+                  '    <!-- End additional ExoClick banner -->\\n\\n'
+                  '    <section id="audience">'
+              )
               if anchor not in html:
                   raise SystemExit("The audience section insertion point was not found. No website changes were written.")
               html = html.replace(anchor, insertion, 1)

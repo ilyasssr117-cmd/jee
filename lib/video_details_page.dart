@@ -83,13 +83,21 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
     super.dispose();
   }
 
+  String get _sourceScopedVideoKey {
+    final host = Uri.tryParse(widget.video.pageUrl)?.host.toLowerCase();
+    final source = host == null || host.isEmpty
+        ? videoRepository.source.name
+        : host;
+    return '$source|${widget.video.id}';
+  }
+
   Future<List<Video>> _loadRelated({
     bool force = false,
     bool fresh = false,
   }) =>
       relatedCache
           .fetch(
-            widget.video.id,
+            'related|$_sourceScopedVideoKey',
             () => videoRepository.getRelated(
               widget.video,
               fresh: fresh,
@@ -104,7 +112,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }) =>
       modelsCache
           .fetch(
-            widget.video.id,
+            'models|$_sourceScopedVideoKey',
             () => videoRepository.getVideoModels(
               widget.video,
               fresh: fresh,

@@ -214,7 +214,7 @@ class SearchOverlayState extends State<SearchOverlay> {
     });
     try {
       final result = await peopleCache.fetch(
-        'people|${text.toLowerCase()}',
+        'people|${videoRepository.source.name}|${text.toLowerCase()}',
         () => videoRepository.searchPeople(text),
       );
       if (!mounted || generation != _generation) return;

@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart'
 import 'package:flutter/material.dart';
 
 import '../app_settings.dart';
+import '../content_source.dart';
 import '../app_theme.dart';
 import '../download_store.dart';
 import '../history_store.dart';
@@ -12,17 +13,33 @@ import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
 import 'dialogs.dart';
+import 'content_source_picker.dart';
 
 class SettingsView extends StatefulWidget {
-  const SettingsView({super.key, required this.bottomInset});
+  const SettingsView({
+    super.key,
+    required this.bottomInset,
+    required this.onContentSourceChanged,
+  });
 
   final double bottomInset;
+  final ValueChanged<ContentSource> onContentSourceChanged;
 
   @override
   State<SettingsView> createState() => _SettingsViewState();
 }
 
 class _SettingsViewState extends State<SettingsView> {
+  Future<void> _chooseContentSource() async {
+    final settings = AppSettings.instance;
+    final source = await showContentSourcePicker(
+      context,
+      initialSource: settings.contentSource,
+    );
+    if (!mounted || source == null || source == settings.contentSource) return;
+    widget.onContentSourceChanged(source);
+  }
+
   void _clearImageCache() {
     PaintingBinding.instance.imageCache
       ..clear()
@@ -105,6 +122,18 @@ class _SettingsViewState extends State<SettingsView> {
                       (AppThemeMode.light, 'Light'),
                     ],
                   ),
+                ),
+              ],
+            ),
+            _Group(
+              title: 'Content',
+              children: [
+                _Row(
+                  icon: Icons.language_rounded,
+                  color: AppColors.accentBlue,
+                  title: 'Content source',
+                  subtitle: settings.contentSource.label,
+                  onTap: _chooseContentSource,
                 ),
               ],
             ),

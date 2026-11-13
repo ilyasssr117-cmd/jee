@@ -71,7 +71,7 @@ class _AllAlbumsViewState extends State<AllAlbumsView> {
     });
 
     final page = _page;
-    final cacheKey = 'albums|all|$page';
+    final cacheKey = 'albums|${videoRepository.source.name}|all|$page';
     final cached = OfflineAlbumCache.read(cacheKey);
     if (cached != null &&
         cached.isNotEmpty &&

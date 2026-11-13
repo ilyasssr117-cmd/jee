@@ -7,6 +7,7 @@ enum ContentSource {
   straight,
   trans;
 
+  /// Genre labels shown in the UI; actual domains stay internal.
   String get label => switch (this) {
     ContentSource.fetish => 'Fetish',
     ContentSource.straight => 'Straight',

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vxtube_final/app_theme.dart';
+import 'package:vxtube_final/content_source.dart';
 import 'package:vxtube_final/models.dart';
 import 'package:vxtube_final/widgets/bottom_bar.dart';
 import 'package:vxtube_final/widgets/library_view.dart';
@@ -28,7 +29,10 @@ void main() {
               textScaler: const TextScaler.linear(2),
             ),
             child: const Scaffold(
-              body: SettingsView(bottomInset: 120),
+              body: SettingsView(
+                bottomInset: 120,
+                onContentSourceChanged: _ignoreSource,
+              ),
               bottomNavigationBar: AppBottomBar(
                 selected: AppTab.settings,
                 onSelect: _ignoreTab,
@@ -83,6 +87,8 @@ void main() {
 }
 
 void _ignoreTab(AppTab tab) {}
+
+void _ignoreSource(ContentSource source) {}
 
 void _ignoreOpen(Video video, List<Video> queue) {}
 

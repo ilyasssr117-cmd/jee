@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
-import 'analytics_service.dart';
 import 'app_settings.dart';
 import 'content_source.dart';
 import 'app_theme.dart';
@@ -27,13 +26,13 @@ import 'video_details_page.dart';
 import 'video_repository.dart';
 import 'widgets/app_button.dart';
 import 'widgets/bottom_bar.dart';
-import 'widgets/category_bar.dart';
 import 'widgets/continue_row.dart';
 import 'widgets/dialogs.dart';
 import 'widgets/home_hero.dart';
 import 'widgets/library_view.dart';
 import 'widgets/search_overlay.dart';
 import 'widgets/settings_view.dart';
+import 'widgets/content_source_picker.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 import 'services/remote_config_service.dart';
@@ -77,9 +76,9 @@ class _HomePageState extends State<HomePage>
   int _page = 0;
   int _generation = 0;
   int _emptyPages = 0;
-  String _category = 'All';
+  bool _sourceChoiceReady = false;
   bool _loading = false;
-  bool _hasMore = true;
+  bool _hasMore = false;
   bool _playingFeatured = false;
   final ValueNotifier<bool> _search = ValueNotifier<bool>(false);
   bool get _searchOpen => _search.value;
@@ -100,13 +99,8 @@ class _HomePageState extends State<HomePage>
   );
   Animation<double>? _pageSettleAnimation;
 
-  List<String> get _categories => <String>[
-        'All',
-        ...videoRepository.categories,
-      ];
-
-  String _homeCacheKey(String category, int page) =>
-      'home|${videoRepository.source.name}|$category|$page';
+  String _homeCacheKey(int page) =>
+      'home|${videoRepository.source.name}|$page';
 
   @override
   void initState() {
@@ -119,7 +113,26 @@ class _HomePageState extends State<HomePage>
       if (!mounted || animation == null) return;
       _dragOffset.value = animation.value;
     });
-    _loadPage(reset: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_promptForContentSource());
+    });
+  }
+
+  Future<void> _promptForContentSource() async {
+    if (!mounted || _sourceChoiceReady) return;
+    final selected = await showContentSourcePicker(
+      context,
+      initialSource: AppSettings.instance.contentSource,
+      requiredChoice: true,
+    );
+    if (!mounted) return;
+    final source = selected ?? AppSettings.instance.contentSource;
+    if (source != videoRepository.source) {
+      _changeContentSource(source);
+    } else {
+      setState(() => _sourceChoiceReady = true);
+      _loadPage(reset: true);
+    }
   }
 
   Timer? _offlineTimer;
@@ -139,19 +152,22 @@ class _HomePageState extends State<HomePage>
   Future<void> _probeConnection() async {
     if (!mounted || _loading || _videos.isNotEmpty) return;
     if (_error?.offline != true) return;
-    final category = _category;
-    final key = _homeCacheKey(category, 0);
+    final source = videoRepository.source;
+    final key = _homeCacheKey(0);
     try {
       final result = await listingCache.fetch(
         key,
         () => videoRepository.getVideos(
           page: 0,
           pageSize: _pageSize,
-          category: category == 'All' ? null : category,
         ),
       );
       OfflineListingCache.write(key, result);
-      if (!mounted || category != _category || _videos.isNotEmpty) return;
+      if (!mounted ||
+          source != videoRepository.source ||
+          _videos.isNotEmpty) {
+        return;
+      }
       unawaited(_loadPage(reset: true));
     } catch (_) {
       if (mounted) _watchConnection();
@@ -240,7 +256,8 @@ class _HomePageState extends State<HomePage>
     if (_loading && !reset) return;
     final requestGeneration = reset ? ++_generation : _generation;
     final requestedPage = reset ? 0 : _page;
-    final key = _homeCacheKey(_category, requestedPage);
+    if (!_sourceChoiceReady) return;
+    final key = _homeCacheKey(requestedPage);
 
     final cached = listingCache.peek(key);
     if (cached != null) {
@@ -259,7 +276,6 @@ class _HomePageState extends State<HomePage>
 
     final offline = OfflineListingCache.read(key);
     if (offline != null) {
-      final requestedCategory = _category;
       setState(() {
         _error = null;
         if (reset) {
@@ -278,7 +294,6 @@ class _HomePageState extends State<HomePage>
           key: key,
           page: requestedPage,
           generation: requestGeneration,
-          category: requestedCategory,
         ),
       );
       return;
@@ -297,13 +312,11 @@ class _HomePageState extends State<HomePage>
     });
 
     try {
-      final requestedCategory = _category;
       final result = await listingCache.fetch(
         key,
         () => videoRepository.getVideos(
           page: requestedPage,
           pageSize: _pageSize,
-          category: requestedCategory == 'All' ? null : requestedCategory,
         ),
       );
       if (!mounted || requestGeneration != _generation) return;
@@ -327,7 +340,6 @@ class _HomePageState extends State<HomePage>
     required String key,
     required int page,
     required int generation,
-    required String category,
   }) async {
     try {
       final result = await listingCache.fetch(
@@ -335,7 +347,6 @@ class _HomePageState extends State<HomePage>
         () => videoRepository.getVideos(
           page: page,
           pageSize: _pageSize,
-          category: category == 'All' ? null : category,
         ),
         force: true,
       );
@@ -354,13 +365,12 @@ class _HomePageState extends State<HomePage>
     Haptics.play(Haptic.light);
     final generation = ++_generation;
     try {
-      final key = _homeCacheKey(_category, 0);
+      final key = _homeCacheKey(0);
       final result = await listingCache.fetch(
         key,
         () => videoRepository.getVideos(
           page: 0,
           pageSize: _pageSize,
-          category: _category == 'All' ? null : _category,
         ),
         force: true,
       );
@@ -650,15 +660,6 @@ class _HomePageState extends State<HomePage>
     if (error != null) _toast(error);
   }
 
-  void _changeCategory(String value) {
-    if (value == _category) return;
-    if (value != 'All') {
-      AnalyticsService.instance.trackCategoryOpen(value);
-    }
-    setState(() => _category = value);
-    _loadPage(reset: true);
-  }
-
   void _changeContentSource(ContentSource source) {
     if (source == videoRepository.source) return;
     Haptics.play(Haptic.selection);
@@ -666,8 +667,9 @@ class _HomePageState extends State<HomePage>
     videoRepository.setSource(source);
     AppSettings.instance.setContentSource(source);
     clearRequestCaches();
+    _libraryPage = null;
     setState(() {
-      _category = 'All';
+      _sourceChoiceReady = true;
       _videos.clear();
       _recomputeDerived();
       _page = 0;
@@ -690,7 +692,6 @@ class _HomePageState extends State<HomePage>
         ? 24.0
         : appBottomBarHeight(context) + context.safe.bottom;
     final featured = _featured;
-    final showCategories = _categories.length > 1;
     final firstLoad = _videos.isEmpty && _loading;
     final resume = featured == null
         ? null
@@ -730,6 +731,7 @@ class _HomePageState extends State<HomePage>
       _settingsPage = SettingsView(
         key: const ValueKey<String>('settings'),
         bottomInset: bottomInset,
+        onContentSourceChanged: _changeContentSource,
       );
     }
 
@@ -738,7 +740,6 @@ class _HomePageState extends State<HomePage>
         margin,
         bottomInset,
         featured,
-        showCategories,
         firstLoad,
         resume,
       ),
@@ -895,7 +896,6 @@ class _HomePageState extends State<HomePage>
     double margin,
     double bottomInset,
     Video? featured,
-    bool showCategories,
     bool firstLoad,
     Duration? resume,
   ) {
@@ -933,46 +933,9 @@ class _HomePageState extends State<HomePage>
           SliverToBoxAdapter(child: ContinueRow(onPlay: _resume)),
           SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(margin, Gaps.xs, margin, 0),
-              child: Text(
-                'Content type',
-                style: AppText.caption.copyWith(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(top: Gaps.xs),
-              child: CategoryBar(
-                categories: ContentSource.values
-                    .map((source) => source.label)
-                    .toList(growable: false),
-                selected: videoRepository.source.label,
-                onSelected: (label) {
-                  final source = ContentSource.values.firstWhere(
-                    (source) => source.label == label,
-                  );
-                  _changeContentSource(source);
-                },
-              ),
-            ),
-          ),
-          if (showCategories)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(top: Gaps.xs),
-                child: CategoryBar(
-                  categories: _categories,
-                  selected: _category,
-                  onSelected: _changeCategory,
-                ),
-              ),
-            ),
-          SliverToBoxAdapter(
-            child: Padding(
               padding: EdgeInsets.fromLTRB(margin, Gaps.md, margin, Gaps.md),
               child: Text(
-                _category == 'All' ? 'Latest videos' : _category,
+                'Latest videos',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppText.headline,
@@ -1032,9 +995,7 @@ class _HomePageState extends State<HomePage>
           child: StatusView(
             icon: Icons.video_library_outlined,
             title: 'No videos found',
-            message: _category == 'All'
-                ? 'There is nothing to show right now.'
-                : 'There are no videos in \u201c$_category\u201d yet.',
+            message: 'There is nothing to show on this source right now.',
             actionLabel: 'Refresh',
             onAction: () => _loadPage(reset: true),
           ),

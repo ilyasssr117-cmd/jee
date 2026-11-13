@@ -1,6 +1,10 @@
 name: Update VXTUBE website ads
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/update-site-ads.yml"
   workflow_dispatch:
 
 permissions:

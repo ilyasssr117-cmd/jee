@@ -92,10 +92,10 @@ jobs:
           set -euo pipefail
           git -C website config user.name "github-actions[bot]"
           git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C website pull --rebase origin main
           git -C website add index.html
           if ! git -C website diff --cached --quiet; then
             git -C website commit -m "feat(ads): add ExoClick zone 6088898 and fix banner clipping"
+            git -C website pull --rebase origin main
             git -C website push origin HEAD:main
           else
             echo "Website already contains the requested ad changes."

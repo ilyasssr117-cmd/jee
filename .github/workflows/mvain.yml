@@ -1,9 +1,12 @@
+
 name: VXTUBE Automatic Release
 
 on:
   push:
     branches: [main]
-    paths: [pubspec.yaml]
+    paths:
+      - pubspec.yaml
+      - assets/**
   workflow_dispatch:
 
 permissions:
@@ -24,6 +27,7 @@ jobs:
       changed: ${{ steps.version.outputs.changed }}
       version_name: ${{ steps.version.outputs.version_name }}
       build_number: ${{ steps.version.outputs.build_number }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,20 +38,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           FULL_VERSION="$(awk '$1 == "version:" {gsub(/["\047\r]/, "", $2); print $2; exit}' pubspec.yaml)"
+
           if [[ ! "$FULL_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$ ]]; then
             echo "Use a version like 2.2.1+4 in pubspec.yaml" >&2
             exit 1
           fi
+
           BEFORE="${{ github.event.before }}"
           PREVIOUS=""
+
           if [[ -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
             PREVIOUS="$(git show "$BEFORE:pubspec.yaml" 2>/dev/null | awk '$1 == "version:" {gsub(/["\047\r]/, "", $2); print $2; exit}' || true)"
           fi
-          if [[ "$FULL_VERSION" == "$PREVIOUS" ]]; then CHANGED=false; else CHANGED=true; fi
+
+          if [[ "$FULL_VERSION" == "$PREVIOUS" ]]; then
+            CHANGED=false
+          else
+            CHANGED=true
+          fi
+
           echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "version_name=${FULL_VERSION%%+*}" >> "$GITHUB_OUTPUT"
           echo "build_number=${FULL_VERSION##*+}" >> "$GITHUB_OUTPUT"
+
           echo "Detected VXTUBE version: $FULL_VERSION (changed=$CHANGED)"
 
       - name: Verify Supabase secret exists
@@ -64,17 +79,29 @@ jobs:
     needs: validate
     if: needs.validate.outputs.changed == 'true'
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.47.8"
           channel: stable
           cache: true
+
       - run: flutter pub get
+
+      # Regenerate launcher icons from the latest assets image
+      - name: Update Android launcher icon
+        run: dart run flutter_launcher_icons
+
       - run: flutter build apk --release --target-platform android-arm64
+
       - name: Rename APK
-        run: cp build/app/outputs/flutter-apk/app-release.apk "VXTUBE-${{ needs.validate.outputs.version_name }}-${{ needs.validate.outputs.build_number }}-android.apk"
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk \
+          "VXTUBE-${{ needs.validate.outputs.version_name }}-${{ needs.validate.outputs.build_number }}-android.apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: VXTUBE-android
@@ -86,20 +113,30 @@ jobs:
     needs: validate
     if: needs.validate.outputs.changed == 'true'
     runs-on: macos-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.47.8"
           channel: stable
           architecture: arm64
           cache: true
+
       - run: flutter pub get
+
+      # Regenerate launcher icons from the latest assets image
+      - name: Update iOS launcher icon
+        run: dart run flutter_launcher_icons
+
       - name: Install CocoaPods
         working-directory: ios
         run: pod install --repo-update
+
       - name: Build unsigned iOS app
         run: flutter build ios --release --no-codesign
+
       - name: Package unsigned IPA
         shell: bash
         run: |
@@ -108,6 +145,7 @@ jobs:
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
           zip -qry "VXTUBE-${{ needs.validate.outputs.version_name }}-${{ needs.validate.outputs.build_number }}-ios-unsigned.ipa" Payload
+
       - uses: actions/upload-artifact@v4
         with:
           name: VXTUBE-ios
@@ -119,20 +157,30 @@ jobs:
     needs: validate
     if: needs.validate.outputs.changed == 'true'
     runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.47.8"
           channel: stable
           cache: true
+
       - run: flutter pub get
+
+      # Regenerate launcher icons from the latest assets image
+      - name: Update Windows launcher icon
+        run: dart run flutter_launcher_icons
+
       - run: flutter build windows --release
+
       - name: Package Windows ZIP
         shell: pwsh
         run: |
           $archive = "VXTUBE-${{ needs.validate.outputs.version_name }}-${{ needs.validate.outputs.build_number }}-windows-x64.zip"
           Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath $archive -CompressionLevel Optimal
+
       - uses: actions/upload-artifact@v4
         with:
           name: VXTUBE-windows
@@ -144,6 +192,7 @@ jobs:
     needs: [validate, build-android, build-ios, build-windows]
     if: needs.validate.outputs.changed == 'true'
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -167,6 +216,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== BUILD FILE SIZES (bytes and MiB) ==="
+
           while IFS= read -r -d '' file; do
             bytes=$(stat -c '%s' "$file")
             mib=$(awk -v n="$bytes" 'BEGIN { printf "%.2f", n/1048576 }')
@@ -182,16 +232,22 @@ jobs:
           BUILD_NUMBER: ${{ needs.validate.outputs.build_number }}
         run: |
           set -euo pipefail
+
           : "${SUPABASE_SERVICE_ROLE_KEY:?Missing SUPABASE_SERVICE_ROLE_KEY}"
+
           APK="$(find dist/VXTUBE-android -type f -name '*.apk' -print -quit)"
           IPA="$(find dist/VXTUBE-ios -type f -name '*.ipa' -print -quit)"
           WIN="$(find dist/VXTUBE-windows -type f -name '*.zip' -print -quit)"
+
           test -s "$APK" && test -s "$IPA" && test -s "$WIN"
 
           AUTH=(-H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+
           STATUS="$(curl -sS -o /tmp/bucket.json -w '%{http_code}' "${SUPABASE_URL}/storage/v1/bucket/${SUPABASE_BUCKET}" "${AUTH[@]}")"
+
           if [[ "$STATUS" != "200" ]]; then
             CREATE_STATUS="$(curl -sS -o /tmp/bucket-create.json -w '%{http_code}' -X POST "${SUPABASE_URL}/storage/v1/bucket" "${AUTH[@]}" -H 'Content-Type: application/json' --data "{\"id\":\"$SUPABASE_BUCKET\",\"name\":\"$SUPABASE_BUCKET\",\"public\":true}")"
+
             if [[ "$CREATE_STATUS" != "200" && "$CREATE_STATUS" != "201" && "$CREATE_STATUS" != "409" ]]; then
               cat /tmp/bucket-create.json >&2
               exit 1
@@ -201,16 +257,19 @@ jobs:
           APK_NAME="VXTUBE-$VERSION_NAME-$BUILD_NUMBER-android.apk"
           IPA_NAME="VXTUBE-$VERSION_NAME-$BUILD_NUMBER-ios-unsigned.ipa"
           WIN_NAME="VXTUBE-$VERSION_NAME-$BUILD_NUMBER-windows-x64.zip"
+
           upload() {
             curl --fail-with-body --silent --show-error -X POST \
               "${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/$2" "${AUTH[@]}" \
               -H "Content-Type: $3" -H "x-upsert: true" --data-binary "@$1"
           }
+
           upload "$APK" "$APK_NAME" "application/vnd.android.package-archive"
           upload "$IPA" "$IPA_NAME" "application/octet-stream"
           upload "$WIN" "$WIN_NAME" "application/zip"
 
           PUBLIC="${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}"
+
           echo "android_url=$PUBLIC/$APK_NAME?download=$APK_NAME" >> "$GITHUB_OUTPUT"
           echo "ios_url=$PUBLIC/$IPA_NAME?download=$IPA_NAME" >> "$GITHUB_OUTPUT"
           echo "windows_url=$PUBLIC/$WIN_NAME?download=$WIN_NAME" >> "$GITHUB_OUTPUT"
@@ -225,41 +284,60 @@ jobs:
           WINDOWS_URL: ${{ steps.upload.outputs.windows_url }}
         run: |
           set -euo pipefail
+
           python3 - <<'PY'
           import os, re
           from pathlib import Path
+
           path = Path("website/links.js")
           source = path.read_text(encoding="utf-8")
+
           for platform in ("android", "ios", "windows"):
               url = os.environ[platform.upper() + "_URL"]
               pattern = rf'(^\s*{platform}\s*:\s*")[^"]*(")'
-              source, count = re.subn(pattern, lambda m: m.group(1) + url + m.group(2), source, count=1, flags=re.MULTILINE)
+              source, count = re.subn(
+                  pattern,
+                  lambda m: m.group(1) + url + m.group(2),
+                  source,
+                  count=1,
+                  flags=re.MULTILINE
+              )
+
               if count != 1:
                   raise SystemExit(f"Could not find exactly one {platform} URL in links.js")
+
           path.write_text(source, encoding="utf-8")
           PY
 
           CURRENT="$(curl --fail-with-body --silent --show-error \
             "${SUPABASE_URL}/rest/v1/vxtube_app_config?select=download_url&config_key=eq.production" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")"
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")"
+
           URLS="$(jq -c --arg a "$ANDROID_URL" --arg i "$IOS_URL" --arg w "$WINDOWS_URL" \
             'if length == 0 then error("production config row missing") else (.[0].download_url // {}) + {android:$a,ios:$i,windows:$w} end' <<< "$CURRENT")"
+
           BODY="$(jq -cn --arg v "$VERSION_NAME" --argjson u "$URLS" \
             '{latest_version:$v,minimum_version:$v,download_url:$u,updated_at:(now|todate)}')"
+
           curl --fail-with-body --silent --show-error -X PATCH \
             "${SUPABASE_URL}/rest/v1/vxtube_app_config?config_key=eq.production" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Content-Type: application/json" -H "Prefer: return=representation" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=representation" \
             --data "$BODY"
 
       - name: Commit website link changes
         shell: bash
         run: |
           set -euo pipefail
+
           git -C website config user.name "github-actions[bot]"
           git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git -C website add links.js
+
           if ! git -C website diff --cached --quiet; then
             git -C website commit -m "chore(release): update VXTUBE links ${{ needs.validate.outputs.version_name }}"
             git -C website pull --rebase origin main

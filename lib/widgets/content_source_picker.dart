@@ -8,8 +8,8 @@ import '../touch.dart';
 
 /// Shows the app-wide catalogue selector.
 ///
-/// When [requiredChoice] is true the dialog cannot be dismissed until the
-/// user confirms a source. This mode is used once on every cold app launch.
+/// The launch flow ([requiredChoice] == true) uses a blurred backdrop. The
+/// Settings flow keeps the page sharp and only adds a light dim overlay.
 Future<ContentSource?> showContentSourcePicker(
   BuildContext context, {
   required ContentSource initialSource,
@@ -20,19 +20,25 @@ Future<ContentSource?> showContentSourcePicker(
     barrierDismissible: !requiredChoice,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
     barrierColor: Colors.transparent,
-    transitionDuration: const Duration(milliseconds: 220),
+    transitionDuration: const Duration(milliseconds: 230),
     pageBuilder: (dialogContext, animation, secondaryAnimation) => Stack(
       fit: StackFit.expand,
       children: [
-        // Blur and gently dim the screen behind the compact selector.
-        Positioned.fill(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 9, sigmaY: 9),
+        if (requiredChoice)
+          Positioned.fill(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.38),
+              ),
+            ),
+          )
+        else
+          Positioned.fill(
             child: ColoredBox(
-              color: Colors.black.withValues(alpha: 0.34),
+              color: Colors.black.withValues(alpha: 0.20),
             ),
           ),
-        ),
         SafeArea(
           child: Center(
             child: _ContentSourcePickerDialog(
@@ -52,7 +58,7 @@ Future<ContentSource?> showContentSourcePicker(
       return FadeTransition(
         opacity: curved,
         child: ScaleTransition(
-          scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+          scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
           child: child,
         ),
       );
@@ -85,30 +91,63 @@ class _ContentSourcePickerDialogState
       child: Dialog(
         backgroundColor: AppColors.surface,
         surfaceTintColor: Colors.transparent,
-        elevation: 18,
+        elevation: 20,
         insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: AppColors.outline),
         ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 340),
+          constraints: const BoxConstraints(maxWidth: 332),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+            padding: const EdgeInsets.fromLTRB(18, 19, 18, 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Choose your content',
-                  style: AppText.headline.copyWith(fontSize: 19, height: 1.2),
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.accent.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.explore_outlined,
+                        color: AppColors.accentForeground,
+                        size: 19,
+                      ),
+                    ),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Text(
+                        widget.requiredChoice
+                            ? 'Choose your content'
+                            : 'Content source',
+                        style: AppText.headline.copyWith(
+                          fontSize: 18,
+                          letterSpacing: -0.35,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  'Choose an option to continue. You can change it later in Settings.',
-                  style: AppText.caption.copyWith(fontSize: 11, height: 1.3),
+                const SizedBox(height: 7),
+                Padding(
+                  padding: const EdgeInsets.only(left: 47),
+                  child: Text(
+                    widget.requiredChoice
+                        ? 'Select an option to start browsing.'
+                        : 'Choose which catalogue you want to browse.',
+                    style: AppText.caption.copyWith(
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 13),
+                const SizedBox(height: 17),
                 for (final source in ContentSource.values) ...[
                   _SourceOption(
                     source: source,
@@ -119,14 +158,15 @@ class _ContentSourcePickerDialogState
                     },
                   ),
                   if (source != ContentSource.values.last)
-                    const SizedBox(height: 7),
+                    const SizedBox(height: 8),
                 ],
-                const SizedBox(height: 13),
+                const SizedBox(height: 17),
                 Row(
                   children: [
                     if (!widget.requiredChoice) ...[
                       TextButton(
                         style: TextButton.styleFrom(
+                          foregroundColor: AppColors.textSecondary,
                           visualDensity: VisualDensity.compact,
                           padding: const EdgeInsets.symmetric(horizontal: 10),
                         ),
@@ -138,9 +178,14 @@ class _ContentSourcePickerDialogState
                       const Spacer(),
                     FilledButton(
                       style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        minimumSize: const Size(0, 36),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        backgroundColor: AppColors.accentStrong,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        minimumSize: const Size(104, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
+                        ),
                         textStyle: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -150,7 +195,7 @@ class _ContentSourcePickerDialogState
                         Haptics.play(Haptic.medium);
                         Navigator.of(context).pop(_selected);
                       },
-                      child: const Text('Continue'),
+                      child: Text(widget.requiredChoice ? 'Continue' : 'Save'),
                     ),
                   ],
                 ),
@@ -175,65 +220,79 @@ class _SourceOption extends StatelessWidget {
   final VoidCallback onTap;
 
   IconData get _icon => switch (source) {
-    ContentSource.fetish => Icons.favorite_border_rounded,
-    ContentSource.straight => Icons.play_circle_outline_rounded,
-    ContentSource.trans => Icons.people_outline_rounded,
-  };
+        ContentSource.fetish => Icons.favorite_border_rounded,
+        ContentSource.straight => Icons.play_circle_outline_rounded,
+        ContentSource.trans => Icons.people_outline_rounded,
+      };
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: selected
-          ? AppColors.accent.withValues(alpha: 0.10)
-          : AppColors.surfaceHigh,
-      borderRadius: BorderRadius.circular(Radii.card),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.card),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(Radii.card),
-            border: Border.all(
-              color: selected ? AppColors.accent : AppColors.outline,
-              width: selected ? 1.4 : 0.8,
-            ),
+    final borderColor = selected ? AppColors.accentStrong : AppColors.outline;
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: source.label,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accent.withValues(alpha: 0.09)
+              : AppColors.surfaceHigh.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(
+            color: borderColor,
+            width: selected ? 1.35 : 0.8,
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(_icon, color: AppColors.accentStrong, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(15),
+            onTap: onTap,
+            child: SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
                   children: [
-                    Text(
-                      source.label,
-                      style: AppText.title.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                    Icon(
+                      _icon,
+                      color: selected
+                          ? AppColors.accentForeground
+                          : AppColors.textTertiary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        source.label,
+                        style: AppText.title.copyWith(
+                          fontSize: 14,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 140),
+                      child: Icon(
+                        selected
+                            ? Icons.check_circle_rounded
+                            : Icons.circle_outlined,
+                        key: ValueKey<bool>(selected),
+                        color: selected
+                            ? AppColors.accentForeground
+                            : AppColors.textTertiary.withValues(alpha: 0.7),
+                        size: 19,
                       ),
                     ),
                   ],
                 ),
               ),
-              Icon(
-                selected
-                    ? Icons.check_circle_rounded
-                    : Icons.circle_outlined,
-                color:
-                    selected ? AppColors.accentStrong : AppColors.textTertiary,
-                size: 19,
-              ),
-            ],
+            ),
           ),
         ),
       ),

@@ -482,11 +482,23 @@ class Scraper {
     final seen = <String>{};
 
     void addModel(String? rawUrl, String? rawName) {
+      var name = _collapse(rawName ?? '');
       final target = _resolveHttp(rawUrl, uri);
-      final base = target == null ? null : _modelBase(target);
+      var base = target == null ? null : _modelBase(target);
+
+      // X-X-X sometimes supplies the Person name but omits author.url.
+      // Keep this fallback scoped to X-X-X (identified by its underscore
+      // search convention) so the other two sources retain their behaviour.
+      if (base == null && config.searchSpacesAsUnderscores && name.isNotEmpty) {
+        final slug = name
+            .toLowerCase()
+            .replaceAll('&', ' and ')
+            .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+            .replaceAll(RegExp(r'^-+|-+$'), '');
+        if (slug.isNotEmpty) base = config.baseUri.resolve('models/$slug/');
+      }
       if (base == null || !seen.add(base.toString())) return;
 
-      var name = _collapse(rawName ?? '');
       if (name.isEmpty) {
         name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ').trim();
       }
@@ -1212,6 +1224,87 @@ class Scraper {
     return count == 1 ? '1 view' : '$count views';
   }
 
+  String _normalCardTitle({
+    required dom.Element? anchor,
+    required dom.Element card,
+    required dom.Element? titleElement,
+    required dom.Element? image,
+    required String anchorText,
+    required String cardText,
+  }) {
+    var title = (anchor?.attributes['title'] ??
+            card.attributes['data-title'] ??
+            titleElement?.text ??
+            image?.attributes['alt'] ??
+            anchorText)
+        .trim();
+    title = _isPolluted(title) ? _cleanTitle(title) : _collapse(title);
+    if (title.isEmpty) title = _cleanTitle(anchorText);
+    if (title.isEmpty) title = _cleanTitle(cardText);
+    return title;
+  }
+
+  /// X-X-X truncates visible `.title` text on some search cards while keeping
+  /// the complete value in a title/data-title attribute. Compare dedicated
+  /// title fields and keep the most complete non-empty candidate.
+  String _xXxCardTitle({
+    required dom.Element? anchor,
+    required dom.Element card,
+    required dom.Element? titleElement,
+    required dom.Element? image,
+    required String anchorText,
+    required String cardText,
+  }) {
+    final dedicatedCandidates = <String?>[
+      anchor?.attributes['title'],
+      anchor?.attributes['data-title'],
+      card.attributes['data-title'],
+      card.attributes['title'],
+      titleElement?.attributes['title'],
+      titleElement?.attributes['data-title'],
+      titleElement?.text,
+    ];
+
+    final candidates = <String>[];
+    for (final raw in dedicatedCandidates) {
+      if (raw == null || raw.trim().isEmpty) continue;
+      final value = _isPolluted(raw) ? _cleanTitle(raw) : _collapse(raw);
+      if (value.isEmpty || _isGenericCardTitle(value)) continue;
+      if (!candidates.contains(value)) candidates.add(value);
+    }
+
+    if (candidates.isNotEmpty) {
+      // Longer values generally come from the full tooltip attribute, while
+      // visible search-card text may be shortened with an ellipsis. Keep the
+      // first candidate when lengths tie (anchor[title] is first).
+      var best = candidates.first;
+      for (final candidate in candidates.skip(1)) {
+        if (candidate.length > best.length) best = candidate;
+      }
+      return best;
+    }
+
+    for (final raw in <String?>[
+      image?.attributes['alt'],
+      anchorText,
+      cardText,
+    ]) {
+      if (raw == null || raw.trim().isEmpty) continue;
+      final value = _isPolluted(raw) ? _cleanTitle(raw) : _collapse(raw);
+      if (value.isNotEmpty && !_isGenericCardTitle(value)) return value;
+    }
+    return '';
+  }
+
+  bool _isGenericCardTitle(String value) {
+    final normalized = value.toLowerCase().trim();
+    return normalized == 'play' ||
+        normalized == 'watch' ||
+        normalized == 'watch video' ||
+        normalized == 'play video' ||
+        normalized == 'video';
+  }
+
   Video? _parseCard(dom.Element element, Uri pageUri) {
     final anchors = <dom.Element>[
       if (element.localName == 'a') element,
@@ -1335,16 +1428,24 @@ class Scraper {
         element.querySelector('video[poster]')?.attributes['poster'];
     final thumbnail = _absoluteUrl(thumbnailRaw, pageUri);
 
-    var title =
-        (anchor?.attributes['title'] ??
-                element.attributes['data-title'] ??
-                element.querySelector(config.titleSelector)?.text ??
-                image?.attributes['alt'] ??
-                anchorText)
-            .trim();
-    title = _isPolluted(title) ? _cleanTitle(title) : _collapse(title);
-    if (title.isEmpty) title = _cleanTitle(anchorText);
-    if (title.isEmpty) title = _cleanTitle(cardText);
+    final titleElement = element.querySelector(config.titleSelector);
+    final title = config.baseUri.host.toLowerCase() == 'x-x-x.tube'
+        ? _xXxCardTitle(
+            anchor: anchor,
+            card: element,
+            titleElement: titleElement,
+            image: image,
+            anchorText: anchorText,
+            cardText: cardText,
+          )
+        : _normalCardTitle(
+            anchor: anchor,
+            card: element,
+            titleElement: titleElement,
+            image: image,
+            anchorText: anchorText,
+            cardText: cardText,
+          );
     if (title.isEmpty) return null;
 
     final rawId =

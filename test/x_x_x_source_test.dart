@@ -161,6 +161,39 @@ void main() {
       scraper.close();
     });
 
+
+    test('uses the full title attribute when search-card text is truncated', () async {
+      final scraper = Scraper(
+        config,
+        client: MockClient((request) async => http.Response('''
+          <html><body>
+            <div class="thumb-holder">
+              <div class="item thumb">
+                <a href="/videos/2009001/search-result/">
+                  <div class="img">
+                    <img src="/contents/search-result.jpg" alt="Thumbnail alt" />
+                  </div>
+                  <div class="title"
+                       title="The Complete Original Search Result Title with Full Ending">
+                    The Complete Original Search Result Title...
+                  </div>
+                  <div class="duration">18:42</div>
+                </a>
+              </div>
+            </div>
+          </body></html>
+        ''', 200)),
+      );
+
+      final videos = await scraper.search('original title');
+      expect(videos, hasLength(1));
+      expect(
+        videos.single.title,
+        'The Complete Original Search Result Title with Full Ending',
+      );
+      scraper.close();
+    });
+
     test('reads VideoObject contentUrl as the playable stream', () async {
       final scraper = Scraper(
         config,
@@ -227,6 +260,32 @@ void main() {
       expect(models, hasLength(1));
       expect(models.single.name, 'Zafira May');
       expect(models.single.url, 'https://x-x-x.tube/models/zafira-may-mugur/');
+      scraper.close();
+    });
+
+    test('keeps the visible model name when JSON-LD has no author URL', () async {
+      final scraper = Scraper(
+        config,
+        client: MockClient((request) async => http.Response('''
+          <html><head>
+            <script type="application/ld+json">
+              {
+                "@type":"VideoObject",
+                "author": {"@type":"Person","name":"Zafira May"}
+              }
+            </script>
+          </head><body></body></html>
+        ''', 200)),
+      );
+      const video = Video(
+        id: 'sample-no-author-url',
+        title: 'Sample',
+        pageUrl: 'https://x-x-x.tube/videos/2008589/sample-video/',
+      );
+      final models = await scraper.videoModels(video);
+      expect(models, hasLength(1));
+      expect(models.single.name, 'Zafira May');
+      expect(models.single.url, 'https://x-x-x.tube/models/zafira-may/');
       scraper.close();
     });
 

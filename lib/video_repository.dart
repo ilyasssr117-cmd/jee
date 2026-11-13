@@ -59,7 +59,7 @@ abstract class VideoCatalogRepository {
 
 const String sourceBaseUrl = String.fromEnvironment(
   'VIDEO_SOURCE_BASE_URL',
-  defaultValue: 'https://x-tg.tube',
+  defaultValue: 'https://x-video.tube',
 );
 
 List<String> _parseCommaSeparated(String value) => value

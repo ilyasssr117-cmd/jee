@@ -274,10 +274,8 @@ class SearchOverlayState extends State<SearchOverlay> {
     final searchText = _query;
     final sort = _sort;
     final pageIndex = reset ? 0 : _page;
-    // Bump this namespace when search-title parsing changes so cached cards
-    // with incomplete titles are not reused after the app is updated.
     final cacheKey =
-        'search-title-v2|${videoRepository.source.cacheScope}|${searchText.toLowerCase()}|${sort.name}|$pageIndex';
+        'search|${videoRepository.source.cacheScope}|${searchText.toLowerCase()}|${sort.name}|$pageIndex';
 
     setState(() {
       _loading = true;

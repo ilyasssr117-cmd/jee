@@ -20,6 +20,10 @@ enum ContentSource {
     ContentSource.trans => 'https://x-tg.tube',
   };
 
+  /// Cache namespace includes the actual domain so changing a source URL
+  /// cannot reuse listings saved for the old domain under the same label.
+  String get cacheScope => '$name@${Uri.parse(baseUrl).host.toLowerCase()}';
+
   static ContentSource fromStoredValue(String? value) =>
       ContentSource.values.firstWhere(
         (source) => source.name == value,

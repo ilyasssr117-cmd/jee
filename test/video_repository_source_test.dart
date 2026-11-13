@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:vxtube_final/content_source.dart';
+import 'package:vxtube_final/models.dart';
 import 'package:vxtube_final/scraper.dart';
 import 'package:vxtube_final/video_repository.dart';
 

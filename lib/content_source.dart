@@ -1,7 +1,7 @@
 /// The catalog domains available from the home screen.
 ///
-/// All three sources share the same scraper implementation; only the base
-/// URL changes when the user switches between them.
+/// Sources share the scraper engine, while each domain can supply its own
+/// routes and HTML selectors through the source-specific configuration.
 enum ContentSource {
   fetish,
   straight,

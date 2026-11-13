@@ -69,7 +69,7 @@ List<String> _parseCommaSeparated(String value) => value
     .toSet()
     .toList(growable: false);
 
-ScraperConfig _scraperConfigFor(String baseUrl) => ScraperConfig(
+ScraperConfig _defaultScraperConfigFor(String baseUrl) => ScraperConfig(
   baseUrl: baseUrl,
   homePath: const String.fromEnvironment('VIDEO_HOME_PATH', defaultValue: '/'),
   pagePathTemplate: const String.fromEnvironment(
@@ -158,11 +158,42 @@ ScraperConfig _scraperConfigFor(String baseUrl) => ScraperConfig(
   ),
 );
 
+/// Creates the scraper configuration for a selected source. X-X-X has its
+/// own route and card markup; Fetish and Trans keep their existing defaults.
+ScraperConfig scraperConfigForSource(ContentSource source) {
+  if (source != ContentSource.straight) {
+    return _defaultScraperConfigFor(source.baseUrl);
+  }
+
+  return ScraperConfig(
+    baseUrl: source.baseUrl,
+    homePath: '/videos/',
+    pagePathTemplate: '/videos/{page}/',
+    pagePathPageOffset: 1,
+    searchPathTemplate: '/search/{query}/{page}/',
+    searchSpacesAsUnderscores: true,
+    categoryPathTemplate: '/categories/{slug}/{page}/',
+    cardSelector: '.thumb-holder .item.thumb',
+    anchorSelector: 'a[href]',
+    imageSelector: 'img',
+    titleSelector: '.title, h1, h2, h3',
+    durationSelector: '.duration, [data-duration]',
+    viewsSelector: '.model-info .rating, .views, [data-views]',
+    likesSelector: '.likes, [data-likes]',
+    videoPathPattern: r'/videos/\d+(?:/|$)',
+    excludePathPattern:
+        r'/albums?/|/galleries/|/gallery/|/photos?/|/pictures?/',
+    relatedCardSelector:
+        '.related .item.thumb, .related-videos .item.thumb, .thumb-holder .item.thumb',
+    modelVideosPathTemplate: '{page}/',
+  );
+}
+
 final VideoCatalogRepository videoRepository = HtmlScraperVideoRepository(
   source: ContentSource.fetish,
   scrapers: <ContentSource, Scraper>{
     for (final source in ContentSource.values)
-      source: Scraper(_scraperConfigFor(source.baseUrl)),
+      source: Scraper(scraperConfigForSource(source)),
   },
 );
 

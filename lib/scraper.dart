@@ -52,7 +52,10 @@ class ScraperConfig {
     required this.baseUrl,
     this.homePath = '/',
     this.pagePathTemplate = '/video/{page}/',
+    this.pagePathPageOffset = 0,
     this.searchPathTemplate = '/search/{query}/{page}/',
+    this.searchSpacesAsUnderscores = false,
+    this.modelVideosPathTemplate = 'videos/{page}/',
     this.categoryPathTemplate = '/categories/{slug}/{page}/',
     this.cardSelector = '.thumbs__list .item.thumb, .thumb-spot, article[data-video], .video-card, .video-item',
     this.anchorSelector = 'a[href]',
@@ -88,7 +91,10 @@ class ScraperConfig {
   final String baseUrl;
   final String homePath;
   final String pagePathTemplate;
+  final int pagePathPageOffset;
   final String searchPathTemplate;
+  final bool searchSpacesAsUnderscores;
+  final String modelVideosPathTemplate;
   final String categoryPathTemplate;
   final String cardSelector;
   final String anchorSelector;
@@ -120,7 +126,10 @@ class ScraperConfig {
   Uri pageUri(int page) {
     final safePage = page < 1 ? 1 : page;
     return baseUri.resolve(
-      pagePathTemplate.replaceAll('{page}', safePage.toString()),
+      pagePathTemplate.replaceAll(
+        '{page}',
+        (safePage + pagePathPageOffset).toString(),
+      ),
     );
   }
 
@@ -130,9 +139,12 @@ class ScraperConfig {
     if (safePage == 1 && template.contains('/{page}/')) {
       template = template.replaceFirst('/{page}/', '/');
     }
+    final normalizedQuery = searchSpacesAsUnderscores
+        ? query.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_')
+        : query.trim();
     return baseUri.resolve(
       template
-          .replaceAll('{query}', Uri.encodeComponent(query.trim()))
+          .replaceAll('{query}', Uri.encodeComponent(normalizedQuery))
           .replaceAll('{page}', safePage.toString()),
     );
   }
@@ -148,6 +160,21 @@ class ScraperConfig {
           .replaceAll('{slug}', Uri.encodeComponent(_slugify(slug)))
           .replaceAll('{page}', safePage.toString()),
     );
+  }
+
+  /// Resolves a model's video-listing page. Sources may list videos directly
+  /// at `/models/<slug>/` or under a nested `/videos/` route.
+  Uri modelVideosUri(Uri modelBaseUri, int page) {
+    final safePage = page < 1 ? 1 : page;
+    var template = modelVideosPathTemplate;
+    if (safePage == 1) {
+      template = template
+          .replaceFirst('/{page}/', '/')
+          .replaceFirst('{page}/', '');
+    } else {
+      template = template.replaceAll('{page}', safePage.toString());
+    }
+    return modelBaseUri.resolve(template);
   }
 
   static String _slugify(String value) => value
@@ -451,35 +478,74 @@ class Scraper {
 
     final uri = config.baseUri.resolve(pageUrl);
     final document = html.parse(await _getDetailPage(uri, fresh: fresh));
+    final models = <ModelRef>[];
+    final seen = <String>{};
 
+    void addModel(String? rawUrl, String? rawName) {
+      final target = _resolveHttp(rawUrl, uri);
+      final base = target == null ? null : _modelBase(target);
+      if (base == null || !seen.add(base.toString())) return;
+
+      var name = _collapse(rawName ?? '');
+      if (name.isEmpty) {
+        name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ').trim();
+      }
+      if (name.isEmpty) return;
+      models.add(ModelRef(name: name, url: base.toString()));
+    }
+
+    // Prefer explicit model links where the source provides them.
     var anchors = document.querySelectorAll('.media-models a[href]');
     if (anchors.isEmpty) {
       anchors = document.querySelectorAll('.media-info a[href*="/models/"]');
     }
-
-    final models = <ModelRef>[];
-    final seen = <String>{};
-    for (final anchor in anchors) {
-      final target = _resolveHttp(anchor.attributes['href'], uri);
-      final base = target == null ? null : _modelBase(target);
-      if (base == null || !seen.add(base.toString())) continue;
-
-      var name = _collapse(anchor.text);
-      if (name.isEmpty) name = _collapse(anchor.attributes['title'] ?? '');
-      if (name.isEmpty) {
-        name = base.pathSegments[1].replaceAll(RegExp(r'[-_]+'), ' ').trim();
-      }
-      if (name.isEmpty) continue;
-      models.add(ModelRef(name: name, url: base.toString()));
+    if (anchors.isEmpty) {
+      anchors = document.querySelectorAll('a[href*="/models/"]');
     }
+    for (final anchor in anchors) {
+      addModel(
+        anchor.attributes['href'],
+        anchor.text.trim().isNotEmpty
+            ? anchor.text
+            : anchor.attributes['title'],
+      );
+    }
+
+    // X-X-X exposes its creator as VideoObject.author in JSON-LD.
+    void visit(Object? node) {
+      if (node is List) {
+        for (final child in node) {
+          visit(child);
+        }
+      } else if (node is Map) {
+        final type = node['@type'];
+        final isPerson = type == 'Person' ||
+            (type is List && type.contains('Person'));
+        if (isPerson) {
+          addModel(node['url']?.toString(), node['name']?.toString());
+        }
+        for (final value in node.values) {
+          visit(value);
+        }
+      }
+    }
+
+    for (final script in document.querySelectorAll(
+      'script[type="application/ld+json"]',
+    )) {
+      try {
+        visit(jsonDecode(script.text));
+      } catch (_) {
+        // Ignore malformed JSON-LD and keep models found from page anchors.
+      }
+    }
+
     return models;
   }
 
   Future<ModelPageResult> modelPage(ModelRef model, {int page = 1}) async {
     final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
-    final uri = page <= 1
-        ? base.resolve('videos/')
-        : base.resolve('videos/$page/');
+    final uri = config.modelVideosUri(base, page);
 
     final String body;
     try {
@@ -573,15 +639,34 @@ class Scraper {
         ? base.resolve('albums/')
         : base.resolve('albums/$page/');
 
-    final String body;
+    Future<List<AlbumRef>> fromSearch() async {
+      final searchPage = config.searchUri(model.name, page);
+      final searchBody = await _get(searchPage);
+      return _albumsFrom(
+        html.parse(searchBody),
+        searchPage,
+        modelName: model.name,
+      );
+    }
+
     try {
-      body = await _get(uri);
+      final body = await _get(uri);
+      final albums = _albumsFrom(html.parse(body), uri, modelName: model.name);
+      if (albums.isNotEmpty || !config.searchSpacesAsUnderscores) {
+        return albums;
+      }
+      // X-X-X does not consistently expose a dedicated model-albums route;
+      // its search page can also contain matching album cards.
+      return await fromSearch();
     } on ScraperException catch (error) {
       if (page > 1 && error.statusCode == 404) return const <AlbumRef>[];
-      rethrow;
+      if (!config.searchSpacesAsUnderscores) rethrow;
+      try {
+        return await fromSearch();
+      } on ScraperException {
+        rethrow;
+      }
     }
-    final albums = _albumsFrom(html.parse(body), uri, modelName: model.name);
-    return albums;
   }
 
   Future<List<AlbumRef>> allAlbums({int page = 1}) async {
@@ -863,8 +948,17 @@ class Scraper {
           final uri = config.baseUri.resolve('models/');
           final directory = html.parse(await _get(uri));
           final result = <String, String>{};
-          for (final card in directory.querySelectorAll('.thumb--models')) {
-            final anchor = card.querySelector('a[href]');
+          var cards = directory.querySelectorAll('.thumb--models');
+          if (cards.isEmpty) {
+            cards = directory
+                .querySelectorAll(config.cardSelector)
+                .where((card) =>
+                    card.querySelector('a[href*="/models/"]') != null)
+                .toList();
+          }
+          for (final card in cards) {
+            final anchor = card.querySelector('a[href*="/models/"]') ??
+                card.querySelector('a[href]');
             final target = _resolveHttp(anchor?.attributes['href'], uri);
             final modelUrl = target == null ? null : _modelBase(target);
             if (target == null || modelUrl == null) continue;
@@ -895,6 +989,8 @@ class Scraper {
     final slugs = <String>{
       ScraperConfig._slugify(q),
       q.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
+      if (config.searchSpacesAsUnderscores)
+        q.toLowerCase().replaceAll(RegExp(r'\s+'), '_'),
     }..removeWhere((s) => s.isEmpty);
 
     // Resolve direct model pages first. This gives exact profile metadata and
@@ -1493,6 +1589,53 @@ class Scraper {
     );
   }
 
+  Map<String, dynamic>? _videoObjectFromJsonLd(dom.Document document) {
+    Map<String, dynamic>? found;
+
+    void visit(Object? node) {
+      if (found != null) return;
+      if (node is List) {
+        for (final child in node) {
+          visit(child);
+          if (found != null) return;
+        }
+      } else if (node is Map) {
+        final type = node['@type'];
+        final isVideo = type == 'VideoObject' ||
+            (type is List && type.contains('VideoObject'));
+        if (isVideo) {
+          found = Map<String, dynamic>.from(node);
+          return;
+        }
+        for (final value in node.values) {
+          visit(value);
+          if (found != null) return;
+        }
+      }
+    }
+
+    for (final script in document.querySelectorAll(
+      'script[type="application/ld+json"]',
+    )) {
+      try {
+        visit(jsonDecode(script.text));
+      } catch (_) {
+        // Ignore unrelated or malformed JSON-LD blocks.
+      }
+      if (found != null) break;
+    }
+    return found;
+  }
+
+  String? _jsonLdString(Object? value) {
+    if (value is String && value.trim().isNotEmpty) return value.trim();
+    if (value is List && value.isNotEmpty) return _jsonLdString(value.first);
+    if (value is Map) {
+      return _jsonLdString(value['url'] ?? value['contentUrl']);
+    }
+    return null;
+  }
+
   Future<Video> resolveForPlayback(Video video, {bool fresh = false}) async {
     if (video.streamUrl.trim().isNotEmpty) return video;
     final pageUrl = video.pageUrl;
@@ -1509,6 +1652,7 @@ class Scraper {
   Video _videoFromPage(Video video, String body, Uri uri) {
     final document = html.parse(body);
 
+    final videoObject = _videoObjectFromJsonLd(document);
     final picked = _extractStreams(body, document, uri);
     final streamUrl = picked.best;
     if (streamUrl == null) {
@@ -1526,18 +1670,22 @@ class Scraper {
             .querySelector('meta[property="og:title"]')
             ?.attributes['content']
             ?.trim() ??
+        _jsonLdString(videoObject?['name']) ??
         _capture(body, config.detailTitlePattern) ??
         video.title;
     final descriptionNode = document.querySelector(config.descriptionSelector);
     final description =
         descriptionNode?.attributes['content']?.trim().isNotEmpty == true
         ? descriptionNode!.attributes['content']!.trim()
-        : descriptionNode?.text.trim() ?? video.description;
+        : (descriptionNode?.text.trim().isNotEmpty == true
+              ? descriptionNode!.text.trim()
+              : _jsonLdString(videoObject?['description']) ?? video.description);
     final thumbnail =
         _absoluteUrl(
           _capture(body, r"""preview_url1?\s*[:=]\s*["']([^"']+)["']""") ??
               _capture(body, config.previewPattern) ??
-              document.querySelector('video[poster]')?.attributes['poster'],
+              document.querySelector('video[poster]')?.attributes['poster'] ??
+              _jsonLdString(videoObject?['thumbnailUrl']),
           uri,
         ) ??
         video.thumbnailUrl;

@@ -4,16 +4,15 @@ import 'package:http/testing.dart';
 import 'package:vxtube_final/content_source.dart';
 import 'package:vxtube_final/scraper.dart';
 import 'package:vxtube_final/video_repository.dart';
-import 'package:vxtube_final/models.dart';
 
 void main() {
-  test('switching the catalog source changes only the scraper base URL', () async {
+  test('switching sources uses each source-specific listing route', () async {
     final requestedUris = <Uri>[];
     final scrapers = <ContentSource, Scraper>{};
 
     for (final source in ContentSource.values) {
       scrapers[source] = Scraper(
-        ScraperConfig(baseUrl: source.baseUrl),
+        scraperConfigForSource(source),
         client: MockClient((request) async {
           requestedUris.add(request.url);
           return http.Response('<html><body></body></html>', 200);
@@ -36,7 +35,7 @@ void main() {
       requestedUris,
       <Uri>[
         Uri.parse('https://x-fetish.tube/'),
-        Uri.parse('https://x-video.tube/'),
+        Uri.parse('https://x-x-x.tube/videos/'),
         Uri.parse('https://x-tg.tube/'),
       ],
     );
@@ -54,7 +53,7 @@ void main() {
 
     for (final source in ContentSource.values) {
       scrapers[source] = Scraper(
-        ScraperConfig(baseUrl: source.baseUrl),
+        scraperConfigForSource(source),
         client: MockClient((request) async {
           requestedUris.add(request.url);
           return http.Response('<html><body></body></html>', 200);
@@ -71,13 +70,13 @@ void main() {
     await repository.getModelPage(
       const ModelRef(
         name: 'Saved model',
-        url: 'https://x-video.tube/models/saved-model/',
+        url: 'https://x-x-x.tube/models/saved-model/',
       ),
     );
 
     expect(
       requestedUris.single,
-      Uri.parse('https://x-video.tube/models/saved-model/videos/'),
+      Uri.parse('https://x-x-x.tube/models/saved-model/'),
     );
 
     for (final scraper in scrapers.values) {

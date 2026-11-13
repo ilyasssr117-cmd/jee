@@ -25,20 +25,143 @@ jobs:
           token: ${{ secrets.WEBSITE_REPO_TOKEN }}
           path: website
 
-      - name: Restore previous website index
+      - name: Restore exact previous index.html
         shell: bash
         run: |
           set -euo pipefail
-          git -C website fetch --unshallow origin main || git -C website fetch origin main
-git -C website fetch origin 7ab37a51ca3b978f617866c33a4aa4406c4220a7
-          git -C website show 7ab37a51ca3b978f617866c33a4aa4406c4220a7:index.html > website/index.html
+          cat > website/index.html <<'VXTUBE_RESTORE_20261113'
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0b0e">
+  <meta name="description" content="VXTUBE — منصة لاكتشاف ومشاهدة محتوى الفيديو المخصص للبالغين 18+ عبر Android وiOS وWindows.">
+  <meta name="robots" content="index,follow">
+  <meta http-equiv="Delegate-CH" content="Sec-CH-UA https://s.magsrv.com; Sec-CH-UA-Mobile https://s.magsrv.com; Sec-CH-UA-Arch https://s.magsrv.com; Sec-CH-UA-Model https://s.magsrv.com; Sec-CH-UA-Platform https://s.magsrv.com; Sec-CH-UA-Platform-Version https://s.magsrv.com; Sec-CH-UA-Bitness https://s.magsrv.com; Sec-CH-UA-Full-Version-List https://s.magsrv.com; Sec-CH-UA-Full-Version https://s.magsrv.com;">
+  <title>VXTUBE — مساحة مشاهدة للبالغين 18+</title>
+  <script async type="application/javascript" src="https://a.magsrv.com/ad-provider.js"></script>
+  <style>
+    :root{--bg:#09090c;--panel:#121218;--panel2:#191920;--text:#f6f6f8;--muted:#a5a5b1;--blue:#2588ff;--blue-strong:#1557c0;--line:rgba(255,255,255,.09);--max:1120px}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 78% 0%,rgba(37,136,255,.18),transparent 35%),var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;line-height:1.7}
+    a{color:inherit;text-decoration:none}.wrap{width:min(var(--max),calc(100% - 40px));margin:auto}.topbar{position:sticky;top:0;z-index:10;background:rgba(9,9,12,.82);backdrop-filter:blur(18px);border-bottom:1px solid var(--line)}
+    .nav{height:76px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:12px;font-weight:850;letter-spacing:-1px;font-size:25px}.mark{width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#69bdff,#1557c0);display:grid;place-items:center;box-shadow:0 8px 28px #2588ff3d;font-weight:950;font-size:21px}.navlinks{display:flex;align-items:center;gap:26px;color:var(--muted);font-size:14px}.navlinks a:hover{color:white}.navright{display:flex;align-items:center;gap:12px}.lang{border:1px solid var(--line);background:var(--panel);color:white;border-radius:99px;padding:9px 14px;cursor:pointer;font-weight:700}
+    .hero{padding:88px 0 76px;display:grid;grid-template-columns:1.08fr .92fr;gap:54px;align-items:center}.eyebrow{display:inline-flex;align-items:center;gap:8px;color:#83bdff;border:1px solid #2588ff4d;background:#2588ff12;border-radius:99px;padding:6px 13px;font-weight:800;font-size:12px;letter-spacing:.08em}.dot{width:7px;height:7px;background:var(--blue);border-radius:50%;box-shadow:0 0 13px var(--blue)}h1{font-size:clamp(42px,6vw,72px);letter-spacing:-2.8px;line-height:1.08;margin:24px 0 18px;font-weight:900}.accent{color:var(--blue)}.lead{font-size:18px;color:#c1c1cb;max-width:620px;margin:0 0 28px}.actions{display:flex;flex-wrap:wrap;gap:12px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:14px 21px;border-radius:13px;font-weight:850;border:1px solid var(--line);transition:.2s}.btn.primary{background:linear-gradient(135deg,#3b96ff,#1557c0);border-color:transparent;box-shadow:0 12px 35px #2588ff30}.btn.secondary{background:rgba(110,170,235,.06)}.btn:hover{transform:translateY(-2px);filter:brightness(1.08)}.btn[aria-disabled="true"]{opacity:.48;pointer-events:none;filter:grayscale(.4)}.smallnote{color:var(--muted);font-size:12px;margin-top:15px}
+    .showcase{min-height:390px;position:relative;display:grid;place-items:center}.orb{position:absolute;width:300px;height:300px;border-radius:50%;background:radial-gradient(circle,#2588ff50 0%,#1557c022 42%,transparent 70%);filter:blur(12px)}.mock{position:relative;width:min(100%,390px);border:1px solid #ffffff22;border-radius:30px;padding:17px;background:linear-gradient(150deg,#22222c,#101015 70%);box-shadow:0 30px 90px #0009;transform:rotate(-3deg)}.mockhead{display:flex;align-items:center;justify-content:space-between;padding:6px 5px 17px}.mocklogo{font-size:21px;font-weight:950;letter-spacing:-1px}.mocklogo span{color:var(--blue)}.mockpill{font-size:10px;color:#a7d2ff;background:#2588ff1c;border:1px solid #2588ff40;padding:4px 8px;border-radius:99px}.poster{height:220px;border-radius:19px;overflow:hidden;background:radial-gradient(circle at 70% 25%,#4aa3ff 0,#174b91 30%,#101f35 66%,#101015 100%);position:relative;display:flex;align-items:end;padding:18px}.poster:before,.poster:after{content:"";position:absolute;border:1px solid #ffffff26;border-radius:50%;width:230px;height:230px;top:-85px;left:-45px}.poster:after{width:160px;height:160px;top:-48px;left:-10px}.posterlabel{position:relative;font-weight:900;font-size:22px}.mocktiles{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:12px}.tile{height:68px;border-radius:12px;background:linear-gradient(145deg,#343440,#17171e);border:1px solid #ffffff0c}.tile:nth-child(2){background:linear-gradient(145deg,#244d7c,#14253a)}.tile:nth-child(3){background:linear-gradient(145deg,#27466c,#111b2b)}.mockfoot{display:flex;justify-content:space-between;color:#9b9ba7;font-size:11px;padding:13px 3px 2px}
+    section{padding:74px 0;border-top:1px solid var(--line)}.sectionhead{max-width:700px;margin-bottom:32px}.kicker{color:var(--blue);font-size:12px;font-weight:900;letter-spacing:.12em;text-transform:uppercase}.sectionhead h2{font-size:clamp(29px,4vw,42px);line-height:1.2;letter-spacing:-1px;margin:8px 0 12px}.sectionhead p{color:var(--muted);margin:0}.grid3{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.card{background:linear-gradient(150deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:20px;padding:24px}.icon{width:43px;height:43px;display:grid;place-items:center;border-radius:13px;background:#17385f;color:#9acbff;font-size:20px;margin-bottom:15px}.card h3{font-size:18px;margin:0 0 8px}.card p{font-size:14px;color:var(--muted);margin:0}.audience{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch}.audiencebox{border-radius:22px;padding:28px;background:linear-gradient(140deg,#102b4d,#10233d 72%);border:1px solid #2588ff33}.audiencebox h3{margin:0 0 10px;font-size:23px}.audiencebox p{margin:0;color:#c8d8ed}.principles{display:grid;grid-template-columns:1fr 1fr;gap:12px}.principle{padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}.principle b{display:block;margin-bottom:4px}.principle span{font-size:13px;color:var(--muted)}
+    .downloads{background:linear-gradient(180deg,transparent,#08172b 50%,transparent)}.downloadgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.download{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px;display:flex;flex-direction:column;min-height:270px}.platform-icon{width:58px;height:58px;border-radius:17px;display:grid;place-items:center;background:linear-gradient(145deg,#183b65,#10243e);color:#a9d3ff;margin-bottom:15px;border:1px solid #5ca9ff35}.platform-icon svg{width:34px;height:34px}.platform-icon.apple{color:#eef6ff}.platform-icon.windows{color:#86c3ff}.download .platform{font-size:12px;color:#8fc4ff;font-weight:900;letter-spacing:.06em}.download h3{font-size:23px;margin:8px 0}.download p{font-size:13px;color:var(--muted);margin:0 0 20px}.download .btn{margin-top:auto;width:100%}.warning{font-size:12px;color:#aaa9b4;margin-top:17px}.policy{border:1px solid #2588ff45;background:#2588ff0b;border-radius:20px;padding:24px}.policy h3{margin:0 0 8px}.policy p{color:#c9c4ca;margin:0;font-size:14px}.footer{padding:30px 0 44px;color:var(--muted);font-size:12px}.footrow{display:flex;justify-content:space-between;gap:18px;align-items:center;flex-wrap:wrap}.footer strong{color:#fff}.footer a{text-decoration:underline;text-decoration-color:#ffffff44;text-underline-offset:3px}
+    .ad-section{padding:28px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}.ad-container{width:min(var(--max),calc(100% - 28px));margin:auto;display:flex;justify-content:center;align-items:center}.ad-box{width:300px;max-width:100%;min-height:250px;text-align:center;overflow:hidden}.ad-label{display:block;margin-bottom:7px;color:var(--muted);font-size:11px}.ad-box ins{display:block;max-width:100%}
+    .leaderboard-ad-section{padding:24px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.012);overflow:hidden}.leaderboard-ad-container{width:min(728px,calc(100% - 28px));min-height:90px;margin:0 auto;display:flex;justify-content:center;align-items:center;overflow:hidden}.leaderboard-ad-box{width:728px;max-width:100%;min-height:90px;text-align:center;overflow:hidden}.leaderboard-ad-box ins{display:block;max-width:100%;margin:0 auto}.leaderboard-ad-label{display:block;margin-bottom:6px;color:var(--muted);font-size:11px}
+    [dir="ltr"] .hero,[dir="ltr"] .audience{direction:ltr}[dir="ltr"] .navlinks{direction:ltr}[dir="ltr"] .wrap{text-align:left}
+    @keyframes languageReveal{0%{opacity:0;transform:translateY(7px);filter:blur(2px)}100%{opacity:1;transform:translateY(0);filter:blur(0)}}@keyframes languageButton{0%{transform:scale(.94);opacity:.7}55%{transform:scale(1.04)}100%{transform:scale(1);opacity:1}}body.lang-switching [data-ar][data-en]{animation:languageReveal .42s cubic-bezier(.2,.75,.25,1) both}body.lang-switching .lang{animation:languageButton .42s ease both}@media(prefers-reduced-motion:reduce){body.lang-switching [data-ar][data-en],body.lang-switching .lang{animation:none!important}}
+    @media(max-width:820px){.hero{grid-template-columns:1fr;padding:60px 0 45px;gap:18px}.showcase{min-height:330px}.navlinks{display:none}.grid3,.downloadgrid{grid-template-columns:1fr}.audience{grid-template-columns:1fr}.principles{grid-template-columns:1fr 1fr}section{padding:58px 0}}
+    @media(max-width:480px){.wrap{width:min(var(--max),calc(100% - 28px))}.nav{height:66px}.brand{font-size:22px}.mark{width:38px;height:38px}.principles{grid-template-columns:1fr}.lead{font-size:16px}.mock{padding:12px}.poster{height:190px}}
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="wrap nav">
+    <a class="brand" href="#home" aria-label="VXTUBE home"><span class="mark">V</span><span>VX<span class="accent">TUBE</span></span></a>
+    <nav class="navlinks"><a href="#about" data-ar="عن التطبيق" data-en="About">عن التطبيق</a><a href="#audience" data-ar="الجمهور" data-en="Audience">الجمهور</a><a href="#downloads" data-ar="التنزيلات" data-en="Downloads">التنزيلات</a><a href="#policy" data-ar="سياسة المحتوى" data-en="Content policy">سياسة المحتوى</a></nav>
+    <div class="navright"><button class="lang" id="langBtn" type="button">EN</button></div>
+  </div></header>
+
+  <main>
+    <div class="wrap hero" id="home">
+      <div>
+        <span class="eyebrow"><span class="dot"></span><span data-ar="للبالغين فقط · 18+" data-en="ADULTS ONLY · 18+">للبالغين فقط · 18+</span></span>
+        <h1 data-ar="اكتشف عالم الفيديو مع <span class='accent'>VXTUBE</span>" data-en="Discover video with <span class='accent'>VXTUBE</span>">اكتشف عالم الفيديو مع <span class="accent">VXTUBE</span></h1>
+        <p class="lead" data-ar="VXTUBE تطبيق مخصص للبالغين (+18) لعرض الفيديوهات وتصفحها ومشاهدتها فقط. لا يوفر التطبيق ميزة رفع فيديوهات المستخدمين أو نشرها؛ فهو تجربة مشاهدة واكتشاف للمحتوى المتاح داخله." data-en="VXTUBE is an adults-only (18+) app for browsing and watching available videos. It is designed for viewing and discovery only; users cannot upload or publish their own videos through the app.">VXTUBE تطبيق مخصص للبالغين (+18) لعرض الفيديوهات وتصفحها ومشاهدتها فقط. لا يوفر التطبيق ميزة رفع فيديوهات المستخدمين أو نشرها؛ فهو تجربة مشاهدة واكتشاف للمحتوى المتاح داخله.</p>
+        <div class="actions"><a class="btn primary" href="#downloads" data-ar="استكشف روابط التنزيل ↓" data-en="Explore downloads ↓">استكشف روابط التنزيل ↓</a><a class="btn secondary" href="#about" data-ar="تعرف على VXTUBE" data-en="Discover VXTUBE">تعرف على VXTUBE</a></div>
+        <p class="smallnote" data-ar="18+ فقط. لا يُسمح بدخول أو استخدام التطبيق لمن هم دون 18 عاماً." data-en="18+ only. Access and use are not permitted for anyone under 18.">18+ فقط. لا يُسمح بدخول أو استخدام التطبيق لمن هم دون 18 عاماً.</p>
+      </div>
+      <div class="showcase" aria-label="VXTUBE visual identity"><div class="orb"></div><div class="mock">
+        <div class="mockhead"><div class="mocklogo">VX<span>TUBE</span></div><div class="mockpill">18+ ONLY</div></div>
+        <div class="poster"><div class="posterlabel" data-ar="مساحة مشاهدة للبالغين" data-en="A viewing space for adults">مساحة مشاهدة للبالغين</div></div>
+        <div class="mocktiles"><div class="tile"></div><div class="tile"></div><div class="tile"></div></div>
+        <div class="mockfoot"><span>Discover</span><span>Watch · Explore</span><span>VXTUBE</span></div>
+      </div></div>
+    </div>
+
+    <!-- ExoClick Banner: Zone 6083844 / 300x250 -->
+    <section class="ad-section" id="advertisement" aria-label="Advertisement">
+      <div class="ad-container"><div class="ad-box">
+        <span class="ad-label" data-ar="إعلان" data-en="Advertisement">إعلان</span>
+        <ins class="eas6a97888e2" data-zoneid="6083844" data-block-ad-types="0"></ins>
+        <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
+      </div></div>
+    </section>
+    <!-- End ExoClick Banner -->
+
+    <section id="about"><div class="wrap"><div class="sectionhead"><span class="kicker" data-ar="عن التطبيق" data-en="ABOUT THE APP">عن التطبيق</span><h2 data-ar="تجربة فيديو واضحة وبسيطة" data-en="A focused video experience">تجربة فيديو واضحة وبسيطة</h2><p data-ar="يركز VXTUBE على عرض الفيديوهات وتصفحها وتشغيلها بسهولة. إنه تطبيق للمشاهدة فقط، وليس منصة لرفع فيديوهات المستخدمين أو نشرها." data-en="VXTUBE focuses on browsing and playing available videos. It is a viewing-only app, not a platform for users to upload or publish videos.">يركز VXTUBE على عرض الفيديوهات وتصفحها وتشغيلها بسهولة. إنه تطبيق للمشاهدة فقط، وليس منصة لرفع فيديوهات المستخدمين أو نشرها.</p></div>
+      <div class="grid3">
+        <article class="card"><div class="icon">▶</div><h3 data-ar="المشاهدة فقط" data-en="Viewing only">المشاهدة فقط</h3><p data-ar="يعرض التطبيق الفيديوهات المتاحة للمستخدمين، ولا يتيح رفع فيديوهاتهم أو نشرها." data-en="The app displays available videos and does not let users upload or publish their own videos.">يعرض التطبيق الفيديوهات المتاحة للمستخدمين، ولا يتيح رفع فيديوهاتهم أو نشرها.</p></article>
+        <article class="card"><div class="icon">▣</div><h3 data-ar="اكتشاف ومشاهدة" data-en="Discover & watch">اكتشاف ومشاهدة</h3><p data-ar="تصفح محتوى الفيديو وانتقل إلى المشاهدة من تجربة موحدة." data-en="Browse video content and move into playback from one unified experience.">تصفح محتوى الفيديو وانتقل إلى المشاهدة من تجربة موحدة.</p></article>
+        <article class="card"><div class="icon">▦</div><h3 data-ar="تنظيم المحتوى" data-en="Organized content">تنظيم المحتوى</h3><p data-ar="تصفح الفيديوهات والألبومات والأقسام بطريقة مرتبة وسهلة." data-en="Browse videos, albums, and categories through a clear, organized layout.">تصفح الفيديوهات والألبومات والأقسام بطريقة مرتبة وسهلة.</p></article>
+        <article class="card"><div class="icon">⌕</div><h3 data-ar="بحث وتصفح" data-en="Search & browse">بحث وتصفح</h3><p data-ar="اعثر على المحتوى عبر البحث والتنقل بين الأقسام." data-en="Find content through search and category navigation.">اعثر على المحتوى عبر البحث والتنقل بين الأقسام.</p></article>
+      </div>
+    </div></section>
+
+    <!-- ExoClick Leaderboard: Zone 6083850 / 728x90 -->
+    <section class="leaderboard-ad-section" id="leaderboard-ad" aria-label="Advertisement">
+      <div class="leaderboard-ad-container">
+        <div class="leaderboard-ad-box">
+          <span class="leaderboard-ad-label" data-ar="إعلان" data-en="Advertisement">إعلان</span>
+          <ins class="eas6a97888e2" data-zoneid="6083850"></ins>
+          <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
+        </div>
+      </div>
+    </section>
+    <!-- End ExoClick Leaderboard -->
+
+    <section id="audience"><div class="wrap"><div class="sectionhead"><span class="kicker" data-ar="الجمهور المستهدف" data-en="WHO IT'S FOR">الجمهور المستهدف</span><h2 data-ar="للبالغين الذين يفضلون تجربة مشاهدة رقمية" data-en="For adults seeking a dedicated viewing experience">للبالغين الذين يفضلون تجربة مشاهدة رقمية</h2><p data-ar="VXTUBE مخصص حصرياً للأشخاص الذين تبلغ أعمارهم 18 عاماً أو أكثر. هذا التصنيف واضح في هوية التطبيق وفي طريقة تقديمه." data-en="VXTUBE is intended exclusively for people aged 18 and over. This age designation is explicit in the app's identity and presentation.">VXTUBE مخصص حصرياً للأشخاص الذين تبلغ أعمارهم 18 عاماً أو أكثر. هذا التصنيف واضح في هوية التطبيق وفي طريقة تقديمه.</p></div>
+      <div class="audience"><div class="audiencebox"><h3 data-ar="هوية VXTUBE" data-en="The VXTUBE identity">هوية VXTUBE</h3><p data-ar="اسم مباشر، تصميم داكن بلمسات زرقاء، وتجربة تضع اكتشاف الفيديو ومشاهدته في المقدمة. تم إعداد العلامة لتكون واضحة على الهاتف والكمبيوتر." data-en="A direct name, a dark visual system with blue accents, and an experience centered on video discovery and playback. The brand is designed to remain clear on mobile and desktop.">اسم مباشر، تصميم داكن بلمسات زرقاء، وتجربة تضع اكتشاف الفيديو ومشاهدته في المقدمة. تم إعداد العلامة لتكون واضحة على الهاتف والكمبيوتر.</p></div>
+        <div class="principles"><div class="principle"><b data-ar="18+ حصرياً" data-en="18+ exclusively">18+ حصرياً</b><span data-ar="ليس موجهاً للقاصرين." data-en="Not intended for minors.">ليس موجهاً للقاصرين.</span></div><div class="principle"><b data-ar="خصوصية المستخدم" data-en="User privacy">خصوصية المستخدم</b><span data-ar="ينبغي توضيح جمع البيانات واستخدامها في سياسة خصوصية مستقلة." data-en="Data collection and use should be explained in a separate privacy policy.">ينبغي توضيح جمع البيانات واستخدامها في سياسة خصوصية مستقلة.</span></div><div class="principle"><b data-ar="محتوى قانوني" data-en="Lawful content">محتوى قانوني</b><span data-ar="يجب أن يكون المحتوى منشوراً بحقوق وموافقات صحيحة." data-en="Content must be lawfully published with valid rights and consent.">يجب أن يكون المحتوى منشوراً بحقوق وموافقات صحيحة.</span></div><div class="principle"><b data-ar="احترام وموافقة" data-en="Respect & consent">احترام وموافقة</b><span data-ar="لا مكان لمحتوى الاستغلال أو النشر دون موافقة." data-en="No exploitative or non-consensually published material.">لا مكان لمحتوى الاستغلال أو النشر دون موافقة.</span></div></div>
+      </div>
+    </div></section>
+
+    <section class="downloads" id="downloads"><div class="wrap"><div class="sectionhead"><span class="kicker" data-ar="احصل على التطبيق" data-en="GET THE APP">احصل على التطبيق</span><h2 data-ar="اختر نسختك من VXTUBE" data-en="Choose your VXTUBE version">اختر نسختك من VXTUBE</h2><p data-ar="روابط التنزيل الرسمية المتاحة حالياً للنسخ التي وفرها مطور التطبيق." data-en="Current download links for the builds provided by the app developer.">روابط التنزيل الرسمية المتاحة حالياً للنسخ التي وفرها مطور التطبيق.</p></div>
+      <div class="downloadgrid">
+        <article class="download"><div class="platform-icon android" aria-hidden="true"><svg viewBox="0 0 48 48"><g fill="currentColor"><path d="M13.4 17.2c1.8-4.3 6-7.2 10.6-7.2s8.8 2.9 10.6 7.2H13.4z"/><rect x="10" y="18" width="28" height="17" rx="5"/><rect x="14" y="34" width="5" height="9" rx="2.5"/><rect x="29" y="34" width="5" height="9" rx="2.5"/><rect x="5" y="21" width="5" height="13" rx="2.5"/><rect x="38" y="21" width="5" height="13" rx="2.5"/><path d="M15 7.2 12.4 3.5M33 7.2l2.6-3.7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="19" cy="14" r="1" fill="#091321"/><circle cx="29" cy="14" r="1" fill="#091321"/></g></svg></div><span class="platform">ANDROID</span><h3>Android APK</h3><p data-ar="ملف تثبيت مباشر لأجهزة Android. قد تحتاج إلى السماح بالتثبيت من هذا المصدر في إعدادات جهازك." data-en="Direct installation package for Android devices. You may need to allow installation from this source in your device settings.">ملف تثبيت مباشر لأجهزة Android. قد تحتاج إلى السماح بالتثبيت من هذا المصدر في إعدادات جهازك.</p><a class="btn primary" id="download-android" href="#" aria-disabled="true" data-ar="رابط التنزيل غير مضبوط" data-en="Download link not set">رابط التنزيل غير مضبوط</a></article>
+        <article class="download"><div class="platform-icon apple" aria-hidden="true"><svg viewBox="0 0 48 48"><path fill="currentColor" d="M32.8 25.1c0-5.2 4.2-7.6 4.4-7.8-2.4-3.5-6.1-4-7.5-4.1-3.2-.3-6.2 1.9-7.8 1.9-1.6 0-4.1-1.9-6.8-1.8-3.5.1-6.7 2.1-8.5 5.3-3.6 6.2-.9 15.4 2.6 20.4 1.7 2.5 3.7 5.2 6.4 5.1 2.6-.1 3.6-1.7 6.7-1.7 3.1 0 4 1.7 6.8 1.6 2.8 0 4.6-2.5 6.3-5 2-2.9 2.8-5.7 2.9-5.8-.1 0-5.5-2.1-5.5-8.1zM27.8 9.8c1.4-1.7 2.3-4 2-6.3-2 .1-4.4 1.3-5.8 3-1.3 1.5-2.4 3.9-2.1 6.1 2.2.2 4.5-1.1 5.9-2.8z"/></svg></div><span class="platform">APPLE · iOS</span><h3>iPhone / iOS</h3><p data-ar="ملف IPA لأجهزة iPhone المتوافقة. قد يتطلب التثبيت توقيعاً أو طريقة تثبيت مدعومة." data-en="IPA package for compatible iPhone devices. Installation may require signing or a supported sideloading method.">ملف IPA لأجهزة iPhone المتوافقة. قد يتطلب التثبيت توقيعاً أو طريقة تثبيت مدعومة.</p><a class="btn primary" id="download-ios" href="#" aria-disabled="true" data-ar="رابط التنزيل غير مضبوط" data-en="Download link not set">رابط التنزيل غير مضبوط</a></article>
+        <article class="download"><div class="platform-icon windows" aria-hidden="true"><svg viewBox="0 0 48 48"><path fill="currentColor" d="M4 9.5 21 7v15H4V9.5zm20-2.8L44 4v18H24V6.7zM4 25h17v15L4 37.5V25zm20 0h20v18l-20-2.8V25z"/></svg></div><span class="platform">WINDOWS</span><h3>Windows</h3><p data-ar="حزمة VXTUBE لنظام Windows بصيغة RAR. فك ضغط الملف ثم اتبع تعليمات التشغيل المرفقة إن وجدت." data-en="VXTUBE package for Windows in RAR format. Extract the archive and follow any included setup instructions.">حزمة VXTUBE لنظام Windows بصيغة RAR. فك ضغط الملف ثم اتبع تعليمات التشغيل المرفقة إن وجدت.</p><a class="btn primary" id="download-windows" href="#" aria-disabled="true" data-ar="رابط التنزيل غير مضبوط" data-en="Download link not set">رابط التنزيل غير مضبوط</a></article>
+      </div>
+      <p class="warning" data-ar="تنبيه: روابط التنزيل الرسمية تُضبط في ملف links.js. نزّل التطبيق فقط إذا كنت تبلغ 18 عاماً أو أكثر وتثق بمصدر الملف. تحقق من الملف قبل تثبيته." data-en="Notice: Official download links are configured in links.js. Download only if you are 18 or older and trust the file source. Check files before installing.">تنبيه: روابط التنزيل الرسمية تُضبط في ملف links.js. نزّل التطبيق فقط إذا كنت تبلغ 18 عاماً أو أكثر وتثق بمصدر الملف. تحقق من الملف قبل تثبيته.</p>
+    </div></section>
+
+    <section id="policy"><div class="wrap"><div class="sectionhead"><span class="kicker" data-ar="المسؤولية" data-en="RESPONSIBILITY">المسؤولية</span><h2 data-ar="تصنيف عمري واضح ومبادئ محتوى مسؤولة" data-en="Clear age rating and responsible content principles">تصنيف عمري واضح ومبادئ محتوى مسؤولة</h2></div><div class="policy"><h3 data-ar="للبالغين فقط — 18+" data-en="Adults only — 18+">للبالغين فقط — 18+</h3><p data-ar="VXTUBE تطبيق عرض ومشاهدة فقط، وليس منصة لرفع أو نشر فيديوهات المستخدمين. لا يُوجَّه إلى الأطفال أو القاصرين، ويجب أن يقتصر المحتوى المتاح عبره على المحتوى القانوني المخصص للبالغين، مع حقوق استخدام وموافقات سليمة. يُحظر تماماً أي محتوى يتضمن قاصرين أو استغلالاً أو مشاركة دون موافقة. على مشغّل التطبيق توفير آلية واضحة للإبلاغ عن المحتوى المخالف والتعامل معه." data-en="VXTUBE is a viewing-only app, not a platform for user video uploads or publishing. It is not intended for children or minors, and content made available through it must be lawful adult content with valid consent and usage rights. Content involving minors, exploitation, or non-consensual sharing is strictly prohibited. The app operator should provide a clear way to report violating content and address such reports.">VXTUBE تطبيق عرض ومشاهدة فقط، وليس منصة لرفع أو نشر فيديوهات المستخدمين. لا يُوجَّه إلى الأطفال أو القاصرين، ويجب أن يقتصر المحتوى المتاح عبره على المحتوى القانوني المخصص للبالغين، مع حقوق استخدام وموافقات سليمة. يُحظر تماماً أي محتوى يتضمن قاصرين أو استغلالاً أو مشاركة دون موافقة. على مشغّل التطبيق توفير آلية واضحة للإبلاغ عن المحتوى المخالف والتعامل معه.</p></div></div></section>
+  </main>
+
+  <footer class="footer"><div class="wrap footrow"><div><strong>VXTUBE</strong> · <span data-ar="منصة فيديو للبالغين 18+" data-en="18+ adult video platform">منصة فيديو للبالغين 18+</span></div><div>© <span id="year"></span> VXTUBE. <span data-ar="جميع الحقوق محفوظة." data-en="All rights reserved.">جميع الحقوق محفوظة.</span></div><div data-ar="18+ فقط · غير مخصص للقاصرين" data-en="18+ only · Not for minors">18+ فقط · غير مخصص للقاصرين</div></div></footer>
+  <script>
+    const langBtn=document.getElementById('langBtn');
+    const languageStorageKey='vxtube-site-language';
+    let currentLang='ar';
+    function readSavedLanguage(){try{const saved=localStorage.getItem(languageStorageKey);return saved==='en'?'en':'ar';}catch(error){return 'ar';}}
+    function setLang(lang,{animate=true,persist=true}={}){
+      const nextLang=lang==='en'?'en':'ar';const changed=nextLang!==currentLang;
+      if(animate&&changed)document.body.classList.remove('lang-switching');
+      currentLang=nextLang;document.documentElement.lang=nextLang;document.documentElement.dir=nextLang==='ar'?'rtl':'ltr';
+      document.querySelectorAll('[data-ar][data-en]').forEach(el=>{el.innerHTML=el.dataset[nextLang];});
+      langBtn.textContent=nextLang==='ar'?'EN':'عربي';langBtn.setAttribute('aria-label',nextLang==='ar'?'Switch language to English':'تغيير اللغة إلى العربية');
+      document.title=nextLang==='ar'?'VXTUBE — مساحة مشاهدة للبالغين 18+':'VXTUBE — Adult video viewing experience 18+';
+      if(persist){try{localStorage.setItem(languageStorageKey,nextLang);}catch(error){/* Storage may be disabled by the browser. */}}
+      if(animate&&changed){void document.body.offsetWidth;document.body.classList.add('lang-switching');}
+    }
+    langBtn.addEventListener('click',()=>setLang(currentLang==='ar'?'en':'ar'));
+    setLang(readSavedLanguage(),{animate:false,persist:false});
+    document.getElementById('year').textContent=new Date().getFullYear();
+  </script>
+  <script src="/links.js?v=5"></script>
+</body>
+</html>
+
+VXTUBE_RESTORE_20261113
           git -C website config user.name "github-actions[bot]"
           git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C website add index.html
           if git -C website diff --cached --quiet; then
-            echo "Website is already restored."
+            echo "Website already matches the pre-ad version."
           else
-            git -C website commit -m "revert: restore website to previous layout"
-            git -C website pull --rebase origin main
+            git -C website commit -m "revert: restore website before latest ad changes"
             git -C website push origin HEAD:main
           fi

@@ -275,7 +275,7 @@ class SearchOverlayState extends State<SearchOverlay> {
     final sort = _sort;
     final pageIndex = reset ? 0 : _page;
     final cacheKey =
-        'search|${searchText.toLowerCase()}|${sort.name}|$pageIndex';
+        'search|${videoRepository.source.name}|${searchText.toLowerCase()}|${sort.name}|$pageIndex';
 
     setState(() {
       _loading = true;

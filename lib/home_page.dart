@@ -8,6 +8,8 @@ import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
 import 'analytics_service.dart';
+import 'app_settings.dart';
+import 'content_source.dart';
 import 'app_theme.dart';
 import 'download_store.dart';
 import 'error_text.dart';
@@ -103,6 +105,9 @@ class _HomePageState extends State<HomePage>
         ...videoRepository.categories,
       ];
 
+  String _homeCacheKey(String category, int page) =>
+      'home|${videoRepository.source.name}|$category|$page';
+
   @override
   void initState() {
     super.initState();
@@ -135,16 +140,17 @@ class _HomePageState extends State<HomePage>
     if (!mounted || _loading || _videos.isNotEmpty) return;
     if (_error?.offline != true) return;
     final category = _category;
+    final key = _homeCacheKey(category, 0);
     try {
       final result = await listingCache.fetch(
-        'home|$category|0',
+        key,
         () => videoRepository.getVideos(
           page: 0,
           pageSize: _pageSize,
           category: category == 'All' ? null : category,
         ),
       );
-      OfflineListingCache.write('home|$category|0', result);
+      OfflineListingCache.write(key, result);
       if (!mounted || category != _category || _videos.isNotEmpty) return;
       unawaited(_loadPage(reset: true));
     } catch (_) {
@@ -234,7 +240,7 @@ class _HomePageState extends State<HomePage>
     if (_loading && !reset) return;
     final requestGeneration = reset ? ++_generation : _generation;
     final requestedPage = reset ? 0 : _page;
-    final key = 'home|$_category|$requestedPage';
+    final key = _homeCacheKey(_category, requestedPage);
 
     final cached = listingCache.peek(key);
     if (cached != null) {
@@ -348,8 +354,9 @@ class _HomePageState extends State<HomePage>
     Haptics.play(Haptic.light);
     final generation = ++_generation;
     try {
+      final key = _homeCacheKey(_category, 0);
       final result = await listingCache.fetch(
-        'home|$_category|0',
+        key,
         () => videoRepository.getVideos(
           page: 0,
           pageSize: _pageSize,
@@ -358,7 +365,7 @@ class _HomePageState extends State<HomePage>
         force: true,
       );
       if (!mounted || generation != _generation) return;
-      OfflineListingCache.write('home|$_category|0', result);
+      OfflineListingCache.write(key, result);
       final seen = <String>{};
       final fresh = <Video>[
         for (final video in result)
@@ -652,6 +659,27 @@ class _HomePageState extends State<HomePage>
     _loadPage(reset: true);
   }
 
+  void _changeContentSource(ContentSource source) {
+    if (source == videoRepository.source) return;
+    Haptics.play(Haptic.selection);
+    PreviewManager.instance.stopNow(fade: false);
+    videoRepository.setSource(source);
+    AppSettings.instance.setContentSource(source);
+    clearRequestCaches();
+    setState(() {
+      _category = 'All';
+      _videos.clear();
+      _recomputeDerived();
+      _page = 0;
+      _emptyPages = 0;
+      _loading = false;
+      _hasMore = true;
+      _error = null;
+    });
+    _scrollToTop();
+    unawaited(_loadPage(reset: true));
+  }
+
   @override
   Widget build(BuildContext context) {
     final margin = context.hMargin;
@@ -903,6 +931,32 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           SliverToBoxAdapter(child: ContinueRow(onPlay: _resume)),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(margin, Gaps.xs, margin, 0),
+              child: Text(
+                'Content type',
+                style: AppText.caption.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: Gaps.xs),
+              child: CategoryBar(
+                categories: ContentSource.values
+                    .map((source) => source.label)
+                    .toList(growable: false),
+                selected: videoRepository.source.label,
+                onSelected: (label) {
+                  final source = ContentSource.values.firstWhere(
+                    (source) => source.label == label,
+                  );
+                  _changeContentSource(source);
+                },
+              ),
+            ),
+          ),
           if (showCategories)
             SliverToBoxAdapter(
               child: Padding(

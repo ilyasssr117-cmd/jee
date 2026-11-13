@@ -2,12 +2,17 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'content_source.dart';
 import 'models.dart';
 import 'request_cache.dart';
 import 'scraper.dart';
 import 'stream_resolver.dart';
 
 abstract class VideoCatalogRepository {
+  ContentSource get source;
+
+  void setSource(ContentSource source);
+
   List<String> get categories;
 
   Future<List<Video>> getVideos({
@@ -57,11 +62,6 @@ abstract class VideoCatalogRepository {
   });
 }
 
-const String sourceBaseUrl = String.fromEnvironment(
-  'VIDEO_SOURCE_BASE_URL',
-  defaultValue: 'https://x-tg.tube',
-);
-
 List<String> _parseCommaSeparated(String value) => value
     .split(',')
     .map((item) => item.trim())
@@ -69,8 +69,8 @@ List<String> _parseCommaSeparated(String value) => value
     .toSet()
     .toList(growable: false);
 
-final ScraperConfig _scraperConfig = ScraperConfig(
-  baseUrl: sourceBaseUrl,
+ScraperConfig _scraperConfigFor(String baseUrl) => ScraperConfig(
+  baseUrl: baseUrl,
   homePath: const String.fromEnvironment('VIDEO_HOME_PATH', defaultValue: '/'),
   pagePathTemplate: const String.fromEnvironment(
     'VIDEO_PAGE_PATH_TEMPLATE',
@@ -159,13 +159,47 @@ final ScraperConfig _scraperConfig = ScraperConfig(
 );
 
 final VideoCatalogRepository videoRepository = HtmlScraperVideoRepository(
-  Scraper(_scraperConfig),
+  source: ContentSource.fetish,
+  scrapers: <ContentSource, Scraper>{
+    for (final source in ContentSource.values)
+      source: Scraper(_scraperConfigFor(source.baseUrl)),
+  },
 );
 
 class HtmlScraperVideoRepository implements VideoCatalogRepository {
-  HtmlScraperVideoRepository(this.scraper);
+  HtmlScraperVideoRepository({
+    required Map<ContentSource, Scraper> scrapers,
+    required ContentSource source,
+  }) : _scrapers = Map<ContentSource, Scraper>.unmodifiable(scrapers),
+       _source = source;
 
-  final Scraper scraper;
+  final Map<ContentSource, Scraper> _scrapers;
+  ContentSource _source;
+
+  Scraper get scraper => _scrapers[_source]!;
+
+  @override
+  ContentSource get source => _source;
+
+  @override
+  void setSource(ContentSource source) {
+    if (_source == source) return;
+    _source = source;
+    clearPlaybackCaches();
+  }
+
+  Scraper _scraperForUrl(String? rawUrl) {
+    final uri = Uri.tryParse(rawUrl?.trim() ?? '');
+    if (uri != null && uri.host.isNotEmpty) {
+      for (final candidate in _scrapers.values) {
+        if (_sameConfiguredSite(uri.host, candidate.config.baseUri.host)) {
+          return candidate;
+        }
+      }
+    }
+    return scraper;
+  }
+
   final Map<String, _RepositoryCookie> _cookieJar =
       <String, _RepositoryCookie>{};
 
@@ -192,8 +226,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
   @override
   List<String> get categories => scraper.config.categories;
 
-  void _ensureConfigured() {
-    final uri = Uri.tryParse(scraper.config.baseUrl.trim());
+  void _ensureConfigured([Scraper? target]) {
+    final configuredScraper = target ?? scraper;
+    final uri = Uri.tryParse(configuredScraper.config.baseUrl.trim());
     final host = uri?.host.toLowerCase() ?? '';
     final isLoopback =
         host == 'localhost' || host == '127.0.0.1' || host == '::1';
@@ -203,14 +238,13 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
         uri.host.isNotEmpty &&
         uri.userInfo.isEmpty &&
         uri.fragment.isEmpty;
-    final isPlaceholder = scraper.config.baseUrl.toLowerCase().contains(
+    final isPlaceholder = configuredScraper.config.baseUrl.toLowerCase().contains(
       'your-authorized-source',
     );
 
     if (!isHttp || isPlaceholder) {
       throw const ScraperException(
-        'Configure sourceBaseUrl in lib/video_repository.dart or run Flutter '
-        'with --dart-define=VIDEO_SOURCE_BASE_URL=https://your-authorized-source.example.',
+        'The selected catalog source has an invalid URL configuration.',
       );
     }
   }
@@ -245,8 +279,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     int limit = 6,
     bool fresh = false,
   }) async {
-    _ensureConfigured();
-    return scraper.related(video, limit: limit, fresh: fresh);
+    final target = _scraperForUrl(video.pageUrl);
+    _ensureConfigured(target);
+    return target.related(video, limit: limit, fresh: fresh);
   }
 
   @override
@@ -257,8 +292,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
 
   @override
   Future<ModelProfile> getModelProfile(ModelRef model) async {
-    _ensureConfigured();
-    return scraper.modelProfile(model);
+    final target = _scraperForUrl(model.url);
+    _ensureConfigured(target);
+    return target.modelProfile(model);
   }
 
   @override
@@ -266,20 +302,23 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     Video video, {
     bool fresh = false,
   }) async {
-    _ensureConfigured();
-    return scraper.videoModels(video, fresh: fresh);
+    final target = _scraperForUrl(video.pageUrl);
+    _ensureConfigured(target);
+    return target.videoModels(video, fresh: fresh);
   }
 
   @override
   Future<ModelPageResult> getModelPage(ModelRef model, {int page = 1}) async {
-    _ensureConfigured();
-    return scraper.modelPage(model, page: page);
+    final target = _scraperForUrl(model.url);
+    _ensureConfigured(target);
+    return target.modelPage(model, page: page);
   }
 
   @override
   Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1}) async {
-    _ensureConfigured();
-    return scraper.modelAlbums(model, page: page);
+    final target = _scraperForUrl(model.url);
+    _ensureConfigured(target);
+    return target.modelAlbums(model, page: page);
   }
 
   @override
@@ -293,8 +332,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     AlbumRef album, {
     int chunk = 0,
   }) async {
-    _ensureConfigured();
-    return scraper.albumPhotos(album, chunk: chunk);
+    final target = _scraperForUrl(album.url);
+    _ensureConfigured(target);
+    return target.albumPhotos(album, chunk: chunk);
   }
 
   @override
@@ -302,18 +342,21 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     AlbumRef album, {
     int chunk = 0,
   }) async {
-    _ensureConfigured();
-    return scraper.albumPhotosPage(album, chunk: chunk);
+    final target = _scraperForUrl(album.url);
+    _ensureConfigured(target);
+    return target.albumPhotosPage(album, chunk: chunk);
   }
 
   @override
   Future<Video> resolveForPlayback(Video video, {bool refresh = false}) async {
-    _ensureConfigured();
+    final target = _scraperForUrl(video.pageUrl);
+    _ensureConfigured(target);
     final given = video.streamUrl.trim();
     if (given.isNotEmpty && given != video.previewUrl.trim()) return video;
+    final cacheKey = '${target.config.baseUri.host.toLowerCase()}|${video.id}';
     final resolved = await _playable.fetch(
-      video.id,
-      () => scraper.resolveForPlayback(
+      cacheKey,
+      () => target.resolveForPlayback(
         video.copyWith(streamUrl: ''),
         fresh: refresh,
       ),
@@ -336,8 +379,9 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     required String userAgent,
     bool refresh = false,
   }) async {
-    _ensureConfigured();
-    final configuredUri = Uri.parse(scraper.config.baseUrl.trim());
+    final target = _scraperForUrl(pageUrl ?? streamUri.toString());
+    _ensureConfigured(target);
+    final configuredUri = Uri.parse(target.config.baseUrl.trim());
     final configuredRoot = configuredUri.resolve('/');
     final parsedPage = Uri.tryParse(pageUrl?.trim() ?? '');
     final validPage =
@@ -346,15 +390,20 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
         parsedPage.host.isNotEmpty &&
         _sameConfiguredSite(parsedPage.host, configuredUri.host);
 
-    await _visitForCookies(configuredRoot, userAgent, refresh);
+    await _visitForCookies(configuredRoot, userAgent, refresh, target);
     if (validPage && parsedPage.toString() != configuredRoot.toString()) {
-      await _visitForCookies(parsedPage, userAgent, refresh);
+      await _visitForCookies(parsedPage, userAgent, refresh, target);
     }
 
     return _cookieHeaderForUri(streamUri);
   }
 
-  Future<void> _visitForCookies(Uri uri, String userAgent, bool refresh) {
+  Future<void> _visitForCookies(
+    Uri uri,
+    String userAgent,
+    bool refresh,
+    Scraper target,
+  ) {
     final key = uri.toString();
     if (!refresh) {
       final last = _cookieVisits[key];
@@ -365,7 +414,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
       if (running != null) return running;
     }
     late final Future<void> task;
-    task = _fetchCookieResponse(uri, userAgent)
+    task = _fetchCookieResponse(uri, userAgent, target)
         .then((ok) {
           if (ok) {
             _cookieVisits.remove(key);
@@ -382,7 +431,11 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     return task;
   }
 
-  Future<bool> _fetchCookieResponse(Uri initialUri, String userAgent) async {
+  Future<bool> _fetchCookieResponse(
+    Uri initialUri,
+    String userAgent,
+    Scraper target,
+  ) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
     var currentUri = initialUri;
@@ -406,7 +459,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
         );
 
         for (final cookie in response.cookies) {
-          _storeCookie(cookie, currentUri);
+          _storeCookie(cookie, currentUri, target);
         }
 
         final location = response.headers.value(HttpHeaders.locationHeader);
@@ -416,8 +469,7 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
             redirectCount < 5) {
           await response.drain<void>().timeout(const Duration(seconds: 10));
           final nextUri = currentUri.resolve(location);
-          final configuredHost =
-              Uri.tryParse(scraper.config.baseUrl)?.host ?? '';
+          final configuredHost = target.config.baseUri.host;
           if ((nextUri.scheme != 'http' && nextUri.scheme != 'https') ||
               (currentUri.scheme == 'https' && nextUri.scheme != 'https') ||
               nextUri.host.isEmpty ||
@@ -442,15 +494,14 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     }
   }
 
-  void _storeCookie(Cookie cookie, Uri responseUri) {
+  void _storeCookie(Cookie cookie, Uri responseUri, Scraper target) {
     final rawDomain = cookie.domain?.trim().toLowerCase();
     final hostOnly = rawDomain == null || rawDomain.isEmpty;
     final domain = rawDomain == null || rawDomain.isEmpty
         ? responseUri.host.toLowerCase()
         : rawDomain.replaceFirst(RegExp(r'^\.'), '');
     final responseHost = responseUri.host.toLowerCase();
-    final configuredHost =
-        Uri.tryParse(scraper.config.baseUrl)?.host.toLowerCase() ?? '';
+    final configuredHost = target.config.baseUri.host.toLowerCase();
 
     // Never accept cookies set by an unrelated redirect host or a public-suffix
     // parent such as "com" / "co.uk". This keeps source cookies scoped to the

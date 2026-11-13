@@ -29,6 +29,7 @@ import 'preview_manager.dart';
 import 'search_history.dart';
 import 'services/remote_access_gate.dart';
 import 'services/remote_config_service.dart';
+import 'video_repository.dart';
 
 void main() {
   runZonedGuarded<Future<void>>(_bootstrap, (error, stack) {
@@ -105,6 +106,7 @@ Future<void> _bootstrap() async {
     OfflineAlbumCache.init();
     unawaited(purgeStaleTempFiles());
     AppSettings.instance.load();
+    videoRepository.setSource(AppSettings.instance.contentSource);
     FavoritesStore.instance.load();
     HistoryStore.instance.load();
     SearchHistory.instance.load();

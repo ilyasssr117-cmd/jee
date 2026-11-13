@@ -1,11 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'age_gate.dart';
-import 'vast.dart';
+import 'package:vxtube_final/ads/age_gate.dart';
+import 'package:vxtube_final/ads/vast.dart';
 
 /// Ad networks, tried in order. The first one that returns a playable ad wins;
 /// if none does, the main video simply plays. Put the best-paying network first.

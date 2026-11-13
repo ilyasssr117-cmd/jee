@@ -7,25 +7,25 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
-import 'app_settings.dart';
-import 'analytics_service.dart';
-import 'app_theme.dart';
-import 'ads/ad_manager.dart';
-import 'ads/pre_roll_ad.dart';
-import 'ads/vast.dart';
-import 'download_store.dart';
-import 'history_store.dart';
-import 'mini_player.dart';
-import 'models.dart';
-import 'native_bridge.dart';
-import 'platform_ui.dart';
-import 'playback_progress.dart';
-import 'playback_source.dart';
-import 'touch.dart';
-import 'video_repository.dart';
-import 'widgets/app_button.dart';
-import 'widgets/dialogs.dart';
-import 'widgets/state_views.dart';
+import 'package:vxtube_final/app_settings.dart';
+import 'package:vxtube_final/analytics_service.dart';
+import 'package:vxtube_final/app_theme.dart';
+import 'package:vxtube_final/ads/ad_manager.dart';
+import 'package:vxtube_final/ads/pre_roll_ad.dart';
+import 'package:vxtube_final/ads/vast.dart';
+import 'package:vxtube_final/download_store.dart';
+import 'package:vxtube_final/history_store.dart';
+import 'package:vxtube_final/mini_player.dart';
+import 'package:vxtube_final/models.dart';
+import 'package:vxtube_final/native_bridge.dart';
+import 'package:vxtube_final/platform_ui.dart';
+import 'package:vxtube_final/playback_progress.dart';
+import 'package:vxtube_final/playback_source.dart';
+import 'package:vxtube_final/touch.dart';
+import 'package:vxtube_final/video_repository.dart';
+import 'package:vxtube_final/widgets/app_button.dart';
+import 'package:vxtube_final/widgets/dialogs.dart';
+import 'package:vxtube_final/widgets/state_views.dart';
 
 /// Returns a safe restore position for a refreshed video stream.
 /// A small end-of-stream buffer avoids seeking exactly to the final frame.

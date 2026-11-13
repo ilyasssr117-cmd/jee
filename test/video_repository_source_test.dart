@@ -4,6 +4,7 @@ import 'package:http/testing.dart';
 import 'package:vxtube_final/content_source.dart';
 import 'package:vxtube_final/scraper.dart';
 import 'package:vxtube_final/video_repository.dart';
+import 'package:vxtube_final/models.dart';
 
 void main() {
   test('switching the catalog source changes only the scraper base URL', () async {

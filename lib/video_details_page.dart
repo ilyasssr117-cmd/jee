@@ -84,7 +84,10 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
   }
 
   String get _sourceScopedVideoKey {
-    final host = Uri.tryParse(widget.video.pageUrl)?.host.toLowerCase();
+    final pageUrl = widget.video.pageUrl;
+    final host = pageUrl == null
+        ? null
+        : Uri.tryParse(pageUrl)?.host.toLowerCase();
     final source = host == null || host.isEmpty
         ? videoRepository.source.name
         : host;

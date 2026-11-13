@@ -25,7 +25,7 @@ jobs:
           token: ${{ secrets.WEBSITE_REPO_TOKEN }}
           path: website
 
-      - name: Restore previous website index
+      - name: Restore previous website index (user requested rollback)
         shell: bash
         run: |
           set -euo pipefail

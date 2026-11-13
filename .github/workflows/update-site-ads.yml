@@ -1,0 +1,100 @@
+name: Update VXTUBE website ads
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vxtube-website-ads
+  cancel-in-progress: false
+
+jobs:
+  update-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout automation repository
+        uses: actions/checkout@v4
+
+      - name: Checkout website repository
+        uses: actions/checkout@v4
+        with:
+          repository: ilyasssr117-cmd/Web
+          ref: main
+          token: ${{ secrets.WEBSITE_REPO_TOKEN }}
+          path: website
+
+      - name: Update responsive ExoClick ad placements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("website/index.html")
+          html = path.read_text(encoding="utf-8")
+
+          old_css = """    .ad-section{padding:28px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}.ad-container{width:min(var(--max),calc(100% - 28px));margin:auto;display:flex;justify-content:center;align-items:center}.ad-box{width:300px;max-width:100%;min-height:250px;text-align:center;overflow:hidden}.ad-label{display:block;margin-bottom:7px;color:var(--muted);font-size:11px}.ad-box ins{display:block;max-width:100%}
+              .leaderboard-ad-section{padding:24px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.012);overflow:hidden}.leaderboard-ad-container{width:min(728px,calc(100% - 28px));min-height:90px;margin:0 auto;display:flex;justify-content:center;align-items:center;overflow:hidden}.leaderboard-ad-box{width:728px;max-width:100%;min-height:90px;text-align:center;overflow:hidden}.leaderboard-ad-box ins{display:block;max-width:100%;margin:0 auto}"""
+
+          new_css = """    .ad-section,.leaderboard-ad-section,.extra-ad-section{padding:28px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015);overflow:visible}
+              .ad-container,.leaderboard-ad-container,.extra-ad-container{width:min(var(--max),calc(100% - 28px));margin:0 auto;display:flex;justify-content:center;align-items:flex-start;overflow:visible}
+              .ad-box{width:min(300px,100%);min-height:0;text-align:center;overflow:visible}
+              .leaderboard-ad-box,.extra-ad-box{width:100%;max-width:728px;min-height:0;text-align:center;overflow:visible}
+              .ad-label,.leaderboard-ad-label,.extra-ad-label{display:block;margin-bottom:7px;color:var(--muted);font-size:11px}
+              .ad-box ins,.leaderboard-ad-box ins,.extra-ad-box ins{display:block;width:100%;max-width:100%;margin:0 auto;overflow:visible}
+              .ad-box ins iframe,.leaderboard-ad-box ins iframe,.extra-ad-box ins iframe{display:block;max-width:100% !important;margin:0 auto;border:0}
+              .leaderboard-ad-container{width:min(728px,calc(100% - 28px))}
+              .leaderboard-ad-section{padding:24px 0;background:rgba(255,255,255,.012)}
+              .extra-ad-section{padding:26px 0;background:rgba(255,255,255,.01)}
+              @media(max-width:600px){
+                .leaderboard-ad-container,.extra-ad-container{width:calc(100% - 20px)}
+                .leaderboard-ad-box ins iframe,.extra-ad-box ins iframe{max-width:100% !important}
+              }"""
+
+          if old_css in html:
+              html = html.replace(old_css, new_css, 1)
+          elif ".extra-ad-section" not in html or ".leaderboard-ad-box ins iframe" not in html:
+              raise SystemExit("The expected ad CSS block was not found. No website changes were written.")
+
+          marker = '    <!-- Additional ExoClick banner: Zone 6088898 -->'
+          if marker not in html:
+              anchor = "    <!-- End ExoClick Leaderboard -->\\n\\n    <section id=\\"audience\\">"
+              insertion = """    <!-- End ExoClick Leaderboard -->
+
+              <!-- Additional ExoClick banner: Zone 6088898 -->
+              <section class="extra-ad-section" id="extra-banner-ad" aria-label="Advertisement">
+                <div class="extra-ad-container">
+                  <div class="extra-ad-box">
+                    <span class="extra-ad-label" data-ar="إعلان" data-en="Advertisement">إعلان</span>
+                    <ins class="eas6a97888e17" data-zoneid="6088898"></ins>
+                    <script>(AdProvider = window.AdProvider || []).push({"serve": {}});</script>
+                  </div>
+                </div>
+              </section>
+              <!-- End additional ExoClick banner -->
+
+              <section id="audience">"""
+              if anchor not in html:
+                  raise SystemExit("The audience section insertion point was not found. No website changes were written.")
+              html = html.replace(anchor, insertion, 1)
+
+          path.write_text(html, encoding="utf-8")
+          print("Updated ExoClick zone 6088898 and responsive banner layout.")
+          PY
+
+      - name: Commit and push website changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C website config user.name "github-actions[bot]"
+          git -C website config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C website pull --rebase origin main
+          git -C website add index.html
+          if ! git -C website diff --cached --quiet; then
+            git -C website commit -m "feat(ads): add ExoClick zone 6088898 and fix banner clipping"
+            git -C website push origin HEAD:main
+          else
+            echo "Website already contains the requested ad changes."
+          fi

@@ -17,7 +17,7 @@ enum ContentSource {
   String get baseUrl => switch (this) {
     ContentSource.fetish => 'https://x-fetish.tube',
     ContentSource.straight => 'https://x-video.tube',
-    ContentSource.trans => 'https://x-tg.tube',
+    ContentSource.trans => 'https://x-x-x.tube',
   };
 
   static ContentSource fromStoredValue(String? value) =>

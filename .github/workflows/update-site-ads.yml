@@ -35,8 +35,10 @@ jobs:
           path = Path("website/index.html")
           html = path.read_text(encoding="utf-8")
 
-          old_css = """    .ad-section{padding:28px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}.ad-container{width:min(var(--max),calc(100% - 28px));margin:auto;display:flex;justify-content:center;align-items:center}.ad-box{width:300px;max-width:100%;min-height:250px;text-align:center;overflow:hidden}.ad-label{display:block;margin-bottom:7px;color:var(--muted);font-size:11px}.ad-box ins{display:block;max-width:100%}
-              .leaderboard-ad-section{padding:24px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.012);overflow:hidden}.leaderboard-ad-container{width:min(728px,calc(100% - 28px));min-height:90px;margin:0 auto;display:flex;justify-content:center;align-items:center;overflow:hidden}.leaderboard-ad-box{width:728px;max-width:100%;min-height:90px;text-align:center;overflow:hidden}.leaderboard-ad-box ins{display:block;max-width:100%;margin:0 auto}"""
+          css_start = html.find("    .ad-section{")
+          css_end = html.find('    [dir="ltr"]', css_start)
+          if css_start < 0 or css_end < 0:
+              raise SystemExit("The current ad CSS block was not found. No website changes were written.")
 
           new_css = """    .ad-section,.leaderboard-ad-section,.extra-ad-section{padding:28px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:rgba(255,255,255,.015);overflow:visible}
               .ad-container,.leaderboard-ad-container,.extra-ad-container{width:min(var(--max),calc(100% - 28px));margin:0 auto;display:flex;justify-content:center;align-items:flex-start;overflow:visible}
@@ -52,15 +54,13 @@ jobs:
                 .leaderboard-ad-container,.extra-ad-container{width:calc(100% - 20px)}
                 .leaderboard-ad-box ins iframe,.extra-ad-box ins iframe{max-width:100% !important}
               }"""
-
-          if old_css in html:
-              html = html.replace(old_css, new_css, 1)
-          elif ".extra-ad-section" not in html or ".leaderboard-ad-box ins iframe" not in html:
-              raise SystemExit("The expected ad CSS block was not found. No website changes were written.")
+          html = html[:css_start] + new_css + html[css_end:]
 
           marker = '    <!-- Additional ExoClick banner: Zone 6088898 -->'
           if marker not in html:
-              anchor = "    <!-- End ExoClick Leaderboard -->\\n\\n    <section id=\\"audience\\">"
+              anchor = """    <!-- End ExoClick Leaderboard -->
+
+              <section id="audience">"""
               insertion = """    <!-- End ExoClick Leaderboard -->
 
               <!-- Additional ExoClick banner: Zone 6088898 -->

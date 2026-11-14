@@ -108,10 +108,37 @@ class ModelProfile {
 }
 
 class ModelPageResult {
-  const ModelPageResult({required this.videos, this.profile});
+  const ModelPageResult({
+    required this.videos,
+    this.profile,
+    this.nextPage,
+    this.hasMore,
+  });
 
   final List<Video> videos;
   final ModelProfile? profile;
+
+  /// Next page number reported by the source pagination links.
+  /// Null means the source did not expose a next-page link.
+  final int? nextPage;
+
+  /// Whether the source explicitly reports another page.
+  /// Null means pagination could not be determined from the response.
+  final bool? hasMore;
+}
+
+/// Lightweight totals for a model's catalog. It deliberately stores counts
+/// only; media cards and photo objects are not retained by this summary.
+class ModelCatalogSummary {
+  const ModelCatalogSummary({
+    required this.videoCount,
+    required this.albumCount,
+    this.photoCount,
+  });
+
+  final int videoCount;
+  final int albumCount;
+  final int? photoCount;
 }
 
 class AlbumRef {

@@ -97,7 +97,7 @@ void main() {
       scraper.close();
     });
 
-    test('model video pagination follows page links and detects the end', () async {
+    test('model video pagination probes sequentially when the pager omits a forward link', () async {
       final requestedPaths = <String>[];
       final scraper = Scraper(
         config,
@@ -133,12 +133,96 @@ void main() {
 
       final second = await scraper.modelPage(model, page: first.nextPage!);
       expect(second.videos, hasLength(1));
-      expect(second.nextPage, isNull);
-      expect(second.hasMore, isFalse);
+      // X-X-X can omit a forward link on a non-empty intermediate page;
+      // the repository probes page 3 and treats its empty/404 result as end.
+      expect(second.nextPage, 3);
+      expect(second.hasMore, isTrue);
       expect(requestedPaths, <String>[
         '/models/ekomomai/videos/0/',
         '/models/ekomomai/videos/2/',
       ]);
+      scraper.close();
+    });
+
+    test('catalog total probes every non-empty model page even without a next link', () async {
+      final requestedPaths = <String>[];
+
+      String pageHtml(int firstId, {String? pagination}) {
+        final cards = List<String>.generate(30, (index) {
+          final id = firstId + index;
+          return '''
+            <div class="item thumb">
+              <a href="/videos/$id/video-$id/" title="Video $id">
+                <div class="title">Video $id</div>
+                <div class="duration">10:00</div>
+              </a>
+            </div>
+          ''';
+        }).join();
+        return '''
+          <html><body>
+            <div class="thumb-holder">$cards</div>
+            ${pagination ?? ''}
+          </body></html>
+        ''';
+      }
+
+      final scraper = Scraper(
+        config,
+        client: MockClient((request) async {
+          final path = request.url.path;
+          requestedPaths.add(path);
+          switch (path) {
+            case '/models/mewqueen/videos/0/':
+              return http.Response(
+                pageHtml(
+                  1,
+                  pagination: '<div class="pagination"><a href="/models/mewqueen/videos/2/">2</a></div>',
+                ),
+                200,
+              );
+            case '/models/mewqueen/videos/2/':
+              // The site may show only the previous page and current page,
+              // omitting a forward link even though page 3 still exists.
+              return http.Response(
+                pageHtml(
+                  31,
+                  pagination: '<div class="pagination"><a href="/models/mewqueen/videos/0/">1</a><span>2</span></div>',
+                ),
+                200,
+              );
+            case '/models/mewqueen/videos/3/':
+              return http.Response(pageHtml(61), 200);
+            case '/models/mewqueen/videos/4/':
+              return http.Response('not found', 404);
+            default:
+              return http.Response('not found', 404);
+          }
+        }),
+      );
+
+      const model = ModelRef(
+        name: 'Mewqueen',
+        url: 'https://x-x-x.tube/models/mewqueen/',
+      );
+      final first = await scraper.modelPage(model);
+      expect(first.videos, hasLength(30));
+      expect(first.hasMore, isTrue);
+      expect(first.nextPage, 2);
+
+      final summary = await scraper.modelCatalogSummary(
+        model,
+        firstVideoPage: first,
+        firstAlbumPage: const <AlbumRef>[],
+      );
+
+      expect(summary.videoCount, 90);
+      expect(requestedPaths, containsAll(<String>[
+        '/models/mewqueen/videos/0/',
+        '/models/mewqueen/videos/2/',
+        '/models/mewqueen/videos/3/',
+        '/models/mewqueen/videos/4/',
+      ]));
       scraper.close();
     });
 
@@ -206,7 +290,10 @@ void main() {
 
       expect(summary.videoCount, 2);
       expect(summary.albumCount, 2);
-      expect(summary.photoCount, 5);
+      // The summary counts album cards without opening each album's photo
+      // page. A site-wide photo sum is therefore unknown unless all card
+      // metadata exposes it.
+      expect(summary.photoCount, isNull);
       scraper.close();
     });
 

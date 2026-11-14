@@ -287,7 +287,10 @@ class _ModelPageState extends State<ModelPage> {
       final finished =
           result.videos.isEmpty ||
           result.hasMore == false ||
-          (page > 1 && added == 0 && result.hasMore != true) ||
+          // Stop if a server repeats a page, even if it incorrectly marks
+          // that response as having more results. Otherwise the last page can
+          // leave the footer in a permanent loading/retry state.
+          (page > 1 && added == 0) ||
           page >= _maxPages;
       setState(() {
         _profile ??= result.profile;
@@ -371,17 +374,27 @@ class _ModelPageState extends State<ModelPage> {
     final videoCount = _totalVideoCount;
     final photoCount = _totalPhotoCount;
     final albumCount = _totalAlbumCount;
+    // For X-X-X, the number currently rendered in the grid is only the
+    // loaded batch (usually 30), not the catalogue total. Never expose that
+    // transient batch size as the model's total; show a counting state until
+    // the independent metadata-only summary has completed.
     final videoLabel = videoCount != null
         ? '${_formatCount(videoCount)} videos'
-        : '${_formatCount(_videos.length)} videos${_summaryStarted && !_summaryFinished ? ' · counting…' : ''}';
-    final photoLabel = photoCount != null
-        ? '${_formatCount(photoCount)} photos'
-        : albumCount != null
-            ? '${_formatCount(albumCount)} albums'
-            : _summaryStarted && !_summaryFinished
-                ? 'photos counting…'
-                : '${_formatCount(_albums.length)} albums';
-    return '$videoLabel · $photoLabel';
+        : _summaryFinished
+            ? 'video total unavailable'
+            : 'counting total videos…';
+    // The Photos tab renders album cards. Its stable total is the number of
+    // albums, not the number of cards loaded so far and not a sum of photos
+    // inside albums. Optional photoCount is shown only as extra metadata.
+    final albumLabel = albumCount != null
+        ? '${_formatCount(albumCount)} albums'
+        : _summaryFinished
+            ? 'album total unavailable'
+            : 'counting total albums…';
+    final photoDetail = photoCount == null
+        ? ''
+        : ' · ${_formatCount(photoCount)} photos';
+    return '$videoLabel · $albumLabel$photoDetail';
   }
 
   String _formatCount(int value) => value.toString().replaceAllMapped(
@@ -390,7 +403,15 @@ class _ModelPageState extends State<ModelPage> {
   );
 
   bool get _isXxxModel {
-    final host = Uri.tryParse(widget.model.url)?.host.toLowerCase() ?? '';
+    final raw = widget.model.url.trim();
+    final normalized = raw.startsWith('//')
+        ? 'https:$raw'
+        : raw.contains('://')
+            ? raw
+            : 'https://$raw';
+    final host = (Uri.tryParse(normalized)?.host ?? '')
+        .toLowerCase()
+        .replaceFirst(RegExp(r'^www\.'), '');
     return host == 'x-x-x.tube' || host.endsWith('.x-x-x.tube');
   }
 
@@ -784,7 +805,6 @@ class _ModelPageState extends State<ModelPage> {
               mode: _mode,
               onChanged: _setMode,
               videoCount: _totalVideoCount,
-              photoCount: _totalPhotoCount,
               albumCount: _totalAlbumCount,
             ),
           ],
@@ -799,14 +819,12 @@ class _ModeSwitch extends StatelessWidget {
     required this.mode,
     required this.onChanged,
     this.videoCount,
-    this.photoCount,
     this.albumCount,
   });
 
   final _Mode mode;
   final ValueChanged<_Mode> onChanged;
   final int? videoCount;
-  final int? photoCount;
   final int? albumCount;
 
   @override
@@ -840,11 +858,7 @@ class _ModeSwitch extends StatelessWidget {
                 Text(
                   value == _Mode.videos
                       ? (videoCount == null ? label : '$label ($videoCount)')
-                      : (photoCount != null
-                          ? '$label ($photoCount)'
-                          : albumCount != null
-                              ? '$label ($albumCount)'
-                              : label),
+                      : (albumCount == null ? label : '$label ($albumCount)'),
                   style: AppText.label.copyWith(
                     fontWeight: FontWeight.w700,
                     color: selected ? Colors.white : AppColors.textSecondary,

@@ -653,14 +653,21 @@ class Scraper {
       section: 'videos',
       currentPage: page,
     );
-    final hasMore = pagination.hasMore ??
-        (config.searchSpacesAsUnderscores && videos.length < 40
-            ? false
-            : null);
+    // X-X-X exposes only a sliding pagination window. On page 2 or later it
+    // can omit the forward link even when another page exists, so treating
+    // `pagination.hasMore == false` as authoritative truncates the model at
+    // 30/60 videos. For this source, every non-empty page means "probe the
+    // next page"; the sequence ends only on an empty response or 404/410.
+    // This same behavior is used by the metadata-only catalogue count pass.
+    final isXxxSource = config.searchSpacesAsUnderscores;
+    final hasMore = isXxxSource ? videos.isNotEmpty : pagination.hasMore;
+    final nextPage = isXxxSource && videos.isNotEmpty
+        ? (pagination.nextPage ?? page + 1)
+        : pagination.nextPage;
     return ModelPageResult(
       videos: videos,
       profile: page <= 1 ? _modelProfile(document, uri, model) : null,
-      nextPage: pagination.nextPage,
+      nextPage: nextPage,
       hasMore: hasMore,
     );
   }
@@ -674,40 +681,44 @@ class Scraper {
   }) {
     final baseSegments = modelBase.pathSegments
         .where((segment) => segment.isNotEmpty)
+        .map((segment) => segment.toLowerCase())
         .toList(growable: false);
     if (baseSegments.length < 2 || baseSegments.first != 'models') {
       return const _ModelPagination.unavailable();
     }
 
+    String normalizedHost(String host) =>
+        host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+
+    final expectedHost = normalizedHost(modelBase.host);
     final pages = <int>{};
     for (final anchor in document.querySelectorAll('a[href]')) {
       final target = _resolveHttp(anchor.attributes['href'], pageUri);
-      if (target == null || target.host != modelBase.host) continue;
+      if (target == null || normalizedHost(target.host) != expectedHost) {
+        continue;
+      }
       final segments = target.pathSegments
           .where((segment) => segment.isNotEmpty)
+          .map((segment) => segment.toLowerCase())
           .toList(growable: false);
       if (segments.length < 3 ||
           segments[0] != baseSegments[0] ||
           segments[1] != baseSegments[1] ||
-          segments[2] != section ||
+          segments[2] != section.toLowerCase() ||
           segments.length > 4) {
         continue;
       }
       final rawPage = segments.length == 3
           ? 1
           : (int.tryParse(segments[3]) ?? -1);
-      final page = rawPage == 0 ? 1 : rawPage;
-      if (page >= 1) pages.add(page);
+      final pageNumber = rawPage == 0 ? 1 : rawPage;
+      if (pageNumber >= 1) pages.add(pageNumber);
     }
 
-    final hasPaginationMarkup = document.querySelector(
-          '.pagination, .pagination-holder, .pagination__wrap, '
-          '.pagination-container, [class*=pagination], '
-          'nav[aria-label*=pagination], #list_videos_videos_list_pagination',
-        ) !=
-        null;
-    final hasPagination = hasPaginationMarkup || pages.isNotEmpty;
-    if (!hasPagination) return const _ModelPagination.unavailable();
+    // Some pages contain a generic pagination wrapper but links to a different
+    // section (or an absolute www host). A wrapper without a matching model
+    // page link is not proof that the current page is the last page.
+    if (pages.isEmpty) return const _ModelPagination.unavailable();
 
     final next = pages.where((value) => value > currentPage).toList()..sort();
     return _ModelPagination(
@@ -741,17 +752,20 @@ class Scraper {
     // Count the independent catalog sections concurrently. Each request parses
     // one listing page and discards its DOM/video cards before fetching the next
     // page; only integer totals and album IDs survive this pass.
-    final videoCountFuture = _countModelVideos(model, firstVideoPage);
-    final albumCountsFuture = _countModelAlbumsAndPhotos(
-      model,
-      firstAlbumPage,
-    );
-    final videoCount = await videoCountFuture;
-    final albumCounts = await albumCountsFuture;
+    // Keep the two totals independent. If the site's album endpoint fails,
+    // the already-computable video total should still be shown (and vice
+    // versa); never replace either total with the number currently scrolled.
+    final videoFuture = _countModelVideos(model, firstVideoPage)
+        .then<int?>((count) => count, onError: (Object _) => null);
+    final albumsFuture = _countModelAlbumsAndPhotos(model, firstAlbumPage)
+        .then<_AlbumCatalogCounts?>((counts) => counts,
+            onError: (Object _) => null);
+    final videoCount = await videoFuture;
+    final albumCounts = await albumsFuture;
     return ModelCatalogSummary(
       videoCount: videoCount,
-      albumCount: albumCounts.albumCount,
-      photoCount: albumCounts.photoCount,
+      albumCount: albumCounts?.albumCount,
+      photoCount: albumCounts?.photoCount,
     );
   }
 
@@ -760,11 +774,12 @@ class Scraper {
     ModelPageResult firstVideoPage,
   ) async {
     const maxSummaryPages = 300;
-    const expectedPageSize = 40;
-    var videoCount = firstVideoPage.videos.length;
+    final seenVideoIds = <String>{
+      for (final video in firstVideoPage.videos) video.id,
+    };
+    var videoCount = seenVideoIds.length;
     var nextVideoPage = firstVideoPage.nextPage;
-    if (firstVideoPage.hasMore == null &&
-        firstVideoPage.videos.length >= expectedPageSize) {
+    if (nextVideoPage == null && firstVideoPage.videos.isNotEmpty) {
       nextVideoPage = 2;
     }
     final visitedVideoPages = <int>{1};
@@ -773,16 +788,27 @@ class Scraper {
         guard++) {
       final page = nextVideoPage;
       if (!visitedVideoPages.add(page)) break;
+
       final result = await modelPage(model, page: page);
       if (result.videos.isEmpty) break;
-      videoCount += result.videos.length;
-      if (result.hasMore == false) break;
-      nextVideoPage = result.nextPage;
-      if (nextVideoPage == null &&
-          result.hasMore == null &&
-          result.videos.length >= expectedPageSize) {
-        nextVideoPage = page + 1;
+
+      var newlyFound = 0;
+      for (final video in result.videos) {
+        if (seenVideoIds.add(video.id)) newlyFound++;
       }
+      // Some hosts return the previous page when the requested page is out
+      // of range. A page with no new IDs is a reliable end-of-list signal and
+      // prevents an endless probe/retry loop.
+      if (newlyFound == 0) break;
+      videoCount += newlyFound;
+
+      // X-X-X's paginator may omit the next link on intermediate pages;
+      // modelPage keeps hasMore=true for every non-empty X-X-X page and
+      // supplies the sequential fallback page number.
+      if (!config.searchSpacesAsUnderscores && result.hasMore == false) {
+        break;
+      }
+      nextVideoPage = result.nextPage ?? page + 1;
     }
     return videoCount;
   }
@@ -792,51 +818,49 @@ class Scraper {
     List<AlbumRef> firstAlbumPage,
   ) async {
     const maxSummaryPages = 300;
-    const albumMetadataConcurrency = 4;
     final seenAlbums = <String>{};
     var albumCount = 0;
     var photoCount = 0;
     var allPhotoCountsKnown = true;
 
-    Future<void> addAlbumMetadata(Iterable<AlbumRef> albums) async {
-      final freshAlbums = <AlbumRef>[];
+    void addAlbumCards(Iterable<AlbumRef> albums) {
       for (final album in albums) {
-        if (seenAlbums.add(album.id)) freshAlbums.add(album);
-      }
-      albumCount += freshAlbums.length;
-
-      // Fetch album count headers in small batches only when the listing card
-      // does not expose a count. No photo objects or thumbnails are retained.
-      for (var offset = 0;
-          offset < freshAlbums.length;
-          offset += albumMetadataConcurrency) {
-        final batch = freshAlbums.skip(offset).take(albumMetadataConcurrency);
-        final counts = await Future.wait<int?>(batch.map((album) async {
-          if (album.totalCount != null) return album.totalCount;
-          try {
-            return await albumPhotoCount(album);
-          } catch (_) {
-            return null;
-          }
-        }));
-        for (final count in counts) {
-          if (count == null) {
-            allPhotoCountsKnown = false;
-          } else {
-            photoCount += count;
-          }
+        if (!seenAlbums.add(album.id)) continue;
+        albumCount++;
+        final count = album.totalCount;
+        if (count == null) {
+          allPhotoCountsKnown = false;
+        } else {
+          photoCount += count;
         }
       }
     }
 
-    await addAlbumMetadata(firstAlbumPage);
+    // Only read model album-listing pages. Do not open all 290 album detail
+    // pages and do not request photo images just to calculate the number shown
+    // above the grid. Each page is parsed and discarded; only album IDs and
+    // small integer counts are kept while the scan runs.
+    addAlbumCards(firstAlbumPage);
     if (firstAlbumPage.isNotEmpty) {
+      var reachedEnd = false;
       for (var page = 2; page <= maxSummaryPages + 1; page++) {
         final albums = await modelAlbums(model, page: page);
-        if (albums.isEmpty) break;
+        if (albums.isEmpty) {
+          reachedEnd = true;
+          break;
+        }
         final before = seenAlbums.length;
-        await addAlbumMetadata(albums);
-        if (seenAlbums.length == before) break;
+        addAlbumCards(albums);
+        if (seenAlbums.length == before) {
+          // The source repeated a page; stop rather than looping forever.
+          reachedEnd = true;
+          break;
+        }
+      }
+      if (!reachedEnd) {
+        throw const ScraperException(
+          'Could not confirm the end of the model album catalogue.',
+        );
       }
     }
 

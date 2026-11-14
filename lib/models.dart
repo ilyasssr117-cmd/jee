@@ -131,13 +131,17 @@ class ModelPageResult {
 /// only; media cards and photo objects are not retained by this summary.
 class ModelCatalogSummary {
   const ModelCatalogSummary({
-    required this.videoCount,
-    required this.albumCount,
+    this.videoCount,
+    this.albumCount,
     this.photoCount,
   });
 
-  final int videoCount;
-  final int albumCount;
+  /// Null means that the complete catalogue could not be counted.
+  final int? videoCount;
+  final int? albumCount;
+
+  /// Optional sum of per-album photo totals when every album card exposes it.
+  /// This is not required to count the album cards shown in the model page.
   final int? photoCount;
 }
 

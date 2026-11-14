@@ -19,18 +19,19 @@ void main() {
       expect(config.searchUri('Alina Rose', 2).path, '/search/alina_rose/2/');
 
       final model = Uri.parse('https://x-x-x.tube/models/ekomomai/');
-      expect(config.modelVideosUri(model, 1), model);
-      expect(config.modelVideosUri(model, 2).path, '/models/ekomomai/2/');
+      expect(config.modelVideosUri(model, 1).path, '/models/ekomomai/videos/0/');
+      expect(config.modelVideosUri(model, 2).path, '/models/ekomomai/videos/2/');
+      expect(config.modelVideosUri(model, 3).path, '/models/ekomomai/videos/3/');
       expect(config.videoPathPattern, r'/videos/\d+(?:/|$)');
       expect(config.cardSelector, '.thumb-holder .item.thumb');
     });
 
 
-    test('uses the model profile itself as its video listing page', () async {
+    test('uses the nested model videos route for the first page', () async {
       final scraper = Scraper(
         config,
         client: MockClient((request) async {
-          expect(request.url.path, '/models/ekomomai/');
+          expect(request.url.path, '/models/ekomomai/videos/0/');
           return http.Response('''
             <html><body>
               <div class="thumb-holder">
@@ -93,6 +94,119 @@ void main() {
           <String>['/models/zafira-may/albums/', '/search/zafira_may/']);
       expect(albums, hasLength(1));
       expect(albums.single.modelName, 'Zafira May');
+      scraper.close();
+    });
+
+    test('model video pagination follows page links and detects the end', () async {
+      final requestedPaths = <String>[];
+      final scraper = Scraper(
+        config,
+        client: MockClient((request) async {
+          requestedPaths.add(request.url.path);
+          final pageOne = request.url.path == '/models/ekomomai/videos/0/';
+          final id = pageOne ? '300001' : '300002';
+          final title = pageOne ? 'Sample one' : 'Sample two';
+          final pager = pageOne
+              ? '<a href="/models/ekomomai/videos/0/">1</a><a href="/models/ekomomai/videos/2/">2</a>'
+              : '<a href="/models/ekomomai/videos/0/">1</a><span>2</span>';
+          return http.Response('''
+            <html><body>
+              <div class="thumb-holder"><div class="item thumb">
+                <a href="/videos/$id/sample/">
+                  <div class="title">$title</div><div class="duration">10:00</div>
+                </a>
+              </div></div>
+              <div class="pagination">$pager</div>
+            </body></html>
+          ''', 200);
+        }),
+      );
+
+      const model = ModelRef(
+        name: 'EKomoMai',
+        url: 'https://x-x-x.tube/models/ekomomai/',
+      );
+      final first = await scraper.modelPage(model);
+      expect(first.videos, hasLength(1));
+      expect(first.nextPage, 2);
+      expect(first.hasMore, isTrue);
+
+      final second = await scraper.modelPage(model, page: first.nextPage!);
+      expect(second.videos, hasLength(1));
+      expect(second.nextPage, isNull);
+      expect(second.hasMore, isFalse);
+      expect(requestedPaths, <String>[
+        '/models/ekomomai/videos/0/',
+        '/models/ekomomai/videos/2/',
+      ]);
+      scraper.close();
+    });
+
+    test('catalog summary counts video and album pages without loading photos', () async {
+      final scraper = Scraper(
+        config,
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/models/ekomomai/videos/2/') {
+            return http.Response('''
+              <div class="thumb-holder"><div class="item thumb">
+                <a href="/videos/400002/b/"><div class="title">Two</div><div class="duration">1:00</div></a>
+              </div></div>
+              <div class="pagination"><a href="/models/ekomomai/videos/0/">1</a><span>2</span></div>
+            ''', 200);
+          }
+          if (path == '/models/ekomomai/albums/2/') {
+            return http.Response('not found', 404);
+          }
+          if (path == '/search/ekomomai/2/') {
+            return http.Response('''
+              <div class="thumb-holder"><div class="item thumb">
+                <a href="/albums/2/second/"><img src="/b.jpg"></a>
+              </div></div>
+            ''', 200);
+          }
+          if (path == '/albums/2/second/') {
+            return http.Response('''
+              <div class="media-data">
+                <div><span class="media-data__list-title">Images:</span>
+                  <span class="media-data__list-value">3</span></div>
+              </div>
+            ''', 200);
+          }
+          if (path == '/models/ekomomai/albums/3/' || path == '/search/ekomomai/3/') {
+            return http.Response('not found', 404);
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      const model = ModelRef(
+        name: 'EKomoMai',
+        url: 'https://x-x-x.tube/models/ekomomai/',
+      );
+      const firstVideoPage = ModelPageResult(
+        videos: <Video>[
+          Video(id: 'one', title: 'One'),
+        ],
+        nextPage: 2,
+        hasMore: true,
+      );
+      final summary = await scraper.modelCatalogSummary(
+        model,
+        firstVideoPage: firstVideoPage,
+        firstAlbumPage: const <AlbumRef>[
+          AlbumRef(
+            id: 'x-x-x.tube/albums/1/first/',
+            title: 'First',
+            url: 'https://x-x-x.tube/albums/1/first/',
+            totalCount: 2,
+          ),
+        ],
+      );
+
+      expect(summary.videoCount, 2);
+      expect(summary.albumCount, 2);
+      expect(summary.photoCount, 5);
       scraper.close();
     });
 

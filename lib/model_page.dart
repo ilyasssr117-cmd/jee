@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
@@ -57,6 +59,13 @@ class _ModelPageState extends State<ModelPage> {
   final List<Video> _videos = <Video>[];
   final Set<String> _seen = <String>{};
   ModelProfile? _profile;
+  int? _totalVideoCount;
+  int? _totalAlbumCount;
+  int? _totalPhotoCount;
+  ModelPageResult? _firstVideoPage;
+  List<AlbumRef>? _firstAlbumPage;
+  bool _summaryStarted = false;
+  bool _summaryFinished = false;
   int _nextPage = 1;
   bool _loading = true;
   bool _videosFinishedLoading = false;
@@ -123,6 +132,10 @@ class _ModelPageState extends State<ModelPage> {
       );
       if (!mounted || run != _albumRun) return;
       OfflineAlbumCache.write(cacheKey, result);
+      if (page == 1) {
+        _firstAlbumPage = List<AlbumRef>.unmodifiable(result);
+        _maybeLoadCatalogSummary();
+      }
       var added = 0;
       for (final album in result) {
         if (_albumSeen.add(album.id)) {
@@ -138,7 +151,7 @@ class _ModelPageState extends State<ModelPage> {
           }
         }
       }
-      final finished = result.isEmpty || (added == 0 && cached == null);
+      final finished = result.isEmpty || (page > 1 && added == 0);
       setState(() {
         _albumNext = page + 1;
         _albumsLoading = false;
@@ -197,14 +210,17 @@ class _ModelPageState extends State<ModelPage> {
     );
   }
 
-  bool get _hasPhotos => _albums.isNotEmpty || _albumsError != null;
+  bool get _hasPhotos =>
+      _albums.isNotEmpty ||
+      _albumsError != null ||
+      (_isXxxModel && (_totalAlbumCount ?? 0) > 0);
 
   String _offlineKey(int page) {
     var hash = 0x811c9dc5;
     for (final unit in widget.model.url.codeUnits) {
       hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
     }
-    return 'model_${hash.toRadixString(16)}_$page';
+    return 'model_v2_${hash.toRadixString(16)}_$page';
   }
 
   String _offlineAlbumKey(int page) {
@@ -212,7 +228,7 @@ class _ModelPageState extends State<ModelPage> {
     for (final unit in widget.model.url.codeUnits) {
       hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;
     }
-    return 'model_albums_${hash.toRadixString(16)}_$page';
+    return 'model_albums_v2_${hash.toRadixString(16)}_$page';
   }
 
   Future<void> _loadAll() async {
@@ -250,6 +266,10 @@ class _ModelPageState extends State<ModelPage> {
         page: page,
       );
       if (!mounted || run != _run) return;
+      if (page == 1) {
+        _firstVideoPage = result;
+        _maybeLoadCatalogSummary();
+      }
       var added = 0;
       for (final video in result.videos) {
         if (_seen.add(video.id)) {
@@ -266,11 +286,12 @@ class _ModelPageState extends State<ModelPage> {
       }
       final finished =
           result.videos.isEmpty ||
-          (added == 0 && cached == null) ||
+          result.hasMore == false ||
+          (page > 1 && added == 0 && result.hasMore != true) ||
           page >= _maxPages;
       setState(() {
         _profile ??= result.profile;
-        _nextPage = page + 1;
+        _nextPage = result.nextPage ?? (page + 1);
         _loading = false;
         _videosFinishedLoading = finished;
         _error = null;
@@ -337,14 +358,72 @@ class _ModelPageState extends State<ModelPage> {
   }
 
   String get _countLabel {
-    if (_mode == _Mode.photos) {
-      final n = _albums.length;
-      final base = '$n album${n == 1 ? '' : 's'}';
-      return _albumsLoading ? '$base \u00b7 loading\u2026' : base;
+    if (!_isXxxModel) {
+      if (_mode == _Mode.photos) {
+        final n = _albums.length;
+        final base = '$n album${n == 1 ? '' : 's'}';
+        return _albumsLoading ? '$base \u00b7 loading\u2026' : base;
+      }
+      final n = _videos.length;
+      final base = '$n video${n == 1 ? '' : 's'}';
+      return _loading ? '$base \u00b7 loading\u2026' : base;
     }
-    final n = _videos.length;
-    final base = '$n video${n == 1 ? '' : 's'}';
-    return _loading ? '$base \u00b7 loading\u2026' : base;
+    final videoCount = _totalVideoCount;
+    final photoCount = _totalPhotoCount;
+    final albumCount = _totalAlbumCount;
+    final videoLabel = videoCount != null
+        ? '${_formatCount(videoCount)} videos'
+        : '${_formatCount(_videos.length)} videos${_summaryStarted && !_summaryFinished ? ' · counting…' : ''}';
+    final photoLabel = photoCount != null
+        ? '${_formatCount(photoCount)} photos'
+        : albumCount != null
+            ? '${_formatCount(albumCount)} albums'
+            : _summaryStarted && !_summaryFinished
+                ? 'photos counting…'
+                : '${_formatCount(_albums.length)} albums';
+    return '$videoLabel · $photoLabel';
+  }
+
+  String _formatCount(int value) => value.toString().replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (_) => ',',
+  );
+
+  bool get _isXxxModel {
+    final host = Uri.tryParse(widget.model.url)?.host.toLowerCase() ?? '';
+    return host == 'x-x-x.tube' || host.endsWith('.x-x-x.tube');
+  }
+
+  void _maybeLoadCatalogSummary() {
+    if (!_isXxxModel || _summaryStarted) return;
+    final firstVideos = _firstVideoPage;
+    final firstAlbums = _firstAlbumPage;
+    if (firstVideos == null || firstAlbums == null) return;
+    _summaryStarted = true;
+    unawaited(_loadCatalogSummary(firstVideos, firstAlbums));
+  }
+
+  Future<void> _loadCatalogSummary(
+    ModelPageResult firstVideos,
+    List<AlbumRef> firstAlbums,
+  ) async {
+    try {
+      final summary = await videoRepository.getModelCatalogSummary(
+        widget.model,
+        firstVideoPage: firstVideos,
+        firstAlbumPage: firstAlbums,
+      );
+      if (!mounted) return;
+      setState(() {
+        _totalVideoCount = summary.videoCount;
+        _totalAlbumCount = summary.albumCount;
+        _totalPhotoCount = summary.photoCount;
+        _summaryFinished = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _summaryFinished = true);
+    }
   }
 
   @override
@@ -701,7 +780,13 @@ class _ModelPageState extends State<ModelPage> {
           ),
           if (_hasPhotos) ...[
             const SizedBox(height: Gaps.lg),
-            _ModeSwitch(mode: _mode, onChanged: _setMode),
+            _ModeSwitch(
+              mode: _mode,
+              onChanged: _setMode,
+              videoCount: _totalVideoCount,
+              photoCount: _totalPhotoCount,
+              albumCount: _totalAlbumCount,
+            ),
           ],
         ],
       ),
@@ -710,10 +795,19 @@ class _ModelPageState extends State<ModelPage> {
 }
 
 class _ModeSwitch extends StatelessWidget {
-  const _ModeSwitch({required this.mode, required this.onChanged});
+  const _ModeSwitch({
+    required this.mode,
+    required this.onChanged,
+    this.videoCount,
+    this.photoCount,
+    this.albumCount,
+  });
 
   final _Mode mode;
   final ValueChanged<_Mode> onChanged;
+  final int? videoCount;
+  final int? photoCount;
+  final int? albumCount;
 
   @override
   Widget build(BuildContext context) {
@@ -744,7 +838,13 @@ class _ModeSwitch extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  label,
+                  value == _Mode.videos
+                      ? (videoCount == null ? label : '$label ($videoCount)')
+                      : (photoCount != null
+                          ? '$label ($photoCount)'
+                          : albumCount != null
+                              ? '$label ($albumCount)'
+                              : label),
                   style: AppText.label.copyWith(
                     fontWeight: FontWeight.w700,
                     color: selected ? Colors.white : AppColors.textSecondary,

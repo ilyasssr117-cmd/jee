@@ -48,6 +48,14 @@ abstract class VideoCatalogRepository {
 
   Future<List<AlbumRef>> getModelAlbums(ModelRef model, {int page = 1});
 
+  Future<int?> getAlbumPhotoCount(AlbumRef album);
+
+  Future<ModelCatalogSummary> getModelCatalogSummary(
+    ModelRef model, {
+    required ModelPageResult firstVideoPage,
+    required List<AlbumRef> firstAlbumPage,
+  });
+
   Future<List<AlbumRef>> getAllAlbums({int page = 1});
 
   Future<List<AlbumPhoto>> getAlbumPhotos(AlbumRef album, {int chunk = 0});
@@ -185,7 +193,10 @@ ScraperConfig scraperConfigForSource(ContentSource source) {
         r'/albums?/|/galleries/|/gallery/|/photos?/|/pictures?/',
     relatedCardSelector:
         '.related .item.thumb, .related-videos .item.thumb, .thumb-holder .item.thumb',
-    modelVideosPathTemplate: '{page}/',
+    // X-X-X model videos use /videos/0/ for page 1, then /videos/2/,
+    // /videos/3/, and so on. /videos/1/ is not a valid page route.
+    modelVideosPathTemplate: 'videos/{page}/',
+    modelVideosFirstPageUsesZero: true,
   );
 }
 
@@ -350,6 +361,28 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     final target = _scraperForUrl(model.url);
     _ensureConfigured(target);
     return target.modelAlbums(model, page: page);
+  }
+
+  @override
+  Future<int?> getAlbumPhotoCount(AlbumRef album) async {
+    final target = _scraperForUrl(album.url);
+    _ensureConfigured(target);
+    return target.albumPhotoCount(album);
+  }
+
+  @override
+  Future<ModelCatalogSummary> getModelCatalogSummary(
+    ModelRef model, {
+    required ModelPageResult firstVideoPage,
+    required List<AlbumRef> firstAlbumPage,
+  }) async {
+    final target = _scraperForUrl(model.url);
+    _ensureConfigured(target);
+    return target.modelCatalogSummary(
+      model,
+      firstVideoPage: firstVideoPage,
+      firstAlbumPage: firstAlbumPage,
+    );
   }
 
   @override

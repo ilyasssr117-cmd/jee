@@ -56,6 +56,7 @@ class ScraperConfig {
     this.searchPathTemplate = '/search/{query}/{page}/',
     this.searchSpacesAsUnderscores = false,
     this.modelVideosPathTemplate = 'videos/{page}/',
+    this.modelVideosFirstPageUsesZero = false,
     this.categoryPathTemplate = '/categories/{slug}/{page}/',
     this.cardSelector = '.thumbs__list .item.thumb, .thumb-spot, article[data-video], .video-card, .video-item',
     this.anchorSelector = 'a[href]',
@@ -95,6 +96,7 @@ class ScraperConfig {
   final String searchPathTemplate;
   final bool searchSpacesAsUnderscores;
   final String modelVideosPathTemplate;
+  final bool modelVideosFirstPageUsesZero;
   final String categoryPathTemplate;
   final String cardSelector;
   final String anchorSelector;
@@ -167,7 +169,9 @@ class ScraperConfig {
   Uri modelVideosUri(Uri modelBaseUri, int page) {
     final safePage = page < 1 ? 1 : page;
     var template = modelVideosPathTemplate;
-    if (safePage == 1) {
+    if (safePage == 1 && modelVideosFirstPageUsesZero) {
+      template = template.replaceAll('{page}', '0');
+    } else if (safePage == 1) {
       template = template
           .replaceFirst('/{page}/', '/')
           .replaceFirst('{page}/', '');
@@ -224,6 +228,12 @@ class Scraper {
       TtlCache<Map<String, String>>(
     ttl: const Duration(minutes: 30),
     maxEntries: 1,
+  );
+
+  final TtlCache<ModelCatalogSummary> _modelSummaryCache =
+      TtlCache<ModelCatalogSummary>(
+    ttl: const Duration(minutes: 20),
+    maxEntries: 80,
   );
 
   Future<String> _getDetailPage(Uri uri, {bool fresh = false}) =>
@@ -624,16 +634,215 @@ class Scraper {
     try {
       body = await _get(uri);
     } on ScraperException catch (error) {
-      if (page > 1 && error.statusCode == 404) {
-        return const ModelPageResult(videos: <Video>[]);
+      if (page > 1 &&
+          (error.statusCode == 404 || error.statusCode == 410)) {
+        return const ModelPageResult(
+          videos: <Video>[],
+          hasMore: false,
+        );
       }
       rethrow;
     }
 
     final document = html.parse(body);
+    final videos = _videosFrom(document, uri, config.cardSelector);
+    final pagination = _modelPagination(
+      document,
+      base,
+      pageUri: uri,
+      section: 'videos',
+      currentPage: page,
+    );
+    final hasMore = pagination.hasMore ??
+        (config.searchSpacesAsUnderscores && videos.length < 40
+            ? false
+            : null);
     return ModelPageResult(
-      videos: _videosFrom(document, uri, config.cardSelector),
+      videos: videos,
       profile: page <= 1 ? _modelProfile(document, uri, model) : null,
+      nextPage: pagination.nextPage,
+      hasMore: hasMore,
+    );
+  }
+
+  _ModelPagination _modelPagination(
+    dom.Document document,
+    Uri modelBase, {
+    required Uri pageUri,
+    required String section,
+    required int currentPage,
+  }) {
+    final baseSegments = modelBase.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (baseSegments.length < 2 || baseSegments.first != 'models') {
+      return const _ModelPagination.unavailable();
+    }
+
+    final pages = <int>{};
+    for (final anchor in document.querySelectorAll('a[href]')) {
+      final target = _resolveHttp(anchor.attributes['href'], pageUri);
+      if (target == null || target.host != modelBase.host) continue;
+      final segments = target.pathSegments
+          .where((segment) => segment.isNotEmpty)
+          .toList(growable: false);
+      if (segments.length < 3 ||
+          segments[0] != baseSegments[0] ||
+          segments[1] != baseSegments[1] ||
+          segments[2] != section ||
+          segments.length > 4) {
+        continue;
+      }
+      final rawPage = segments.length == 3
+          ? 1
+          : (int.tryParse(segments[3]) ?? -1);
+      final page = rawPage == 0 ? 1 : rawPage;
+      if (page >= 1) pages.add(page);
+    }
+
+    final hasPaginationMarkup = document.querySelector(
+          '.pagination, .pagination-holder, .pagination__wrap, '
+          '.pagination-container, [class*=pagination], '
+          'nav[aria-label*=pagination], #list_videos_videos_list_pagination',
+        ) !=
+        null;
+    final hasPagination = hasPaginationMarkup || pages.isNotEmpty;
+    if (!hasPagination) return const _ModelPagination.unavailable();
+
+    final next = pages.where((value) => value > currentPage).toList()..sort();
+    return _ModelPagination(
+      nextPage: next.isEmpty ? null : next.first,
+      hasMore: next.isNotEmpty,
+    );
+  }
+
+  Future<ModelCatalogSummary> modelCatalogSummary(
+    ModelRef model, {
+    required ModelPageResult firstVideoPage,
+    required List<AlbumRef> firstAlbumPage,
+  }) {
+    final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
+    final key = '${base.host}${base.path}';
+    return _modelSummaryCache.fetch(
+      key,
+      () => _loadModelCatalogSummary(
+        model,
+        firstVideoPage: firstVideoPage,
+        firstAlbumPage: firstAlbumPage,
+      ),
+    );
+  }
+
+  Future<ModelCatalogSummary> _loadModelCatalogSummary(
+    ModelRef model, {
+    required ModelPageResult firstVideoPage,
+    required List<AlbumRef> firstAlbumPage,
+  }) async {
+    // Count the independent catalog sections concurrently. Each request parses
+    // one listing page and discards its DOM/video cards before fetching the next
+    // page; only integer totals and album IDs survive this pass.
+    final videoCountFuture = _countModelVideos(model, firstVideoPage);
+    final albumCountsFuture = _countModelAlbumsAndPhotos(
+      model,
+      firstAlbumPage,
+    );
+    final videoCount = await videoCountFuture;
+    final albumCounts = await albumCountsFuture;
+    return ModelCatalogSummary(
+      videoCount: videoCount,
+      albumCount: albumCounts.albumCount,
+      photoCount: albumCounts.photoCount,
+    );
+  }
+
+  Future<int> _countModelVideos(
+    ModelRef model,
+    ModelPageResult firstVideoPage,
+  ) async {
+    const maxSummaryPages = 300;
+    const expectedPageSize = 40;
+    var videoCount = firstVideoPage.videos.length;
+    var nextVideoPage = firstVideoPage.nextPage;
+    if (firstVideoPage.hasMore == null &&
+        firstVideoPage.videos.length >= expectedPageSize) {
+      nextVideoPage = 2;
+    }
+    final visitedVideoPages = <int>{1};
+    for (var guard = 0;
+        nextVideoPage != null && guard < maxSummaryPages;
+        guard++) {
+      final page = nextVideoPage;
+      if (!visitedVideoPages.add(page)) break;
+      final result = await modelPage(model, page: page);
+      if (result.videos.isEmpty) break;
+      videoCount += result.videos.length;
+      if (result.hasMore == false) break;
+      nextVideoPage = result.nextPage;
+      if (nextVideoPage == null &&
+          result.hasMore == null &&
+          result.videos.length >= expectedPageSize) {
+        nextVideoPage = page + 1;
+      }
+    }
+    return videoCount;
+  }
+
+  Future<_AlbumCatalogCounts> _countModelAlbumsAndPhotos(
+    ModelRef model,
+    List<AlbumRef> firstAlbumPage,
+  ) async {
+    const maxSummaryPages = 300;
+    const albumMetadataConcurrency = 4;
+    final seenAlbums = <String>{};
+    var albumCount = 0;
+    var photoCount = 0;
+    var allPhotoCountsKnown = true;
+
+    Future<void> addAlbumMetadata(Iterable<AlbumRef> albums) async {
+      final freshAlbums = <AlbumRef>[];
+      for (final album in albums) {
+        if (seenAlbums.add(album.id)) freshAlbums.add(album);
+      }
+      albumCount += freshAlbums.length;
+
+      // Fetch album count headers in small batches only when the listing card
+      // does not expose a count. No photo objects or thumbnails are retained.
+      for (var offset = 0;
+          offset < freshAlbums.length;
+          offset += albumMetadataConcurrency) {
+        final batch = freshAlbums.skip(offset).take(albumMetadataConcurrency);
+        final counts = await Future.wait<int?>(batch.map((album) async {
+          if (album.totalCount != null) return album.totalCount;
+          try {
+            return await albumPhotoCount(album);
+          } catch (_) {
+            return null;
+          }
+        }));
+        for (final count in counts) {
+          if (count == null) {
+            allPhotoCountsKnown = false;
+          } else {
+            photoCount += count;
+          }
+        }
+      }
+    }
+
+    await addAlbumMetadata(firstAlbumPage);
+    if (firstAlbumPage.isNotEmpty) {
+      for (var page = 2; page <= maxSummaryPages + 1; page++) {
+        final albums = await modelAlbums(model, page: page);
+        if (albums.isEmpty) break;
+        final before = seenAlbums.length;
+        await addAlbumMetadata(albums);
+        if (seenAlbums.length == before) break;
+      }
+    }
+
+    return _AlbumCatalogCounts(
+      albumCount: albumCount,
+      photoCount: allPhotoCountsKnown ? photoCount : null,
     );
   }
 
@@ -706,6 +915,14 @@ class Scraper {
     return null;
   }
 
+  /// Reads only the album page's count metadata. It does not parse or keep
+  /// the photo grid, so model summary counts do not populate photo memory.
+  Future<int?> albumPhotoCount(AlbumRef album) async {
+    final uri = Uri.parse(album.url);
+    final body = await _get(uri);
+    return _albumTotalCount(html.parse(body));
+  }
+
   Future<List<AlbumRef>> modelAlbums(ModelRef model, {int page = 1}) async {
     final base = _modelBase(Uri.parse(model.url)) ?? Uri.parse(model.url);
     final uri = page <= 1
@@ -732,11 +949,21 @@ class Scraper {
       // its search page can also contain matching album cards.
       return await fromSearch();
     } on ScraperException catch (error) {
-      if (page > 1 && error.statusCode == 404) return const <AlbumRef>[];
-      if (!config.searchSpacesAsUnderscores) rethrow;
+      if (!config.searchSpacesAsUnderscores) {
+        if (page > 1 &&
+          (error.statusCode == 404 || error.statusCode == 410)) {
+          return const <AlbumRef>[];
+        }
+        rethrow;
+      }
+      // X-X-X model album pages can be absent (404) while paginated search
+      // results still expose the model's albums. Always try that fallback.
       try {
         return await fromSearch();
-      } on ScraperException {
+      } on ScraperException catch (fallbackError) {
+        if (page > 1 && fallbackError.statusCode == 404) {
+          return const <AlbumRef>[];
+        }
         rethrow;
       }
     }
@@ -900,15 +1127,34 @@ class Scraper {
   }
 
   int? _albumTotalFromCard(dom.Element card) {
-    final count = card.querySelector('i[class*="photo-shape"]')?.parent?.text;
-    return _parseImageCount(count);
+    final candidates = <String?>[
+      card.querySelector('i[class*="photo-shape"]')?.parent?.text,
+      card.querySelector(
+        '.photo-count, .photos-count, .album-photo-count, '
+        '[data-photo-count], [class*=photo-count]',
+      )?.text,
+      card.attributes['data-photo-count'],
+    ];
+    for (final candidate in candidates) {
+      final count = _parseImageCount(candidate);
+      if (count != null) return count;
+    }
+    return null;
   }
 
   int? _parseImageCount(String? raw) {
-    if (raw == null || raw.isEmpty) return null;
-    final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+    if (raw == null || raw.trim().isEmpty) return null;
+    final normalized = _collapse(raw);
+    final labeled = RegExp(
+      r'([\d][\d\s,._]*)\s*(?:photos?|images?|pictures?)\b',
+      caseSensitive: false,
+    ).firstMatch(normalized);
+    final numeric = labeled?.group(1) ??
+        (RegExp(r'^[\d\s,._]+$').hasMatch(normalized) ? normalized : null);
+    if (numeric == null) return null;
+    final digits = numeric.replaceAll(RegExp(r'[^\d]'), '');
     final count = int.tryParse(digits);
-    return count != null && count > 0 && count <= 10000000 ? count : null;
+    return count != null && count <= 10000000 ? count : null;
   }
 
   static String _photoId(String url) {
@@ -1946,3 +2192,23 @@ class _StreamCandidate {
 
   int get score => quality <= 0 ? 1 : (quality > 1080 ? 1000 : quality);
 }
+
+
+class _AlbumCatalogCounts {
+  const _AlbumCatalogCounts({
+    required this.albumCount,
+    required this.photoCount,
+  });
+
+  final int albumCount;
+  final int? photoCount;
+}
+
+class _ModelPagination {
+  const _ModelPagination({this.nextPage, required this.hasMore});
+  const _ModelPagination.unavailable() : nextPage = null, hasMore = null;
+
+  final int? nextPage;
+  final bool? hasMore;
+}
+

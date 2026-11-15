@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html;
 import 'package:http/http.dart' as http;
 import 'package:cupertino_http/cupertino_http.dart';
@@ -17,6 +18,7 @@ const String _xfreeUserAgent =
     'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7 '
     'Mobile/15E148 Safari/604.1';
 const int _maxXFreeResponseBytes = 8 * 1024 * 1024;
+const MethodChannel _xfreeIosWebChannel = MethodChannel('flow/native');
 
 int _xfreeInt(dynamic value) {
   if (value is num && value.isFinite) return value.clamp(0, 2147483647).toInt();
@@ -46,12 +48,6 @@ String? _xfreeString(dynamic value) {
   if (value is! String) return null;
   final text = value.trim();
   return text.isEmpty || text.length > 8192 ? null : text;
-}
-
-String _xfreeDisplayValue(dynamic value) {
-  if (value is String) return value.trim();
-  if (value is num && value.isFinite) return value.toString();
-  return '';
 }
 
 String? _xfreeAbsoluteUrl(dynamic value) {
@@ -97,8 +93,6 @@ class XFreeAccountProfile {
     this.followers = 0,
     this.following = 0,
     this.postsCount = 0,
-    this.lastActive = '',
-    this.lastPostDate = '',
   });
 
   final String id;
@@ -115,8 +109,6 @@ class XFreeAccountProfile {
   final int followers;
   final int following;
   final int postsCount;
-  final String lastActive;
-  final String lastPostDate;
 
   factory XFreeAccountProfile.fromJson(Map<String, dynamic> json) {
     final avatar = _xfreeMap(json['avatarMedia']);
@@ -139,8 +131,6 @@ class XFreeAccountProfile {
       followers: _xfreeInt(json['followers']),
       following: _xfreeInt(json['following']),
       postsCount: _xfreeInt(json['postsCount']),
-      lastActive: _xfreeDisplayValue(json['lastActive']),
-      lastPostDate: _xfreeDisplayValue(json['lastPostDate']),
     );
   }
 }
@@ -172,7 +162,7 @@ class XFreeTransReelsRepository {
 
   static http.Client _createClient() {
     try {
-      if (Platform.isIOS || Platform.isMacOS) {
+      if (Platform.isMacOS) {
         return CupertinoClient.defaultSessionConfiguration();
       }
     } catch (_) {}
@@ -196,8 +186,41 @@ class XFreeTransReelsRepository {
     return text;
   }
 
+  Future<String> _getIosWebViewText(Uri uri, {required bool json}) async {
+    final text = await _xfreeIosWebChannel
+        .invokeMethod<String>('xfreeFetch', <String, Object?>{
+          'url': uri.toString(),
+          'accept': json
+              ? 'application/json, text/plain, */*'
+              : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        })
+        .timeout(const Duration(seconds: 55));
+    if (text == null || text.isEmpty) {
+      throw HttpException('The iOS XFree browser returned an empty response.', uri: uri);
+    }
+    if (utf8.encode(text).length > _maxXFreeResponseBytes) {
+      throw const FormatException('XFree browser response is too large.');
+    }
+    return text;
+  }
+
   Future<String> _getText(Uri uri, {bool json = false}) async {
     if (_disposed) throw StateError('XFree repository is closed.');
+
+    // iOS must use WKWebView's persistent Safari/WebKit session. A plain
+    // CupertinoClient request does not share that browser session and may be
+    // rejected by XFree's edge protection even when the page works in Safari.
+    if (Platform.isIOS) {
+      try {
+        return await _getIosWebViewText(uri, json: json);
+      } catch (error) {
+        if (kDebugMode) {
+          debugPrint('[XFREE][iOS] ${uri.path} failed: $error');
+        }
+        rethrow;
+      }
+    }
+
     try {
       final response = await _client
           .get(uri, headers: _headers(json: json))
@@ -211,7 +234,7 @@ class XFreeTransReelsRepository {
       final text = utf8.decode(response.bodyBytes, allowMalformed: true);
       if (Platform.isWindows &&
           (text.contains('Just a moment') || text.contains('cf-chl-'))) {
-        return await _getBrowserText(uri);
+        return _getBrowserText(uri);
       }
       return text;
     } catch (_) {
@@ -337,11 +360,8 @@ class XFreeTransReelsRepository {
     final tags = <String>[
       if (tagsRaw is List)
         for (final tag in tagsRaw.take(24))
-          if (tag is Map &&
-              (_xfreeString(tag['tag']) ?? _xfreeString(tag['name'])) != null)
-            (_xfreeString(tag['tag']) ?? _xfreeString(tag['name']))!
-          else if (tag is String && _xfreeString(tag) != null)
-            _xfreeString(tag)!,
+          if (tag is Map && _xfreeString(tag['name']) != null)
+            _xfreeString(tag['name'])!,
     ];
     final detailsUri = _uri('/video', <String, String>{'id': id});
     try {
@@ -365,11 +385,11 @@ class XFreeTransReelsRepository {
         id: id,
         videoUrl: stream,
         downloadUrl: stream,
-        mediaReferer: detailsUri.toString(),
-        // media.name is a UUID used in the CDN path, not a display title.
-        title: _xfreeString(post['title']) ??
+        mediaReferer: '$_xfreeBase/',
+        title: _xfreeString(media['name']) ??
             _xfreeString(post['name']) ??
-            (username.isNotEmpty ? 'Video by @$username' : 'XFree video'),
+            _xfreeString(post['title']) ??
+            'XFree video',
         thumbUrl: thumb,
         avatarUrl: avatarUrl,
         author: username.isNotEmpty ? username : displayName,
@@ -450,9 +470,6 @@ class XFreeTransReelsRepository {
         added++;
       }
       if (added == 0) break;
-      if (batch + 1 < maxBatches) {
-        await Future<void>.delayed(const Duration(milliseconds: 350));
-      }
     }
     return posts;
   }

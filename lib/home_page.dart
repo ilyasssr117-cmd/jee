@@ -716,6 +716,7 @@ class _HomePageState extends State<HomePage>
         // overlay or other full-screen route covers it.
         active: reelsActive && !_searchOpen,
         bottomInset: context.safe.bottom + 4,
+        source: videoRepository.source,
       );
     }
     if (libraryVisible || _libraryPage != null) {

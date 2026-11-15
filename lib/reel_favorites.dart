@@ -47,12 +47,14 @@ class ReelItem {
     this.tags = const <String>[],
     this.fallbackUrl,
     this.downloadUrl,
+    this.mediaReferer,
   });
 
   final String id;
   final String videoUrl;
   final String? fallbackUrl;
   final String? downloadUrl;
+  final String? mediaReferer;
   final String title;
   final String? thumbUrl;
   final String? avatarUrl;
@@ -69,6 +71,7 @@ class ReelItem {
         'url': videoUrl,
         'fallback': fallbackUrl,
         'download': downloadUrl,
+        'mediaReferer': mediaReferer,
         'title': title,
         'thumb': thumbUrl,
         'avatar': avatarUrl,
@@ -97,6 +100,7 @@ class ReelItem {
       videoUrl: url,
       fallbackUrl: optional('fallback'),
       downloadUrl: optional('download'),
+      mediaReferer: optional('mediaReferer'),
       title: map['title'] is String ? map['title'] as String : '',
       thumbUrl: optional('thumb'),
       avatarUrl: optional('avatar'),
@@ -206,6 +210,16 @@ class ReelFavorites {
     _ensureLoaded();
     final item = _items[videoId.substring(5)];
     if (item == null) return null;
-    return PlaybackSource(item.videoUrl, kReelMediaHeaders);
+    final referer = item.mediaReferer;
+    if (referer == null || referer.isEmpty) {
+      return PlaybackSource(item.videoUrl, kReelMediaHeaders);
+    }
+    final origin = Uri.tryParse(referer)?.origin;
+    final headers = <String, String>{
+      ...kReelMediaHeaders,
+      'Referer': referer,
+      if (origin != null) 'Origin': origin,
+    };
+    return PlaybackSource(item.videoUrl, headers);
   }
 }

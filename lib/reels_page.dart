@@ -25,6 +25,7 @@ import 'ads/ad_manager.dart';
 import 'ads/pre_roll_ad.dart';
 import 'ads/vast.dart';
 import 'app_theme.dart';
+import 'content_source.dart';
 import 'analytics_service.dart';
 import 'download_store.dart';
 import 'error_text.dart';
@@ -35,6 +36,7 @@ import 'models.dart';
 import 'photo_saver.dart';
 import 'preview_manager.dart';
 import 'reel_favorites.dart';
+import 'xfree_trans_reels.dart';
 import 'services/remote_config_service.dart';
 import 'touch.dart';
 import 'widgets/app_button.dart';
@@ -52,6 +54,17 @@ const bool _kReelsSfwMode = bool.fromEnvironment(
   defaultValue: false,
 );
 const Map<String, String> _kMediaHeaders = kReelMediaHeaders;
+
+Map<String, String> _headersForReel(ReelItem item) {
+  final referer = item.mediaReferer;
+  if (referer == null || referer.isEmpty) return _kMediaHeaders;
+  final origin = Uri.tryParse(referer)?.origin;
+  return <String, String>{
+    ..._kMediaHeaders,
+    'Referer': referer,
+    if (origin != null) 'Origin': origin,
+  };
+}
 
 const int _kFirstBatch = 12;
 const int _kNextBatch = 12;
@@ -377,6 +390,11 @@ Uri _validatedReelsApiUri() {
 }
 
 class ReelsRepository {
+  ReelsRepository({required this.source});
+
+  final ContentSource source;
+  final XFreeTransReelsRepository _transRepository =
+      XFreeTransReelsRepository();
   final LinkedHashSet<String> _seen = LinkedHashSet<String>();
   final http.Client _client = _makeClient();
 
@@ -579,6 +597,9 @@ class ReelsRepository {
   }
 
   Future<List<ReelItem>> nextBatch(int amount) async {
+    if (source == ContentSource.trans) {
+      return _transRepository.nextBatch(amount);
+    }
     final fresh = <ReelItem>[];
     var emptyRounds = 0;
     var rounds = 0;
@@ -606,7 +627,17 @@ class ReelsRepository {
     return fresh;
   }
 
-  void dispose() => _client.close();
+  Future<XFreeAccountSnapshot> getXFreeAccount(String username) =>
+      _transRepository.getAccountSnapshot(username);
+
+  Future<List<Map<String, dynamic>>> getAllXFreeAuthorPosts(
+    XFreeAccountSnapshot account,
+  ) => _transRepository.getAllAuthorPosts(account);
+
+  void dispose() {
+    _client.close();
+    _transRepository.dispose();
+  }
 }
 
 String _safeReelFileToken(String value) {
@@ -623,7 +654,12 @@ String _compact(num n) => reelCompact(n);
 String _clock(Duration d) => reelClock(d);
 
 class ReelsPage extends StatefulWidget {
-  const ReelsPage({super.key, required this.active, required this.bottomInset});
+  const ReelsPage({
+    super.key,
+    required this.active,
+    required this.bottomInset,
+    required this.source,
+  });
 
   /// True only while the Reels section is the visible one. When false the
   /// page keeps its state but pauses playback and releases spare decoders.
@@ -631,13 +667,14 @@ class ReelsPage extends StatefulWidget {
 
   /// Safe-area spacing below controls; the tab bar is hidden while Reels is active.
   final double bottomInset;
+  final ContentSource source;
 
   @override
   State<ReelsPage> createState() => _ReelsPageState();
 }
 
 class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
-  final ReelsRepository _repo = ReelsRepository();
+  late ReelsRepository _repo;
   final http.Client _media = _makeClient();
   final PageController _pager = PageController(viewportFraction: 1.0);
   final FocusNode _keyboardFocus = FocusNode(debugLabel: 'Reels keyboard');
@@ -675,6 +712,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _repo = ReelsRepository(source: widget.source);
     WidgetsBinding.instance.addObserver(this);
     _clear = LocalStore.readBool(_kClearKey, fallback: false);
     if (widget.active) {
@@ -692,6 +730,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant ReelsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.source != widget.source) {
+      _resetForSourceChange();
+    }
     if (oldWidget.active == widget.active) return;
     if (widget.active) {
       _focusForKeyboard();
@@ -705,6 +746,36 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       _pauseForLeaving();
       _dropReelAd();
     }
+  }
+
+  void _resetForSourceChange() {
+    _stopReelAnalytics(_current);
+    for (final controller in _controllers.values.toList()) {
+      final listener = _controllerListeners.remove(controller);
+      if (listener != null) controller.removeListener(listener);
+      unawaited(_disposeReelController(controller));
+    }
+    _controllers.clear();
+    _reelStates.clear();
+    _analyticsWatchStarted.clear();
+    _analyticsPlayedReels.clear();
+    _repo.dispose();
+    _repo = ReelsRepository(source: widget.source);
+    _items.clear();
+    _current = 0;
+    _exhausted = false;
+    _error = null;
+    _loading = false;
+    _pendingKeyboardPage = null;
+    _reelsSinceAd = 0;
+    _dropReelAd();
+    if (mounted) {
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pager.hasClients) _pager.jumpToPage(0);
+      });
+    }
+    if (widget.active) unawaited(_loadMore(first: true));
   }
 
   void _focusForKeyboard() {
@@ -794,9 +865,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       _loading = true;
       _error = null;
     });
+    final requestRepository = _repo;
     try {
-      final batch = await _repo.nextBatch(first ? _kFirstBatch : _kNextBatch);
-      if (!mounted) return;
+      final batch = await requestRepository.nextBatch(
+        first ? _kFirstBatch : _kNextBatch,
+      );
+      if (!mounted || !identical(requestRepository, _repo)) return;
       setState(() {
         _items.addAll(batch);
         if (batch.isEmpty) _exhausted = true;
@@ -824,8 +898,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         }
       }
     } catch (e) {
+      if (!mounted || !identical(requestRepository, _repo)) return;
       if (kDebugMode) debugPrint('[REELS] load failed: ${e.runtimeType}');
-      if (!mounted) return;
       setState(() {
         _error = describeError(e, subject: 'reels').message;
         _loading = false;
@@ -937,13 +1011,18 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
   }
 
-  VideoPlayerController _build(String url, int index, {String? fallback}) {
+  VideoPlayerController _build(
+    String url,
+    int index, {
+    String? fallback,
+    Map<String, String>? headers,
+  }) {
     if (_reelStates[index] != _ReelPlaybackState.retrying) {
       _reelStates[index] = _ReelPlaybackState.loading;
     }
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(url),
-      httpHeaders: _kMediaHeaders,
+      httpHeaders: headers ?? _kMediaHeaders,
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
     );
     _attachControllerListener(controller);
@@ -977,7 +1056,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         unawaited(_disposeReelController(controller));
         if (fallback != null) {
           _reelStates[index] = _ReelPlaybackState.retrying;
-          _controllers[index] = _build(fallback, index);
+          _controllers[index] = _build(fallback, index, headers: headers);
         } else {
           _reelStates[index] = _ReelPlaybackState.failed;
         }
@@ -1001,7 +1080,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   VideoPlayerController _controllerFor(int index) {
     return _controllers.putIfAbsent(index, () {
       final item = _items[index];
-      return _build(item.videoUrl, index, fallback: item.fallbackUrl);
+      return _build(
+        item.videoUrl,
+        index,
+        fallback: item.fallbackUrl,
+        headers: _headersForReel(item),
+      );
     });
   }
 
@@ -1246,6 +1330,20 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     });
   }
 
+  void _openXFreeAccount(String username) {
+    if (widget.source != ContentSource.trans || username.trim().isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _XFreeAccountSheet(
+        repository: _repo,
+        username: username,
+      ),
+    );
+  }
+
   void _toggleLike(ReelItem item) {
     final liked = ReelFavorites.instance.toggle(item);
     Haptics.play(liked ? Haptic.medium : Haptic.light);
@@ -1370,7 +1468,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         throw const FormatException('Invalid video URL.');
       }
       file = File('${dir.path}/reel_${_safeReelFileToken(item.id)}.mp4');
-      final req = http.Request('GET', uri)..headers.addAll(_kMediaHeaders);
+      final req = http.Request('GET', uri)
+        ..headers.addAll(_headersForReel(item));
       final res = await _media.send(req).timeout(const Duration(seconds: 20));
       if (res.statusCode != 200) {
         await res.stream.drain<void>();
@@ -1482,6 +1581,10 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         onRetry: () => _retry(i),
                         onToggleLike: () => _toggleLike(item),
                         onDoubleTapLike: () => _likeFromDoubleTap(item),
+                        onOpenAuthor: widget.source == ContentSource.trans &&
+                                item.author.isNotEmpty
+                            ? () => _openXFreeAccount(item.author)
+                            : null,
                       ),
                     );
                   },
@@ -1571,6 +1674,307 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 }
 
+class _XFreeAccountSheet extends StatefulWidget {
+  const _XFreeAccountSheet({
+    required this.repository,
+    required this.username,
+  });
+
+  final ReelsRepository repository;
+  final String username;
+
+  @override
+  State<_XFreeAccountSheet> createState() => _XFreeAccountSheetState();
+}
+
+class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
+  late Future<XFreeAccountSnapshot> _accountFuture;
+  Future<List<Map<String, dynamic>>>? _allPostsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _accountFuture = widget.repository.getXFreeAccount(widget.username);
+  }
+
+  String _postTitle(Map<String, dynamic> post) {
+    final title = post['title'] ?? post['name'];
+    if (title is String && title.trim().isNotEmpty) return title.trim();
+    return 'Post ${post['id'] ?? ''}';
+  }
+
+  Widget _metric(String label, int value) => Expanded(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _compact(value),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.title.copyWith(color: Colors.white, fontSize: 18),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption.copyWith(color: Colors.white60),
+            ),
+          ],
+        ),
+      );
+
+  Widget _details(XFreeAccountSnapshot snapshot) {
+    final profile = snapshot.profile;
+    final allPosts = _allPostsFuture;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ClipOval(
+              child: SizedBox(
+                width: 64,
+                height: 64,
+                child: profile.avatarUrl == null
+                    ? const ColoredBox(
+                        color: Color(0xFF30343B),
+                        child: Icon(CupertinoIcons.person_fill, color: Colors.white70, size: 30),
+                      )
+                    : Image.network(
+                        profile.avatarUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const ColoredBox(
+                          color: Color(0xFF30343B),
+                          child: Icon(CupertinoIcons.person_fill, color: Colors.white70, size: 30),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    profile.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.title.copyWith(color: Colors.white, fontSize: 20),
+                  ),
+                  Text(
+                    '@${profile.username}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.caption.copyWith(color: Colors.white60),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (profile.bio.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(profile.bio, style: AppText.body.copyWith(color: Colors.white, height: 1.35)),
+        ],
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            _metric('Followers', profile.followers),
+            _metric('Following', profile.following),
+            _metric('Posts', profile.postsCount),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Column(
+            children: [
+              _accountDataRow('Published posts', profile.postsPublished),
+              _accountDataRow('Unlisted posts', profile.postsUnlisted),
+              _accountDataRow('Profile hits', profile.hitCount),
+              _accountDataRow('Post views', profile.postViewCount),
+              _accountDataRow('Post likes', profile.postLikeCount),
+              if (profile.lastActive.isNotEmpty)
+                _accountTextRow('Last active', profile.lastActive),
+              if (profile.lastPostDate.isNotEmpty)
+                _accountTextRow('Last post', profile.lastPostDate),
+              _accountDataRow('Pinned posts', snapshot.pinnedPosts.length),
+              _accountDataRow('First author batch', snapshot.firstAuthorPosts.length),
+              if (profile.id.isNotEmpty) _accountTextRow('User ID', profile.id),
+              if (profile.uid.isNotEmpty) _accountTextRow('UID', profile.uid),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: Text('Pinned posts', style: AppText.label.copyWith(color: Colors.white, fontSize: 15)),
+            ),
+            Text('${snapshot.pinnedPosts.length}', style: AppText.caption.copyWith(color: Colors.white60)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        if (snapshot.pinnedPosts.isEmpty)
+          Text('No pinned posts returned.', style: AppText.caption.copyWith(color: Colors.white54))
+        else
+          for (final post in snapshot.pinnedPosts.take(5))
+            _postRow(post),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: Text('Author feed', style: AppText.label.copyWith(color: Colors.white, fontSize: 15)),
+            ),
+            Text('${snapshot.firstAuthorPosts.length} loaded', style: AppText.caption.copyWith(color: Colors.white60)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: allPosts != null || snapshot.authorRecommId.isEmpty
+                ? null
+                : () => setState(() {
+                      _allPostsFuture = widget.repository.getAllXFreeAuthorPosts(snapshot);
+                    }),
+            icon: const Icon(CupertinoIcons.cloud_download),
+            label: Text(
+              snapshot.authorRecommId.isEmpty
+                  ? 'Author pagination unavailable'
+                  : 'Load all account posts',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.24)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+        if (allPosts != null) ...[
+          const SizedBox(height: 8),
+          FutureBuilder<List<Map<String, dynamic>>>(
+            future: allPosts,
+            builder: (context, state) {
+              if (state.connectionState != ConnectionState.done) {
+                return const Center(child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CupertinoActivityIndicator(color: Colors.white70),
+                ));
+              }
+              if (state.hasError) {
+                return Text('Could not load the full author feed.', style: AppText.caption.copyWith(color: Colors.redAccent));
+              }
+              final posts = state.data ?? const <Map<String, dynamic>>[];
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${posts.length} unique posts collected', style: AppText.caption.copyWith(color: Colors.white70)),
+                  for (final post in posts.take(12)) _postRow(post),
+                ],
+              );
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _accountDataRow(String label, int value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(child: Text(label, style: AppText.caption.copyWith(color: Colors.white60))),
+            Text(_compact(value), style: AppText.label.copyWith(color: Colors.white)),
+          ],
+        ),
+      );
+
+  Widget _accountTextRow(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: Text(label, style: AppText.caption.copyWith(color: Colors.white60))),
+            Flexible(child: Text(value, textAlign: TextAlign.end, style: AppText.caption.copyWith(color: Colors.white))),
+          ],
+        ),
+      );
+
+  Widget _postRow(Map<String, dynamic> post) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            const Icon(CupertinoIcons.play_rectangle, size: 14, color: Colors.white54),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _postTitle(post),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.caption.copyWith(color: Colors.white80),
+              ),
+            ),
+            Text('#${post['id'] ?? ''}', style: AppText.caption.copyWith(color: Colors.white38)),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.84),
+      decoration: BoxDecoration(
+        color: const Color(0xFF15171D),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: FutureBuilder<XFreeAccountSnapshot>(
+          future: _accountFuture,
+          builder: (context, state) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 38,
+                      height: 4,
+                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(9)),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text('XFree account', style: AppText.title.copyWith(color: Colors.white, fontSize: 18)),
+                  const SizedBox(height: 14),
+                  if (state.connectionState != ConnectionState.done)
+                    const Center(child: Padding(
+                      padding: EdgeInsets.all(28),
+                      child: CupertinoActivityIndicator(color: Colors.white70, radius: 14),
+                    ))
+                  else if (state.hasError)
+                    Text('Could not load @${widget.username}: ${state.error}', style: AppText.body.copyWith(color: Colors.white70))
+                  else if (state.data != null)
+                    _details(state.data!),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _ReelsTopBar extends StatelessWidget {
   const _ReelsTopBar({required this.clear, required this.onToggleClear});
 
@@ -1648,6 +2052,7 @@ class _ReelView extends StatefulWidget {
     required this.onRetry,
     required this.onToggleLike,
     required this.onDoubleTapLike,
+    this.onOpenAuthor,
   });
 
   final ReelItem item;
@@ -1665,6 +2070,7 @@ class _ReelView extends StatefulWidget {
   final VoidCallback onRetry;
   final VoidCallback onToggleLike;
   final bool Function() onDoubleTapLike;
+  final VoidCallback? onOpenAuthor;
 
   @override
   State<_ReelView> createState() => _ReelViewState();
@@ -1952,7 +2358,7 @@ class _ReelViewState extends State<_ReelView>
                     .round()
                     .clamp(128, 1080)
                     .toInt(),
-                headers: _kMediaHeaders,
+                headers: _headersForReel(item),
                 gaplessPlayback: true,
                 filterQuality: FilterQuality.low,
                 errorBuilder: (context, error, stackTrace) =>
@@ -2003,7 +2409,7 @@ class _ReelViewState extends State<_ReelView>
                           .round()
                           .clamp(128, 1080)
                           .toInt(),
-                      headers: _kMediaHeaders,
+                      headers: _headersForReel(item),
                       gaplessPlayback: true,
                       filterQuality: FilterQuality.low,
                       errorBuilder: (context, error, stackTrace) =>
@@ -2136,7 +2542,13 @@ class _ReelViewState extends State<_ReelView>
           left: 16,
           right: 84,
           bottom: bottom + 52,
-          child: _UiFade(hidden: hideUi, child: _InfoBlock(item: item)),
+          child: _UiFade(
+            hidden: hideUi,
+            child: _InfoBlock(
+              item: item,
+              onOpenAuthor: widget.onOpenAuthor,
+            ),
+          ),
         ),
 
         Positioned(
@@ -2319,9 +2731,10 @@ class _SkipFeedback extends StatelessWidget {
 }
 
 class _InfoBlock extends StatelessWidget {
-  const _InfoBlock({required this.item});
+  const _InfoBlock({required this.item, this.onOpenAuthor});
 
   final ReelItem item;
+  final VoidCallback? onOpenAuthor;
 
   @override
   Widget build(BuildContext context) {
@@ -2333,55 +2746,63 @@ class _InfoBlock extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (item.author.isNotEmpty)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                padding: const EdgeInsets.all(1.5),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.4),
-                ),
-                child: ClipOval(
-                  child: ColoredBox(
-                    color: const Color(0xFF30333B),
-                    child: item.avatarUrl == null
-                        ? const Icon(
-                            CupertinoIcons.person_fill,
-                            size: 18,
-                            color: Colors.white70,
-                          )
-                        : Image.network(
-                            item.avatarUrl!,
-                            fit: BoxFit.cover,
-                            cacheWidth: 108,
-                            headers: _kMediaHeaders,
-                            errorBuilder: (_, __, ___) => const Icon(
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onOpenAuthor,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  padding: const EdgeInsets.all(1.5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.4),
+                  ),
+                  child: ClipOval(
+                    child: ColoredBox(
+                      color: const Color(0xFF30333B),
+                      child: item.avatarUrl == null
+                          ? const Icon(
                               CupertinoIcons.person_fill,
                               size: 18,
                               color: Colors.white70,
+                            )
+                          : Image.network(
+                              item.avatarUrl!,
+                              fit: BoxFit.cover,
+                              cacheWidth: 108,
+                              headers: _headersForReel(item),
+                              errorBuilder: (_, __, ___) => const Icon(
+                                CupertinoIcons.person_fill,
+                                size: 18,
+                                color: Colors.white70,
+                              ),
                             ),
-                          ),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 9),
-              Flexible(
-                child: Text(
-                  '@${item.author}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.label.copyWith(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    shadows: shadow,
+                const SizedBox(width: 9),
+                Flexible(
+                  child: Text(
+                    '@${item.author}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.label.copyWith(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      shadows: shadow,
+                    ),
                   ),
                 ),
-              ),
-            ],
+                if (onOpenAuthor != null) ...[
+                  const SizedBox(width: 5),
+                  const Icon(CupertinoIcons.info_circle, size: 14, color: Colors.white70),
+                ],
+              ],
+            ),
           ),
         const SizedBox(height: 10),
         ExpandableText(

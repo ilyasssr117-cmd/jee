@@ -205,7 +205,7 @@ class XFreeTransReelsRepository {
               ? 'application/json, text/plain, */*'
               : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         })
-        .timeout(const Duration(seconds: 55));
+        .timeout(const Duration(minutes: 10));
     if (text == null || text.isEmpty) {
       throw HttpException('The iOS XFree browser returned an empty response.', uri: uri);
     }

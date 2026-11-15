@@ -68,6 +68,8 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
   private var xfreeLoading = false
   private var xfreeLoadTimeout: DispatchWorkItem?
   private var xfreeRequestTimeout: DispatchWorkItem?
+  private var xfreeConsentToolbar: UIView?
+  private var xfreeConsentRequestId: Int?
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -320,7 +322,7 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
 
     if request.url.path == "/trans/" && request.url.query == nil {
       browser.evaluateJavaScript(
-        "document.documentElement ? document.documentElement.outerHTML : ''"
+        "(() => JSON.stringify({html: document.documentElement ? document.documentElement.outerHTML : '', text: document.body ? document.body.innerText : ''}))()"
       ) { [weak self] value, error in
         guard let self = self else { return }
         if let error = error {
@@ -335,7 +337,24 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
           )
           return
         }
-        let text = value as? String ?? ""
+        guard
+          let raw = value as? String,
+          let data = raw.data(using: .utf8),
+          let page = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else {
+          self.completeXFreeRequest(
+            id: requestId,
+            text: nil,
+            error: FlutterError(
+              code: "XFREE_EMPTY_HTML",
+              message: "XFree returned an empty Trans page.",
+              details: nil
+            )
+          )
+          return
+        }
+        let text = page["html"] as? String ?? ""
+        let visibleText = page["text"] as? String ?? ""
         if text.isEmpty {
           self.completeXFreeRequest(
             id: requestId,
@@ -348,16 +367,11 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
           )
           return
         }
-        if self.isXFreeChallenge(text) {
-          self.completeXFreeRequest(
-            id: requestId,
-            text: nil,
-            error: FlutterError(
-              code: "XFREE_CHALLENGE",
-              message: "XFree is showing a browser verification page instead of the Trans feed.",
-              details: String(text.prefix(1200))
-            )
-          )
+        if self.isXFreeConsentPage(visibleText) || self.isXFreeChallenge(visibleText) {
+          // The WebView was intentionally kept hidden while normal API calls
+          // run. Age/cookie consent and browser checks require a real user tap,
+          // so temporarily bring the same WebKit session to the foreground.
+          self.presentXFreeConsent(for: requestId)
           return
         }
         self.completeXFreeRequest(id: requestId, text: text, error: nil)
@@ -463,19 +477,185 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
       )
       return
     }
-    if isXFreeChallenge(text) {
+    if isXFreeConsentPage(text) || isXFreeChallenge(text) {
+      presentXFreeConsent(for: requestId)
+      return
+    }
+    completeXFreeRequest(id: requestId, text: text, error: nil)
+  }
+
+  private func isXFreeConsentPage(_ text: String) -> Bool {
+    let lower = text.lowercased()
+    return lower.contains("only adults are allowed") ||
+      lower.contains("agree & allow all") ||
+      lower.contains("agree and allow all") ||
+      (lower.contains("cookies to personalize") && lower.contains("agree"))
+  }
+
+  /// Shows the existing WKWebView as a real, touch-enabled page when XFree
+  /// requires age/cookie consent. The pending Flutter request is deliberately
+  /// held until the user completes the page and taps Continue.
+  private func presentXFreeConsent(for requestId: Int) {
+    guard
+      let first = xfreeQueue.first,
+      first.id == requestId,
+      let browser = xfreeWebView,
+      let top = topViewController()
+    else {
       completeXFreeRequest(
         id: requestId,
         text: nil,
         error: FlutterError(
-          code: "XFREE_CHALLENGE",
-          message: "XFree returned a browser verification page to the app.",
-          details: String(text.prefix(1200))
+          code: "XFREE_CONSENT_VIEW",
+          message: "Could not show the XFree consent page.",
+          details: nil
         )
       )
       return
     }
-    completeXFreeRequest(id: requestId, text: text, error: nil)
+
+    // A human may need more than the normal network timeout to review consent.
+    xfreeRequestTimeout?.cancel()
+    xfreeRequestTimeout = nil
+    xfreeConsentRequestId = requestId
+
+    if browser.superview !== top.view {
+      browser.removeFromSuperview()
+      top.view.addSubview(browser)
+    } else {
+      top.view.bringSubviewToFront(browser)
+    }
+    browser.frame = top.view.bounds
+    browser.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    browser.alpha = 1.0
+    browser.isUserInteractionEnabled = true
+    browser.scrollView.isScrollEnabled = true
+    browser.scrollView.alwaysBounceVertical = true
+
+    xfreeConsentToolbar?.removeFromSuperview()
+
+    let toolbar = UIView()
+    toolbar.translatesAutoresizingMaskIntoConstraints = false
+    toolbar.backgroundColor = UIColor(red: 0.08, green: 0.09, blue: 0.12, alpha: 0.97)
+
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.text = "Complete the age and cookie check on XFree, then tap Continue."
+    label.textColor = .white
+    label.font = UIFont.systemFont(ofSize: 13, weight: .medium)
+    label.numberOfLines = 2
+    label.accessibilityLabel = label.text
+
+    let button = UIButton(type: .system)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setTitle("Continue", for: .normal)
+    button.setTitleColor(.white, for: .normal)
+    button.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+    button.backgroundColor = .systemBlue
+    button.layer.cornerRadius = 10
+    button.contentEdgeInsets = UIEdgeInsets(top: 9, left: 14, bottom: 9, right: 14)
+    button.addTarget(self, action: #selector(continueXFreeConsent), for: .touchUpInside)
+    button.accessibilityHint = "Continue after completing the XFree age and cookie check."
+
+    let stack = UIStackView(arrangedSubviews: [label, button])
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.axis = .horizontal
+    stack.alignment = .center
+    stack.spacing = 12
+    stack.distribution = .fill
+
+    toolbar.addSubview(stack)
+    top.view.addSubview(toolbar)
+    top.view.bringSubviewToFront(toolbar)
+
+    NSLayoutConstraint.activate([
+      toolbar.leadingAnchor.constraint(equalTo: top.view.safeAreaLayoutGuide.leadingAnchor),
+      toolbar.trailingAnchor.constraint(equalTo: top.view.safeAreaLayoutGuide.trailingAnchor),
+      toolbar.topAnchor.constraint(equalTo: top.view.safeAreaLayoutGuide.topAnchor),
+      toolbar.heightAnchor.constraint(equalToConstant: 72),
+      stack.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 14),
+      stack.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -14),
+      stack.topAnchor.constraint(equalTo: toolbar.topAnchor, constant: 8),
+      stack.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: -8),
+      button.widthAnchor.constraint(equalToConstant: 104)
+    ])
+
+    xfreeConsentToolbar = toolbar
+  }
+
+  @objc private func continueXFreeConsent() {
+    guard
+      let requestId = xfreeConsentRequestId,
+      let browser = xfreeWebView
+    else { return }
+
+    let script = """
+    (() => {
+      const body = (document.body?.innerText || '').toLowerCase();
+      const controls = Array.from(document.querySelectorAll(
+        'button,[role="button"],input[type="button"],input[type="submit"]'
+      ));
+      const visibleAgree = controls.some(el => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const label = (el.innerText || el.value || el.getAttribute('aria-label') || '').toLowerCase();
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' &&
+          style.visibility !== 'hidden' && label.includes('agree') &&
+          (label.includes('allow') || label.includes('all'));
+      });
+      return JSON.stringify({
+        needsConsent: body.includes('only adults are allowed') ||
+          body.includes('agree & allow all') || visibleAgree,
+        html: document.documentElement ? document.documentElement.outerHTML : ''
+      });
+    })();
+    """
+
+    browser.evaluateJavaScript(script) { [weak self] value, error in
+      guard let self = self else { return }
+      if let error = error {
+        self.showXFreeConsentAlert(error.localizedDescription)
+        return
+      }
+      guard
+        let raw = value as? String,
+        let data = raw.data(using: .utf8),
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+      else {
+        self.showXFreeConsentAlert("Could not verify the XFree page. Please try Continue again.")
+        return
+      }
+
+      if (payload["needsConsent"] as? Bool) == true {
+        self.showXFreeConsentAlert("Please complete the age and cookie check on the page first.")
+        return
+      }
+
+      let html = payload["html"] as? String ?? ""
+      guard !html.isEmpty else {
+        self.showXFreeConsentAlert("The XFree page is still loading. Please wait a moment and try again.")
+        return
+      }
+
+      self.dismissXFreeConsentPage()
+      self.completeXFreeRequest(id: requestId, text: html, error: nil)
+    }
+  }
+
+  private func showXFreeConsentAlert(_ message: String) {
+    guard let top = topViewController() else { return }
+    let alert = UIAlertController(title: "XFree verification", message: message, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: "OK", style: .default))
+    top.present(alert, animated: true)
+  }
+
+  private func dismissXFreeConsentPage() {
+    xfreeConsentToolbar?.removeFromSuperview()
+    xfreeConsentToolbar = nil
+    xfreeConsentRequestId = nil
+    xfreeWebView?.isUserInteractionEnabled = false
+    xfreeWebView?.scrollView.isScrollEnabled = false
+    xfreeWebView?.alpha = 0.01
   }
 
   private func isXFreeChallenge(_ text: String) -> Bool {

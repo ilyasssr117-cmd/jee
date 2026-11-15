@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/xfree_trans_reels.dart';
-import '../lib/reel_favorites.dart';
+import 'package:vxtube_final/xfree_trans_reels.dart';
+import 'package:vxtube_final/reel_favorites.dart';
 
 void main() {
   test('XFree profile parser maps known account fields and avatar URL', () {

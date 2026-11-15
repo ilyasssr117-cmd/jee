@@ -211,7 +211,7 @@ class XFreeTransReelsRepository {
       final text = utf8.decode(response.bodyBytes, allowMalformed: true);
       if (Platform.isWindows &&
           (text.contains('Just a moment') || text.contains('cf-chl-'))) {
-        return _getBrowserText(uri);
+        return await _getBrowserText(uri);
       }
       return text;
     } catch (_) {

@@ -70,6 +70,10 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
   private var xfreeRequestTimeout: DispatchWorkItem?
   private var xfreeConsentToolbar: UIView?
   private var xfreeConsentRequestId: Int?
+  // When Continue triggers a page reload, the current Flutter request stays
+  // at the head of the queue. didFinish must release its active slot and retry it.
+  private var xfreeConsentReloadRequestId: Int?
+  private var xfreeConsentReloadedRequestId: Int?
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -266,6 +270,21 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     xfreeLoadTimeout = nil
     xfreeLoading = false
     xfreeReady = true
+
+    // The Continue action reloads /trans/ so XFree can apply the consent
+    // cookies. The original request is still queued and was still marked
+    // active, so simply calling runNextXFreeRequest() would do nothing and
+    // leave Flutter's loading indicator spinning forever. Release that slot
+    // and retry the same queued request against the freshly loaded document.
+    if let retryId = xfreeConsentReloadRequestId,
+       xfreeQueue.first?.id == retryId {
+      xfreeConsentReloadRequestId = nil
+      xfreeConsentReloadedRequestId = retryId
+      xfreeActiveRequestId = nil
+      runNextXFreeRequest()
+      return
+    }
+
     runNextXFreeRequest()
   }
 
@@ -379,12 +398,19 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
           options: .regularExpression
         ) != nil
 
-        // Keep consent, challenge, and not-yet-hydrated pages visible. Hide
-        // the browser only after the actual Trans feed token is present.
-        if isConsent || isChallenge || !hasRecommId {
+        // A real consent/challenge page must remain interactive. If the user
+        // has already completed consent and we have reloaded once, return the
+        // HTML even without recommId so Dart can show a concrete parse error
+        // instead of waiting forever. The user can then retry from the UI.
+        if isConsent || isChallenge {
           self.presentXFreeConsent(for: requestId)
           return
         }
+        if !hasRecommId && self.xfreeConsentReloadedRequestId != requestId {
+          self.presentXFreeConsent(for: requestId)
+          return
+        }
+        self.xfreeConsentReloadedRequestId = nil
         self.dismissXFreeConsentPage()
         self.completeXFreeRequest(id: requestId, text: text, error: nil)
       }
@@ -662,11 +688,29 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
         return
       }
       guard (payload["hasRecommId"] as? Bool) == true else {
-        self.showXFreeConsentAlert("Refreshing XFree after the consent step. When the page finishes loading, tap Continue again.")
+        // Reload after consent so the server can apply the newly stored
+        // cookies. didFinish navigation resumes the *same* queued Flutter
+        // request; it must clear xfreeActiveRequestId first (see above).
+        self.xfreeConsentReloadRequestId = requestId
+        self.xfreeLoading = true
+        let reloadTimeout = DispatchWorkItem { [weak self] in
+          guard let self = self,
+                self.xfreeConsentReloadRequestId == requestId else { return }
+          self.xfreeConsentReloadRequestId = nil
+          self.failXFreeQueue(
+            code: "XFREE_CONSENT_RELOAD_TIMEOUT",
+            message: "XFree did not finish reloading after consent. Check the connection and try again."
+          )
+        }
+        self.xfreeLoadTimeout?.cancel()
+        self.xfreeLoadTimeout = reloadTimeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: reloadTimeout)
         browser.reload()
         return
       }
 
+      self.xfreeConsentReloadRequestId = nil
+      self.xfreeConsentReloadedRequestId = nil
       self.dismissXFreeConsentPage()
       self.completeXFreeRequest(id: requestId, text: html, error: nil)
     }
@@ -704,6 +748,8 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     xfreeRequestTimeout?.cancel()
     xfreeRequestTimeout = nil
     xfreeActiveRequestId = nil
+    if xfreeConsentReloadRequestId == id { xfreeConsentReloadRequestId = nil }
+    if xfreeConsentReloadedRequestId == id { xfreeConsentReloadedRequestId = nil }
     _ = xfreeQueue.removeFirst()
     if let error = error {
       first.result(error)
@@ -720,6 +766,8 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     xfreeRequestTimeout = nil
     xfreeLoading = false
     xfreeActiveRequestId = nil
+    xfreeConsentReloadRequestId = nil
+    xfreeConsentReloadedRequestId = nil
     let queued = xfreeQueue
     xfreeQueue.removeAll()
     for request in queued {

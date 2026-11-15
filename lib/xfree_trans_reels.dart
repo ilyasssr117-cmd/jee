@@ -169,6 +169,7 @@ class XFreeTransReelsRepository {
   final Set<String> _seenPosts = <String>{};
   final List<Map<String, dynamic>> _pendingPosts = <Map<String, dynamic>>[];
   String? _categoryRecommId;
+  String? _lastResolveError;
   bool _disposed = false;
 
   static http.Client _createClient() {
@@ -324,23 +325,35 @@ class XFreeTransReelsRepository {
 
   Future<List<ReelItem>> nextBatch(int amount) =>
       _nextBatchInternal(amount).timeout(
-        const Duration(seconds: 100),
+        const Duration(seconds: 58),
         onTimeout: () => throw TimeoutException(
-          'XFree Trans took too long to prepare videos. Check the connection and retry.',
+          'XFree did not finish loading this batch within 58 seconds. Tap Try again.',
         ),
       );
 
   Future<List<ReelItem>> _nextBatchInternal(int amount) async {
     final recommId = await _ensureCategoryRecommId();
     final ready = <ReelItem>[];
+    final deferredFailedPosts = <Map<String, dynamic>>[];
     var fetchRounds = 0;
-    while (ready.length < amount && fetchRounds < 5) {
+    var attemptedPosts = 0;
+    var failedPosts = 0;
+    final maxAttempts = amount * 2 > 4 ? amount * 2 : 4;
+    _lastResolveError = null;
+
+    // Never walk through an entire 18-post server page while silently dropping
+    // every video that fails to resolve. A small bounded attempt count lets
+    // Reels show an actionable error instead of spinning for minutes.
+    while (ready.length < amount &&
+        attemptedPosts < maxAttempts &&
+        fetchRounds < 4) {
       if (_pendingPosts.isEmpty) {
         fetchRounds++;
         final posts = await _fetchNextPosts(recommId, limit: 18);
         for (final post in posts) {
           final id = '${post['id'] ?? ''}'.trim();
-          if (id.isNotEmpty && !_seenPosts.contains(id) &&
+          if (id.isNotEmpty &&
+              !_seenPosts.contains(id) &&
               !_pendingPosts.any((queued) => '${queued['id']}' == id)) {
             _pendingPosts.add(post);
           }
@@ -348,17 +361,49 @@ class XFreeTransReelsRepository {
         if (_pendingPosts.isEmpty) break;
       }
 
+      final remainingAttempts = maxAttempts - attemptedPosts;
       final count = (amount - ready.length).clamp(1, 3).toInt();
-      final group = _pendingPosts.take(count).toList(growable: false);
+      final takeCount = count < remainingAttempts ? count : remainingAttempts;
+      final group = _pendingPosts.take(takeCount).toList(growable: false);
       _pendingPosts.removeRange(0, group.length);
+      attemptedPosts += group.length;
+
+      // WebKit serializes these requests through one persistent page. Keep the
+      // group small so the first playable items can reach the UI promptly.
+      final resolved = await Future.wait(group.map(_postToReel));
+      final valid = resolved.whereType<ReelItem>().toList(growable: false);
+      ready.addAll(valid);
+      final resolvedIds = valid.map((item) => item.id).toSet();
+      for (final id in resolvedIds) {
+        _seenPosts.add(id);
+      }
       for (final post in group) {
         final id = '${post['id'] ?? ''}'.trim();
-        if (id.isNotEmpty) _seenPosts.add(id);
+        if (id.isNotEmpty && !resolvedIds.contains(id)) {
+          failedPosts++;
+          deferredFailedPosts.add(post);
+        }
       }
-      // Resolve stream URLs from each /video?id= page. Keep concurrency low to
-      // avoid flooding the source and to limit memory/network pressure.
-      final resolved = await Future.wait(group.map(_postToReel));
-      ready.addAll(resolved.whereType<ReelItem>());
+    }
+
+    // Keep failed IDs retryable; previously they were marked seen before the
+    // stream page was verified, so one transient failure permanently skipped
+    // those posts for the life of the Reels screen.
+    if (deferredFailedPosts.isNotEmpty) {
+      final alreadyQueued = _pendingPosts.map((post) => '${post['id']}').toSet();
+      _pendingPosts.insertAll(
+        0,
+        deferredFailedPosts.where(
+          (post) => !alreadyQueued.contains('${post['id']}'),
+        ),
+      );
+    }
+
+    if (ready.isEmpty && attemptedPosts > 0 && failedPosts == attemptedPosts) {
+      throw FormatException(
+        _lastResolveError ??
+            'XFree returned posts, but none of their video pages contained a playable stream URL.',
+      );
     }
     return ready.take(amount).toList(growable: false);
   }
@@ -395,7 +440,17 @@ class XFreeTransReelsRepository {
         document = html.parse(page);
         stream = _xfreeAbsoluteUrl(readMeta('twitter:player:stream'));
       }
-      if (stream == null) return null;
+      if (stream == null) {
+        final lowerPage = page.toLowerCase();
+        _lastResolveError = lowerPage.contains('only adults are allowed') ||
+                lowerPage.contains('agree & allow all')
+            ? 'XFree is still returning its age/cookie page for video $id. Complete the check in the browser, then retry.'
+            : lowerPage.contains('just a moment') || lowerPage.contains('cf-chl-')
+                ? 'XFree returned a browser verification page for video $id. Complete the verification, then retry.'
+                : 'XFree video $id did not contain the twitter:player:stream metadata. The feed posts loaded, but the playback URL could not be extracted.';
+        if (kDebugMode) debugPrint('[XFREE] $_lastResolveError');
+        return null;
+      }
       final thumb = _xfreeAbsoluteUrl(readMeta('twitter:image'));
       final seconds = _xfreeInt(media['duration'] ?? post['duration']);
       final views = _xfreeInt(post['views'] ?? post['viewCount'] ?? post['viewsCount']);
@@ -404,7 +459,7 @@ class XFreeTransReelsRepository {
         id: id,
         videoUrl: stream,
         downloadUrl: stream,
-        mediaReferer: '$_xfreeBase/',
+        mediaReferer: detailsUri.toString(),
         title: _xfreeString(media['name']) ??
             _xfreeString(post['name']) ??
             _xfreeString(post['title']) ??
@@ -418,7 +473,8 @@ class XFreeTransReelsRepository {
         tags: tags,
       );
     } catch (error) {
-      if (kDebugMode) debugPrint('[XFREE] video $id could not be resolved: $error');
+      _lastResolveError = 'Could not resolve XFree video $id: $error';
+      if (kDebugMode) debugPrint('[XFREE] $_lastResolveError');
       return null;
     }
   }

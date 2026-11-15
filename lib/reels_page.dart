@@ -867,9 +867,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     });
     final requestRepository = _repo;
     try {
-      final batch = await requestRepository.nextBatch(
-        first ? _kFirstBatch : _kNextBatch,
-      );
+      // XFree needs one detail-page request per post to resolve the stream
+      // URL. Fetch a small first page so the first reel can appear quickly;
+      // subsequent loads fill the buffer while the user watches.
+      final batchSize = widget.source == ContentSource.trans
+          ? (first ? 1 : 3)
+          : (first ? _kFirstBatch : _kNextBatch);
+      final batch = await requestRepository.nextBatch(batchSize);
       if (!mounted || !identical(requestRepository, _repo)) return;
       setState(() {
         _items.addAll(batch);

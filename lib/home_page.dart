@@ -131,8 +131,25 @@ class _HomePageState extends State<HomePage>
       _changeContentSource(source);
     } else {
       setState(() => _sourceChoiceReady = true);
-      _loadPage(reset: true);
+      unawaited(_loadPage(reset: true));
+      _openReelsForTrans(source);
     }
+  }
+
+  /// Trans is backed by the XFree Reels feed in this app. Selecting it should
+  /// take the user to the surface that actually consumes that provider, rather
+  /// than leaving them on the catalog page and making the selection appear to
+  /// have done nothing.
+  void _openReelsForTrans(ContentSource source) {
+    if (source != ContentSource.trans) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_availableSections.contains(_Section.reels)) {
+        _toast('Reels is currently unavailable.');
+        return;
+      }
+      _transitionToSection(_Section.reels);
+    });
   }
 
   Timer? _offlineTimer;
@@ -661,7 +678,10 @@ class _HomePageState extends State<HomePage>
   }
 
   void _changeContentSource(ContentSource source) {
-    if (source == videoRepository.source) return;
+    if (source == videoRepository.source) {
+      _openReelsForTrans(source);
+      return;
+    }
     Haptics.play(Haptic.selection);
     PreviewManager.instance.stopNow(fade: false);
     videoRepository.setSource(source);
@@ -680,6 +700,7 @@ class _HomePageState extends State<HomePage>
     });
     _scrollToTop();
     unawaited(_loadPage(reset: true));
+    _openReelsForTrans(source);
   }
 
   @override

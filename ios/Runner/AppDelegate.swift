@@ -215,11 +215,13 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
       browser.isUserInteractionEnabled = true
       browser.accessibilityElementsHidden = false
       browser.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-      // Keep the real XFree page visible and touchable during its first load.
-      // Hiding it before consent detection made the gate appear black and
-      // prevented users from interacting with the website.
-      browser.alpha = 1.0
+      // Keep WebKit attached and running as a persistent network session,
+      // but never cover Flutter during ordinary requests. It is revealed only
+      // by presentXFreeConsent() when the user must interact with the site.
+      browser.alpha = 0.0
       browser.isHidden = false
+      browser.isUserInteractionEnabled = false
+      browser.accessibilityElementsHidden = true
       browser.frame = top.view.bounds
       top.view.addSubview(browser)
       top.view.bringSubviewToFront(browser)
@@ -332,19 +334,45 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     DispatchQueue.main.asyncAfter(deadline: .now() + 22, execute: timeout)
 
     if request.url.path == "/trans/" && request.url.query == nil {
-      // XFree hydrates the feed asynchronously after WKNavigationDelegate's
-      // didFinish callback. A one-shot DOM read races that hydration and can
-      // send an empty recommId back to Dart. Poll until the feed token appears,
-      // a consent/challenge page is detected, or a bounded deadline expires.
+      // The Trans route may hydrate its recommId from client-side state after
+      // the first document load. Inspect the live DOM, embedded app state and
+      // same-page resource URLs rather than relying on the original HTML only.
       let script = """
       (() => {
         const requestId = \(requestId);
         const started = Date.now();
-        const maxWaitMs = 16000;
-        const inspect = () => {
+        const maxWaitMs = 18000;
+        const tokenPattern = /rec_[A-Za-z0-9_-]{6,}/;
+        const scan = () => {
           const html = document.documentElement ? document.documentElement.outerHTML : '';
-          const text = document.body ? document.body.innerText : '';
-          const lower = text.toLowerCase();
+          const isVisible = element => {
+            const style = window.getComputedStyle(element);
+            const rects = element.getClientRects();
+            return style.display !== 'none' && style.visibility !== 'hidden' &&
+              Number(style.opacity || 1) > 0.02 && rects.length > 0;
+          };
+          const visibleText = Array.from(document.querySelectorAll('body *'))
+            .filter(element => element.children.length === 0 && isVisible(element))
+            .map(element => (element.innerText || element.textContent || '').trim())
+            .filter(Boolean).join(' ');
+          const sources = [html];
+          for (const key of ['__NUXT__', '__INITIAL_STATE__', '__NEXT_DATA__', '__APOLLO_STATE__']) {
+            try {
+              if (window[key] != null) sources.push(JSON.stringify(window[key]));
+            } catch (_) {}
+          }
+          try {
+            sources.push(Array.from(document.scripts).map(s => s.textContent || '').join('\\n'));
+          } catch (_) {}
+          try {
+            sources.push(performance.getEntriesByType('resource').map(e => e.name).join('\\n'));
+          } catch (_) {}
+          let token = null;
+          for (const source of sources) {
+            const match = String(source || '').match(tokenPattern);
+            if (match) { token = match[0]; break; }
+          }
+          const lower = visibleText.toLowerCase();
           const consent = lower.includes('only adults are allowed') ||
             lower.includes('agree & allow all') ||
             lower.includes('agree and allow all') ||
@@ -353,17 +381,23 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
             lower.includes('checking your browser') ||
             lower.includes('verify you are human') ||
             !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-          const hasRecommId = /rec_[A-Za-z0-9_-]{6,}/.test(html);
-          if (consent || challenge || hasRecommId || Date.now() - started >= maxWaitMs) {
+          return { html, visibleText, token, consent, challenge };
+        };
+        const inspect = () => {
+          const snapshot = scan();
+          if (snapshot.consent || snapshot.challenge || snapshot.token || Date.now() - started >= maxWaitMs) {
+            const text = snapshot.token && !snapshot.html.includes(snapshot.token)
+              ? snapshot.html + '\\n<!-- recommId: ' + snapshot.token + ' -->'
+              : snapshot.html;
             window.webkit.messageHandlers.xfreeResult.postMessage(JSON.stringify({
               id: requestId,
               kind: 'transPage',
-              text: html,
-              visibleText: text,
-              hasRecommId,
-              consent,
-              challenge,
-              timedOut: !consent && !challenge && !hasRecommId
+              text,
+              visibleText: snapshot.visibleText,
+              hasRecommId: !!snapshot.token,
+              consent: snapshot.consent,
+              challenge: snapshot.challenge,
+              timedOut: !snapshot.token && !snapshot.consent && !snapshot.challenge
             }));
             return;
           }
@@ -411,7 +445,16 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     let script = """
     (() => {
       const requestId = \(requestId);
-      fetch(\(urlLiteral), {
+      const requested = new URL(\(urlLiteral));
+      const currentHost = location.hostname.toLowerCase();
+      if ((currentHost === 'xfree.com' || currentHost.endsWith('.xfree.com')) &&
+          (requested.hostname === 'xfree.com' || requested.hostname.endsWith('.xfree.com'))) {
+        // Keep the request on the exact origin currently holding the accepted
+        // WebKit session (www and non-www are different browser origins).
+        requested.protocol = location.protocol;
+        requested.host = location.host;
+      }
+      fetch(requested.toString(), {
         method: 'GET',
         credentials: 'include',
         cache: 'no-store',
@@ -701,65 +744,104 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
       )
     }
     xfreeRequestTimeout = timeout
-    DispatchQueue.main.asyncAfter(deadline: .now() + 26, execute: timeout)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 38, execute: timeout)
 
     let script = """
     (() => {
       const requestId = \(requestId);
-      const post = (payload) => {
-        window.webkit.messageHandlers.xfreeResult.postMessage(JSON.stringify({ id: requestId, kind: 'transPage', ...payload }));
-      };
-      const currentHtml = () => document.documentElement ? document.documentElement.outerHTML : '';
-      const hasToken = value => /rec_[A-Za-z0-9_-]{6,}/.test(value || '');
-      const textFromHtml = value => {
-        try { return new DOMParser().parseFromString(value || '', 'text/html').body?.innerText || ''; }
-        catch (_) { return ''; }
-      };
-      const isConsent = value => {
-        const lower = (value || '').toLowerCase();
-        return lower.includes('only adults are allowed') ||
-          lower.includes('agree & allow all') ||
-          lower.includes('agree and allow all') ||
-          (lower.includes('cookies to personalize') && lower.includes('agree'));
-      };
-      const isChallenge = value => {
-        const lower = (value || '').toLowerCase();
-        return lower.includes('just a moment') || lower.includes('checking your browser') ||
-          lower.includes('verify you are human') || lower.includes('cf-chl-') ||
-          lower.includes('challenge-platform');
-      };
-      const current = currentHtml();
-      if (hasToken(current)) {
-        post({ text: current, visibleText: document.body?.innerText || '', hasRecommId: true, consent: false, challenge: false, timedOut: false, status: 200 });
-        return true;
-      }
-      // Let the page's own click handler finish writing consent cookies.
-      setTimeout(async () => {
+      const started = Date.now();
+      const maxWaitMs = 18000;
+      let probed = false;
+      const tokenPattern = /rec_[A-Za-z0-9_-]{6,}/;
+      const post = payload => window.webkit.messageHandlers.xfreeResult.postMessage(
+        JSON.stringify({ id: requestId, kind: 'transPage', ...payload })
+      );
+      const scan = extra => {
+        const html = document.documentElement ? document.documentElement.outerHTML : '';
+        const isVisible = element => {
+          const style = window.getComputedStyle(element);
+          const rects = element.getClientRects();
+          return style.display !== 'none' && style.visibility !== 'hidden' &&
+            Number(style.opacity || 1) > 0.02 && rects.length > 0;
+        };
+        const visibleText = Array.from(document.querySelectorAll('body *'))
+          .filter(element => element.children.length === 0 && isVisible(element))
+          .map(element => (element.innerText || element.textContent || '').trim())
+          .filter(Boolean).join(' ');
+        const sources = [html, extra || ''];
+        for (const key of ['__NUXT__', '__INITIAL_STATE__', '__NEXT_DATA__', '__APOLLO_STATE__']) {
+          try {
+            if (window[key] != null) sources.push(JSON.stringify(window[key]));
+          } catch (_) {}
+        }
         try {
-          const response = await fetch('/trans/', {
+          sources.push(Array.from(document.scripts).map(s => s.textContent || '').join('\\n'));
+          sources.push(performance.getEntriesByType('resource').map(e => e.name).join('\\n'));
+        } catch (_) {}
+        let token = null;
+        for (const source of sources) {
+          const match = String(source || '').match(tokenPattern);
+          if (match) { token = match[0]; break; }
+        }
+        const lower = visibleText.toLowerCase();
+        const consent = lower.includes('only adults are allowed') ||
+          lower.includes('agree & allow all') || lower.includes('agree and allow all') ||
+          (lower.includes('cookies to personalize') && lower.includes('agree'));
+        const challenge = lower.includes('just a moment') || lower.includes('checking your browser') ||
+          lower.includes('verify you are human') || lower.includes('cf-chl-') ||
+          !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+        return { html, visibleText, token, consent, challenge };
+      };
+      const finish = (snapshot, status = 200) => {
+        const text = snapshot.token && !snapshot.html.includes(snapshot.token)
+          ? snapshot.html + '\\n<!-- recommId: ' + snapshot.token + ' -->'
+          : snapshot.html;
+        post({
+          text,
+          visibleText: snapshot.visibleText,
+          hasRecommId: !!snapshot.token,
+          consent: snapshot.consent,
+          challenge: snapshot.challenge,
+          timedOut: !snapshot.token && !snapshot.consent && !snapshot.challenge,
+          status
+        });
+      };
+      const inspect = () => {
+        const snapshot = scan('');
+        if (snapshot.token) { finish(snapshot); return; }
+        if ((snapshot.consent || snapshot.challenge) && Date.now() - started > 3500) {
+          finish(snapshot); return;
+        }
+        if (Date.now() - started < maxWaitMs) {
+          setTimeout(inspect, 350);
+          return;
+        }
+        // The page may have accepted the choice but still need a fresh
+        // same-origin document response to expose its feed token. This is a
+        // background fetch: it does not navigate or reload the visible page.
+        if (!probed) {
+          probed = true;
+          fetch('/trans/', {
             method: 'GET',
             credentials: 'include',
             cache: 'no-store',
             headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
+          }).then(async response => {
+            const body = await response.text();
+            const after = scan(body);
+            finish(after, response.status);
+          }).catch(error => {
+            const after = scan('');
+            post({
+              error: String(error), text: after.html, visibleText: after.visibleText,
+              hasRecommId: !!after.token, consent: after.consent,
+              challenge: after.challenge, timedOut: true
+            });
           });
-          const html = await response.text();
-          const visibleText = textFromHtml(html);
-          const token = hasToken(html);
-          const challenge = isChallenge(html);
-          const consent = isConsent(visibleText);
-          post({
-            text: html,
-            visibleText,
-            hasRecommId: token,
-            consent,
-            challenge,
-            timedOut: !token && !consent && !challenge,
-            status: response.status
-          });
-        } catch (error) {
-          post({ error: String(error), text: '', visibleText: '', hasRecommId: false, consent: false, challenge: false, timedOut: false });
+          return;
         }
-      }, 700);
+      };
+      inspect();
       return true;
     })();
     """
@@ -798,8 +880,11 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     if let browser = xfreeWebView {
       browser.isUserInteractionEnabled = false
       browser.scrollView.isScrollEnabled = false
+      browser.accessibilityElementsHidden = true
       browser.alpha = 0.0
-      browser.isHidden = true
+      // Do not set isHidden: WebKit remains attached and can service future
+      // evaluateJavaScript/fetch calls using the same persistent cookie store.
+      browser.isHidden = false
     }
   }
 
@@ -816,11 +901,13 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     error: FlutterError?
   ) {
     guard let first = xfreeQueue.first, first.id == id else { return }
-    let wasConsentFlow = xfreeConsentRequestId == id || xfreeConsentCheckRequestId == id
     xfreeRequestTimeout?.cancel()
     xfreeRequestTimeout = nil
     xfreeActiveRequestId = nil
-    if wasConsentFlow { dismissXFreeConsentPage() }
+    // The WebView is only a transport surface. Once any request finishes it
+    // must never remain over the Flutter Reels UI; the next consent response
+    // will explicitly reveal it again if user interaction is required.
+    dismissXFreeConsentPage()
     if xfreeConsentCheckRequestId == id { xfreeConsentCheckRequestId = nil }
     _ = xfreeQueue.removeFirst()
     if let error = error {

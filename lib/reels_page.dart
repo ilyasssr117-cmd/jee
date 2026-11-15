@@ -1923,7 +1923,7 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
                 _postTitle(post),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.caption.copyWith(color: Colors.white80),
+                style: AppText.caption.copyWith(color: const Color(0xCCFFFFFF)),
               ),
             ),
             Text('#${post['id'] ?? ''}', style: AppText.caption.copyWith(color: Colors.white38)),

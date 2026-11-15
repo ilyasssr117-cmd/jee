@@ -899,9 +899,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (!mounted || !identical(requestRepository, _repo)) return;
-      if (kDebugMode) debugPrint('[REELS] load failed: ${e.runtimeType}');
+      if (kDebugMode) debugPrint('[REELS] load failed: $e');
       setState(() {
-        _error = describeError(e, subject: 'reels').message;
+        // Keep XFree's native/WebKit error visible while diagnosing iOS.
+        // Other Reels providers retain the existing friendly error copy.
+        _error = widget.source == ContentSource.trans
+            ? e.toString().replaceFirst('Exception: ', '')
+            : describeError(e, subject: 'reels').message;
         _loading = false;
         _pendingKeyboardPage = null;
       });
@@ -1919,7 +1923,7 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
                 _postTitle(post),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppText.caption.copyWith(color: Colors.white.withValues(alpha: 0.80)),
+                style: AppText.caption.copyWith(color: Colors.white80),
               ),
             ),
             Text('#${post['id'] ?? ''}', style: AppText.caption.copyWith(color: Colors.white38)),

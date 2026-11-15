@@ -205,7 +205,7 @@ class XFreeTransReelsRepository {
               ? 'application/json, text/plain, */*'
               : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         })
-        .timeout(const Duration(minutes: 10));
+        .timeout(const Duration(seconds: 38));
     if (text == null || text.isEmpty) {
       throw HttpException('The iOS XFree browser returned an empty response.', uri: uri);
     }
@@ -322,7 +322,15 @@ class XFreeTransReelsRepository {
     return posts;
   }
 
-  Future<List<ReelItem>> nextBatch(int amount) async {
+  Future<List<ReelItem>> nextBatch(int amount) =>
+      _nextBatchInternal(amount).timeout(
+        const Duration(seconds: 100),
+        onTimeout: () => throw TimeoutException(
+          'XFree Trans took too long to prepare videos. Check the connection and retry.',
+        ),
+      );
+
+  Future<List<ReelItem>> _nextBatchInternal(int amount) async {
     final recommId = await _ensureCategoryRecommId();
     final ready = <ReelItem>[];
     var fetchRounds = 0;
@@ -410,7 +418,7 @@ class XFreeTransReelsRepository {
         tags: tags,
       );
     } catch (error) {
-      if (kDebugMode) debugPrint('[XFREE] video $id could not be resolved: ${error.runtimeType}');
+      if (kDebugMode) debugPrint('[XFREE] video $id could not be resolved: $error');
       return null;
     }
   }

@@ -205,17 +205,20 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
         configuration: configuration
       )
       browser.navigationDelegate = self
-      browser.isOpaque = false
-      browser.backgroundColor = .clear
-      browser.scrollView.isScrollEnabled = false
-      browser.isUserInteractionEnabled = false
-      browser.accessibilityElementsHidden = true
+      browser.isOpaque = true
+      browser.backgroundColor = .systemBackground
+      browser.scrollView.isScrollEnabled = true
+      browser.scrollView.alwaysBounceVertical = true
+      browser.isUserInteractionEnabled = true
+      browser.accessibilityElementsHidden = false
       browser.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-      // Keep a real viewport so responsive layouts and browser checks behave
-      // like an ordinary iPhone page. The view is visually transparent and
-      // does not intercept touches intended for Flutter.
-      browser.alpha = 0.01
+      // Keep the real XFree page visible and touchable during its first load.
+      // Hiding it before consent detection made the gate appear black and
+      // prevented users from interacting with the website.
+      browser.alpha = 1.0
+      browser.frame = top.view.bounds
       top.view.addSubview(browser)
+      top.view.bringSubviewToFront(browser)
       xfreeWebView = browser
     }
 
@@ -367,13 +370,22 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
           )
           return
         }
-        if self.isXFreeConsentPage(visibleText) || self.isXFreeChallenge(visibleText) {
-          // The WebView was intentionally kept hidden while normal API calls
-          // run. Age/cookie consent and browser checks require a real user tap,
-          // so temporarily bring the same WebKit session to the foreground.
+        let isConsent = self.isXFreeConsentPage(visibleText) ||
+          self.isXFreeConsentPage(text)
+        let isChallenge = self.isXFreeChallenge(visibleText) ||
+          self.isXFreeChallenge(text)
+        let hasRecommId = text.range(
+          of: #"rec_[A-Za-z0-9_-]{6,}"#,
+          options: .regularExpression
+        ) != nil
+
+        // Keep consent, challenge, and not-yet-hydrated pages visible. Hide
+        // the browser only after the actual Trans feed token is present.
+        if isConsent || isChallenge || !hasRecommId {
           self.presentXFreeConsent(for: requestId)
           return
         }
+        self.dismissXFreeConsentPage()
         self.completeXFreeRequest(id: requestId, text: text, error: nil)
       }
       return
@@ -465,6 +477,13 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
 
     let status = payload["status"] as? Int ?? 0
     let text = payload["text"] as? String ?? ""
+    // XFree may answer an API request with an HTML consent/Cloudflare page.
+    // Display that page instead of returning an opaque HTTP error to Flutter.
+    if isXFreeConsentPage(text) || isXFreeChallenge(text) ||
+       (text.lowercased().contains("<html") && status != 200) {
+      presentXFreeConsent(for: requestId)
+      return
+    }
     if status != 200 {
       completeXFreeRequest(
         id: requestId,
@@ -475,10 +494,6 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
           details: String(text.prefix(1200))
         )
       )
-      return
-    }
-    if isXFreeConsentPage(text) || isXFreeChallenge(text) {
-      presentXFreeConsent(for: requestId)
       return
     }
     completeXFreeRequest(id: requestId, text: text, error: nil)
@@ -529,7 +544,9 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     browser.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     browser.alpha = 1.0
     browser.isUserInteractionEnabled = true
+    browser.accessibilityElementsHidden = false
     browser.scrollView.isScrollEnabled = true
+    top.view.bringSubviewToFront(browser)
     browser.scrollView.alwaysBounceVertical = true
 
     xfreeConsentToolbar?.removeFromSuperview()
@@ -591,22 +608,30 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
 
     let script = """
     (() => {
-      const body = (document.body?.innerText || '').toLowerCase();
       const controls = Array.from(document.querySelectorAll(
-        'button,[role="button"],input[type="button"],input[type="submit"]'
+        'button,a,[role="button"],input[type="button"],input[type="submit"]'
       ));
-      const visibleAgree = controls.some(el => {
+      const visibleConsentControl = controls.some(el => {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         const label = (el.innerText || el.value || el.getAttribute('aria-label') || '').toLowerCase();
-        return rect.width > 0 && rect.height > 0 && style.display !== 'none' &&
-          style.visibility !== 'hidden' && label.includes('agree') &&
-          (label.includes('allow') || label.includes('all'));
+        const visible = rect.width > 0 && rect.height > 0 &&
+          style.display !== 'none' && style.visibility !== 'hidden' &&
+          Number(style.opacity || '1') > 0.05;
+        return visible && (label.includes('agree') || label.includes('allow all') ||
+          label.includes('i am over') || label.includes('over 18') ||
+          label.includes('confirm age'));
       });
+      const html = document.documentElement ? document.documentElement.outerHTML : '';
+      const bodyText = (document.body?.innerText || '').toLowerCase();
+      const challengeFrame = !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+      const challenge = challengeFrame || bodyText.includes('just a moment') ||
+        bodyText.includes('checking your browser') || bodyText.includes('verify you are human');
+      const recommId = /rec_[A-Za-z0-9_-]{6,}/.test(html);
       return JSON.stringify({
-        needsConsent: body.includes('only adults are allowed') ||
-          body.includes('agree & allow all') || visibleAgree,
-        html: document.documentElement ? document.documentElement.outerHTML : ''
+        needsConsent: visibleConsentControl || challenge,
+        hasRecommId: recommId,
+        html: html
       });
     })();
     """
@@ -627,13 +652,18 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
       }
 
       if (payload["needsConsent"] as? Bool) == true {
-        self.showXFreeConsentAlert("Please complete the age and cookie check on the page first.")
+        self.showXFreeConsentAlert("Please finish the age or cookie check on the page first.")
         return
       }
 
       let html = payload["html"] as? String ?? ""
       guard !html.isEmpty else {
-        self.showXFreeConsentAlert("The XFree page is still loading. Please wait a moment and try again.")
+        self.showXFreeConsentAlert("The XFree page is still loading. Wait a moment and try Continue again.")
+        return
+      }
+      guard (payload["hasRecommId"] as? Bool) == true else {
+        self.showXFreeConsentAlert("Refreshing XFree after the consent step. When the page finishes loading, tap Continue again.")
+        browser.reload()
         return
       }
 

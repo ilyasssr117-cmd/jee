@@ -70,10 +70,9 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
   private var xfreeRequestTimeout: DispatchWorkItem?
   private var xfreeConsentToolbar: UIView?
   private var xfreeConsentRequestId: Int?
-  // When Continue triggers a page reload, the current Flutter request stays
-  // at the head of the queue. didFinish must release its active slot and retry it.
-  private var xfreeConsentReloadRequestId: Int?
-  private var xfreeConsentReloadedRequestId: Int?
+  // The consent page stays in the existing WKWebView. Continue checks the
+  // accepted session with a same-origin fetch; it must not navigate/reload it.
+  private var xfreeConsentCheckRequestId: Int?
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
@@ -220,6 +219,7 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
       // Hiding it before consent detection made the gate appear black and
       // prevented users from interacting with the website.
       browser.alpha = 1.0
+      browser.isHidden = false
       browser.frame = top.view.bounds
       top.view.addSubview(browser)
       top.view.bringSubviewToFront(browser)
@@ -271,19 +271,9 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     xfreeLoading = false
     xfreeReady = true
 
-    // The Continue action reloads /trans/ so XFree can apply the consent
-    // cookies. The original request is still queued and was still marked
-    // active, so simply calling runNextXFreeRequest() would do nothing and
-    // leave Flutter's loading indicator spinning forever. Release that slot
-    // and retry the same queued request against the freshly loaded document.
-    if let retryId = xfreeConsentReloadRequestId,
-       xfreeQueue.first?.id == retryId {
-      xfreeConsentReloadedRequestId = retryId
-      xfreeActiveRequestId = nil
-      runNextXFreeRequest()
-      return
-    }
-
+    // Consent completion is checked with fetch() from the current page.
+    // Continue deliberately does not navigate, so didFinish only starts a
+    // request if one is already queued and idle.
     runNextXFreeRequest()
   }
 
@@ -475,8 +465,44 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
       let needsConsent = (payload["consent"] as? Bool) == true
       let challenge = (payload["challenge"] as? Bool) == true
       let timedOut = (payload["timedOut"] as? Bool) == true
-      if needsConsent || challenge || isXFreeConsentPage(text) || isXFreeChallenge(text) {
-        presentXFreeConsent(for: requestId)
+      if let jsError = payload["error"] as? String {
+        xfreeConsentCheckRequestId = nil
+        completeXFreeRequest(
+          id: requestId,
+          text: nil,
+          error: FlutterError(code: "XFREE_CONSENT_FETCH", message: jsError, details: nil)
+        )
+        return
+      }
+      if needsConsent || challenge || isXFreeConsentPage(visibleText) || isXFreeChallenge(text) {
+        if xfreeConsentCheckRequestId == requestId {
+          // Continue checked the current browser session but XFree still
+          // returned a consent/challenge page. Leave the live page visible so
+          // the user can finish it; do not reload or dismiss it.
+          xfreeConsentCheckRequestId = nil
+          xfreeRequestTimeout?.cancel()
+          xfreeRequestTimeout = nil
+          showXFreeConsentAlert(
+            challenge
+              ? "XFree is still showing a browser verification. Complete it on the page, then tap Continue."
+              : "XFree has not confirmed the age/cookie choice yet. Complete the on-page choice, then tap Continue."
+          )
+        } else {
+          presentXFreeConsent(for: requestId)
+        }
+        return
+      }
+      if let status = payload["status"] as? Int, status != 200 {
+        xfreeConsentCheckRequestId = nil
+        completeXFreeRequest(
+          id: requestId,
+          text: nil,
+          error: FlutterError(
+            code: "XFREE_CONSENT_HTTP",
+            message: "XFree returned HTTP \(status) after the consent action. The page was not reloaded.",
+            details: String(visibleText.prefix(1000))
+          )
+        )
         return
       }
       guard !text.isEmpty else {
@@ -501,7 +527,7 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
         )
         return
       }
-      xfreeConsentReloadedRequestId = nil
+      xfreeConsentCheckRequestId = nil
       dismissXFreeConsentPage()
       completeXFreeRequest(id: requestId, text: text, error: nil)
       return
@@ -588,6 +614,7 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     browser.frame = top.view.bounds
     browser.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     browser.alpha = 1.0
+    browser.isHidden = false
     browser.isUserInteractionEnabled = true
     browser.accessibilityElementsHidden = false
     browser.scrollView.isScrollEnabled = true
@@ -648,79 +675,108 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
   @objc private func continueXFreeConsent() {
     guard
       let requestId = xfreeConsentRequestId,
-      let browser = xfreeWebView
+      let browser = xfreeWebView,
+      xfreeConsentCheckRequestId == nil
     else { return }
 
-    // The user has already interacted with the site's consent controls. Check
-    // only whether a visible consent/challenge control is still present; do not
-    // require recommId here because it is hydrated asynchronously after reload.
+    // The user has already accepted the site's consent in this WKWebView.
+    // Do NOT call browser.load() or browser.reload(): that visibly reloads the
+    // age-gate page and may put the user straight back on the same screen.
+    // Instead, use the same-origin fetch API inside the current document so
+    // WKWebView automatically sends the just-saved cookies.
+    xfreeConsentCheckRequestId = requestId
+    xfreeRequestTimeout?.cancel()
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self = self,
+            self.xfreeConsentCheckRequestId == requestId else { return }
+      self.xfreeConsentCheckRequestId = nil
+      self.completeXFreeRequest(
+        id: requestId,
+        text: nil,
+        error: FlutterError(
+          code: "XFREE_CONSENT_CHECK_TIMEOUT",
+          message: "XFree did not confirm the consent session. The page was not reloaded; try Continue again after the page finishes updating.",
+          details: nil
+        )
+      )
+    }
+    xfreeRequestTimeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 26, execute: timeout)
+
     let script = """
     (() => {
-      const controls = Array.from(document.querySelectorAll(
-        'button,a,[role="button"],input[type="button"],input[type="submit"]'
-      ));
-      const stillNeedsConsent = controls.some(el => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        const label = (el.innerText || el.value || el.getAttribute('aria-label') || '').toLowerCase();
-        const visible = rect.width > 0 && rect.height > 0 &&
-          style.display !== 'none' && style.visibility !== 'hidden' &&
-          Number(style.opacity || '1') > 0.05;
-        return visible && (label.includes('agree') || label.includes('allow all') ||
-          label.includes('i am over') || label.includes('over 18') ||
-          label.includes('confirm age'));
-      });
-      const bodyText = (document.body?.innerText || '').toLowerCase();
-      const challenge = bodyText.includes('just a moment') ||
-        bodyText.includes('checking your browser') ||
-        bodyText.includes('verify you are human') ||
-        !!document.querySelector('iframe[src*="challenges.cloudflare.com"]');
-      return JSON.stringify({stillNeedsConsent, challenge});
+      const requestId = \(requestId);
+      const post = (payload) => {
+        window.webkit.messageHandlers.xfreeResult.postMessage(JSON.stringify({ id: requestId, kind: 'transPage', ...payload }));
+      };
+      const currentHtml = () => document.documentElement ? document.documentElement.outerHTML : '';
+      const hasToken = value => /rec_[A-Za-z0-9_-]{6,}/.test(value || '');
+      const textFromHtml = value => {
+        try { return new DOMParser().parseFromString(value || '', 'text/html').body?.innerText || ''; }
+        catch (_) { return ''; }
+      };
+      const isConsent = value => {
+        const lower = (value || '').toLowerCase();
+        return lower.includes('only adults are allowed') ||
+          lower.includes('agree & allow all') ||
+          lower.includes('agree and allow all') ||
+          (lower.includes('cookies to personalize') && lower.includes('agree'));
+      };
+      const isChallenge = value => {
+        const lower = (value || '').toLowerCase();
+        return lower.includes('just a moment') || lower.includes('checking your browser') ||
+          lower.includes('verify you are human') || lower.includes('cf-chl-') ||
+          lower.includes('challenge-platform');
+      };
+      const current = currentHtml();
+      if (hasToken(current)) {
+        post({ text: current, visibleText: document.body?.innerText || '', hasRecommId: true, consent: false, challenge: false, timedOut: false, status: 200 });
+        return true;
+      }
+      // Let the page's own click handler finish writing consent cookies.
+      setTimeout(async () => {
+        try {
+          const response = await fetch('/trans/', {
+            method: 'GET',
+            credentials: 'include',
+            cache: 'no-store',
+            headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
+          });
+          const html = await response.text();
+          const visibleText = textFromHtml(html);
+          const token = hasToken(html);
+          const challenge = isChallenge(html);
+          const consent = isConsent(visibleText);
+          post({
+            text: html,
+            visibleText,
+            hasRecommId: token,
+            consent,
+            challenge,
+            timedOut: !token && !consent && !challenge,
+            status: response.status
+          });
+        } catch (error) {
+          post({ error: String(error), text: '', visibleText: '', hasRecommId: false, consent: false, challenge: false, timedOut: false });
+        }
+      }, 700);
+      return true;
     })();
     """
 
-    browser.evaluateJavaScript(script) { [weak self] value, error in
-      guard let self = self else { return }
-      if let error = error {
-        self.showXFreeConsentAlert(error.localizedDescription)
-        return
-      }
-      guard
-        let raw = value as? String,
-        let data = raw.data(using: .utf8),
-        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-      else {
-        self.showXFreeConsentAlert("Could not check the XFree consent page. Try again.")
-        return
-      }
-      if (payload["stillNeedsConsent"] as? Bool) == true ||
-         (payload["challenge"] as? Bool) == true {
-        self.showXFreeConsentAlert("Finish the age/cookie confirmation on the website first, then tap Continue.")
-        return
-      }
-
-      guard let categoryURL = URL(string: "https://www.xfree.com/trans/") else {
-        self.failXFreeQueue(code: "XFREE_BAD_START_URL", message: "Invalid XFree Trans URL.")
-        return
-      }
-      self.xfreeConsentReloadRequestId = requestId
-      self.xfreeConsentReloadedRequestId = nil
-      self.xfreeLoading = true
-      self.xfreeReady = false
-      self.xfreeLoadTimeout?.cancel()
-      let reloadTimeout = DispatchWorkItem { [weak self] in
-        guard let self = self,
-              self.xfreeConsentReloadRequestId == requestId else { return }
-        self.failXFreeQueue(
-          code: "XFREE_CONSENT_RELOAD_TIMEOUT",
-          message: "XFree did not finish loading after consent. Check the connection and retry."
+    browser.evaluateJavaScript(script) { [weak self] _, error in
+      guard let self = self, let error = error else { return }
+      guard self.xfreeConsentCheckRequestId == requestId else { return }
+      self.xfreeConsentCheckRequestId = nil
+      self.completeXFreeRequest(
+        id: requestId,
+        text: nil,
+        error: FlutterError(
+          code: "XFREE_CONSENT_CHECK_JS",
+          message: "Could not verify the accepted XFree session: \(error.localizedDescription)",
+          details: nil
         )
-      }
-      self.xfreeLoadTimeout = reloadTimeout
-      DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: reloadTimeout)
-      var request = URLRequest(url: categoryURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
-      request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
-      browser.load(request)
+      )
     }
   }
 
@@ -735,9 +791,16 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     xfreeConsentToolbar?.removeFromSuperview()
     xfreeConsentToolbar = nil
     xfreeConsentRequestId = nil
-    xfreeWebView?.isUserInteractionEnabled = false
-    xfreeWebView?.scrollView.isScrollEnabled = false
-    xfreeWebView?.alpha = 0.01
+
+    // A nearly-transparent WKWebView can remain on top of Flutter and keep
+    // intercepting hit tests. Hide it explicitly, while retaining the instance
+    // and WKWebsiteDataStore so the accepted cookies remain available to fetch().
+    if let browser = xfreeWebView {
+      browser.isUserInteractionEnabled = false
+      browser.scrollView.isScrollEnabled = false
+      browser.alpha = 0.0
+      browser.isHidden = true
+    }
   }
 
   private func isXFreeChallenge(_ text: String) -> Bool {
@@ -753,11 +816,12 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
     error: FlutterError?
   ) {
     guard let first = xfreeQueue.first, first.id == id else { return }
+    let wasConsentFlow = xfreeConsentRequestId == id || xfreeConsentCheckRequestId == id
     xfreeRequestTimeout?.cancel()
     xfreeRequestTimeout = nil
     xfreeActiveRequestId = nil
-    if xfreeConsentReloadRequestId == id { xfreeConsentReloadRequestId = nil }
-    if xfreeConsentReloadedRequestId == id { xfreeConsentReloadedRequestId = nil }
+    if wasConsentFlow { dismissXFreeConsentPage() }
+    if xfreeConsentCheckRequestId == id { xfreeConsentCheckRequestId = nil }
     _ = xfreeQueue.removeFirst()
     if let error = error {
       first.result(error)
@@ -768,14 +832,16 @@ final class NativeBridge: NSObject, AVPictureInPictureControllerDelegate, WKNavi
   }
 
   private func failXFreeQueue(code: String, message: String) {
+    if xfreeConsentRequestId != nil || xfreeConsentCheckRequestId != nil {
+      dismissXFreeConsentPage()
+    }
     xfreeLoadTimeout?.cancel()
     xfreeLoadTimeout = nil
     xfreeRequestTimeout?.cancel()
     xfreeRequestTimeout = nil
     xfreeLoading = false
     xfreeActiveRequestId = nil
-    xfreeConsentReloadRequestId = nil
-    xfreeConsentReloadedRequestId = nil
+    xfreeConsentCheckRequestId = nil
     let queued = xfreeQueue
     xfreeQueue.removeAll()
     for request in queued {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -50,6 +49,12 @@ String? _xfreeString(dynamic value) {
   return text.isEmpty || text.length > 8192 ? null : text;
 }
 
+String _xfreeDisplayValue(dynamic value) {
+  if (value is String) return value.trim();
+  if (value is num && value.isFinite) return value.toString();
+  return '';
+}
+
 String? _xfreeAbsoluteUrl(dynamic value) {
   final raw = _xfreeString(value);
   if (raw == null) return null;
@@ -93,6 +98,8 @@ class XFreeAccountProfile {
     this.followers = 0,
     this.following = 0,
     this.postsCount = 0,
+    this.lastActive = '',
+    this.lastPostDate = '',
   });
 
   final String id;
@@ -109,6 +116,8 @@ class XFreeAccountProfile {
   final int followers;
   final int following;
   final int postsCount;
+  final String lastActive;
+  final String lastPostDate;
 
   factory XFreeAccountProfile.fromJson(Map<String, dynamic> json) {
     final avatar = _xfreeMap(json['avatarMedia']);
@@ -131,6 +140,8 @@ class XFreeAccountProfile {
       followers: _xfreeInt(json['followers']),
       following: _xfreeInt(json['following']),
       postsCount: _xfreeInt(json['postsCount']),
+      lastActive: _xfreeDisplayValue(json['lastActive']),
+      lastPostDate: _xfreeDisplayValue(json['lastPostDate']),
     );
   }
 }
@@ -234,13 +245,13 @@ class XFreeTransReelsRepository {
       final text = utf8.decode(response.bodyBytes, allowMalformed: true);
       if (Platform.isWindows &&
           (text.contains('Just a moment') || text.contains('cf-chl-'))) {
-        return _getBrowserText(uri);
+        return await _getBrowserText(uri);
       }
       return text;
     } catch (_) {
       // Windows' native HTTP fingerprint may be rejected by the edge server.
       // Retry through the same Chromium WebView2 profile used by the app.
-      if (Platform.isWindows) return _getBrowserText(uri);
+      if (Platform.isWindows) return await _getBrowserText(uri);
       rethrow;
     }
   }

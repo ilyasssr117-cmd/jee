@@ -9,6 +9,13 @@ import 'xxx_follow_trans_reels.dart';
 
 const String _creatorSite = 'https://www.xxxfollow.com/';
 
+typedef CreatorReelsLoadMore = Future<List<ReelItem>> Function();
+typedef CreatorPlayReels = Future<void> Function(
+  List<ReelItem> items,
+  int initialIndex,
+  CreatorReelsLoadMore loadMore,
+);
+
 class XxxFollowCreatorPage extends StatefulWidget {
   const XxxFollowCreatorPage({
     super.key,
@@ -25,7 +32,7 @@ class XxxFollowCreatorPage extends StatefulWidget {
     XxxFollowAccountSnapshot account,
   ) loadMorePosts;
   final bool Function() hasMorePages;
-  final Future<void> Function(List<ReelItem> items, int initialIndex) onPlayReels;
+  final CreatorPlayReels onPlayReels;
 
   @override
   State<XxxFollowCreatorPage> createState() => _XxxFollowCreatorPageState();
@@ -37,6 +44,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
   bool _loading = true;
   bool _loadingMore = false;
   bool _moreSearched = false;
+  Future<void>? _loadMoreRequest;
   final ScrollController _scroll = ScrollController();
   final List<Map<String, dynamic>> _rows = <Map<String, dynamic>>[];
   final Set<String> _postIds = <String>{};
@@ -47,7 +55,23 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
     unawaited(_loadAccount());
+  }
+
+  void _onScroll() {
+    if (!_scroll.hasClients || _loading || _loadingMore || _moreSearched) return;
+    final position = _scroll.position;
+    if (position.maxScrollExtent - position.pixels < 720) {
+      unawaited(_loadMore());
+    }
+  }
+
+  void _scheduleFillViewport() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients || _loadingMore || _moreSearched) return;
+      if (_scroll.position.maxScrollExtent < 420) unawaited(_loadMore());
+    });
   }
 
   @override
@@ -70,6 +94,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
       _mergeRows(account.firstAuthorPosts);
       _moreSearched = !widget.hasMorePages();
       setState(() => _loading = false);
+      _scheduleFillViewport();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -101,6 +126,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
     final parsed = XxxFollowTransParser.toReelsFromRows(
       _rows,
       baseUri: Uri.parse(_creatorSite),
+      creator: _account?.profile,
     );
     for (final reel in parsed) {
       if (_reelIds.add(reel.id) && _reelUrls.add(reel.videoUrl)) {
@@ -109,9 +135,20 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
     }
   }
 
-  Future<void> _loadMore() async {
+  Future<void> _loadMore() {
+    final pending = _loadMoreRequest;
+    if (pending != null) return pending;
     final account = _account;
-    if (account == null || _loadingMore || _moreSearched) return;
+    if (account == null || _moreSearched) return Future<void>.value();
+    late final Future<void> request;
+    request = _performLoadMore(account).whenComplete(() {
+      if (identical(_loadMoreRequest, request)) _loadMoreRequest = null;
+    });
+    _loadMoreRequest = request;
+    return request;
+  }
+
+  Future<void> _performLoadMore(XxxFollowAccountSnapshot account) async {
     setState(() {
       _loadingMore = true;
       _error = null;
@@ -128,13 +165,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
         _loadingMore = false;
         _moreSearched = !widget.hasMorePages();
       });
-      if (!addedVideos && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No more videos from this creator were found in the scanned pages.'),
-          ),
-        );
-      }
+      if (addedVideos) _scheduleFillViewport();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -157,11 +188,23 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
     return value;
   }
 
+  Future<List<ReelItem>> _loadMoreForReels() async {
+    if (_account == null || _moreSearched) return const <ReelItem>[];
+    final oldCount = _reels.length;
+    // Share the same in-flight request with the profile's scroll listener.
+    // This prevents a quick swipe from mistaking an already-running page for
+    // an empty/end-of-feed response.
+    await _loadMore();
+    if (!mounted || _reels.length <= oldCount) return const <ReelItem>[];
+    return List<ReelItem>.unmodifiable(_reels.skip(oldCount));
+  }
+
   Future<void> _openInReels(int index) async {
     if (index < 0 || index >= _reels.length || _reels.isEmpty) return;
     await widget.onPlayReels(
       List<ReelItem>.unmodifiable(_reels),
       index,
+      _loadMoreForReels,
     );
   }
 
@@ -275,11 +318,6 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
       );
 
   Widget _profileHeader(XxxFollowCreatorProfile profile) {
-    final totalLikes = _rows.fold<int>(0, (sum, row) {
-      final likes = _asMap(row)['like_count'] ?? _asMap(row)['favorite_count'];
-      if (likes is num) return sum + likes.toInt();
-      return sum;
-    });
     final name = profile.displayName.isEmpty ? profile.username : profile.displayName;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -341,6 +379,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                   _stat('Videos', _compact(profile.postsCount ?? _reels.length)),
                   _stat('Followers', _compact(profile.followersCount)),
                   _stat('Following', _compact(profile.followingCount)),
+                  _stat('Views', _compact(profile.viewsCount)),
                 ],
               ),
               const SizedBox(height: 18),
@@ -354,6 +393,8 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                     _metaChip('Joined ${_joined(profile.createdAt)}', CupertinoIcons.calendar),
                   if (profile.isStreaming)
                     _metaChip('Streaming now', CupertinoIcons.dot_radiowaves_left_right),
+                  if ((profile.lastSeenAt ?? '').isNotEmpty)
+                    _metaChip('Seen ${_joined(profile.lastSeenAt!)}', CupertinoIcons.clock),
                   if (profile.id.isNotEmpty)
                     _metaChip('ID ${profile.id}', CupertinoIcons.number),
                 ],

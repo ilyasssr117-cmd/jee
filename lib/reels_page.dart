@@ -15,6 +15,7 @@ import 'package:flutter/cupertino.dart'
         showCupertinoModalPopup;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -71,12 +72,30 @@ const int _kPreloadAhead = 2;
 const int _kMaxBufferedReels = 96;
 const int _kReelHistoryKeep = 12;
 const int _kReelTrimTrigger = 48;
-const Duration _kNeighborPreloadDelay = Duration(milliseconds: 240);
 const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
 const Duration _kReelDoubleTapWindow = Duration(milliseconds: 260);
 const Duration _kReelLongPressDelay = Duration(milliseconds: 140);
 const double _kReelMoveSlop = 14;
+
+/// Fast, page-snapped vertical motion tuned for short-form video feeds.
+/// The finger controls the page while dragging; the stronger spring settles
+/// the next reel quickly after release without replacing PageView's gesture
+/// handling with a competing GestureDetector.
+class _FastReelsPagePhysics extends PageScrollPhysics {
+  const _FastReelsPagePhysics({super.parent});
+
+  @override
+  SpringDescription get spring => const SpringDescription(
+        mass: 0.5,
+        stiffness: 500,
+        damping: 34,
+      );
+
+  @override
+  _FastReelsPagePhysics applyTo(ScrollPhysics? ancestor) =>
+      _FastReelsPagePhysics(parent: buildParent(ancestor));
+}
 
 enum _ReelPlaybackState {
   idle,
@@ -629,7 +648,8 @@ class ReelsRepository {
   Future<XxxFollowAccountSnapshot> getXxxFollowAccount(String username) =>
       _transRepository.getAccountSnapshot(username);
 
-  bool get hasMoreXxxFollowPages => _transRepository.hasMorePages;
+  bool hasMoreXxxFollowCreatorPages(String username) =>
+      _transRepository.hasMoreCreatorPosts(username);
 
   Future<List<Map<String, dynamic>>> getMoreXxxFollowCreatorPosts(
     XxxFollowAccountSnapshot account, {
@@ -667,6 +687,8 @@ class ReelsPage extends StatefulWidget {
     this.initialItems,
     this.initialIndex = 0,
     this.initialItemsOnly = false,
+    this.loadMoreInitialItems,
+    this.hasMoreInitialItems,
   });
 
   /// True only while the Reels section is the visible one. When false the
@@ -679,6 +701,8 @@ class ReelsPage extends StatefulWidget {
   final List<ReelItem>? initialItems;
   final int initialIndex;
   final bool initialItemsOnly;
+  final Future<List<ReelItem>> Function()? loadMoreInitialItems;
+  final bool Function()? hasMoreInitialItems;
 
   @override
   State<ReelsPage> createState() => _ReelsPageState();
@@ -703,7 +727,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   bool _loading = false;
   bool _resumeOnForeground = false;
-  bool _syncPending = false;
+  bool _reelScrollInProgress = false;
   bool _trimming = false;
   bool _exhausted = false;
   bool _muted = false;
@@ -728,7 +752,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           _items.add(item);
         }
       }
-      _exhausted = widget.initialItemsOnly;
+      _exhausted = widget.initialItemsOnly && widget.loadMoreInitialItems == null;
     }
     _current = _items.isEmpty
         ? 0
@@ -740,6 +764,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _clear = LocalStore.readBool(_kClearKey, fallback: false);
     if (widget.active) {
+      _reelScrollInProgress = false;
       _focusForKeyboard();
       _claimPlayback();
       if (_items.isNotEmpty) {
@@ -765,6 +790,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
     if (oldWidget.active == widget.active) return;
     if (widget.active) {
+      _reelScrollInProgress = false;
       _focusForKeyboard();
       _claimPlayback();
       if (_items.isEmpty && !_loading) {
@@ -776,6 +802,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         _syncControllers(_current);
       }
     } else {
+      _reelScrollInProgress = false;
       _pauseForLeaving();
     }
   }
@@ -890,28 +917,38 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   Future<void> _loadMore({bool first = false}) async {
     // Reels pages are kept alive by the tab host. Do not fetch or prepare
     // media while this page is only an off-screen tab preview.
-    if (!widget.active || _loading || _exhausted || widget.initialItemsOnly) return;
+    if (!widget.active ||
+        _loading ||
+        _exhausted ||
+        (widget.initialItemsOnly && widget.loadMoreInitialItems == null)) {
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
     });
     final requestRepository = _repo;
     try {
-      if (widget.source == ContentSource.trans) {
-        final ageConfirmed = await confirmAge(context);
-        if (!mounted) return;
-        if (!ageConfirmed) {
-          setState(() {
-            _error = 'Confirm that you are 18 or older to open this source.';
-            _loading = false;
-            _pendingKeyboardPage = null;
-          });
-          return;
+      List<ReelItem> batch;
+      if (widget.initialItemsOnly && widget.loadMoreInitialItems != null) {
+        batch = await widget.loadMoreInitialItems!();
+      } else {
+        if (widget.source == ContentSource.trans) {
+          final ageConfirmed = await confirmAge(context);
+          if (!mounted) return;
+          if (!ageConfirmed) {
+            setState(() {
+              _error = 'Confirm that you are 18 or older to open this source.';
+              _loading = false;
+              _pendingKeyboardPage = null;
+            });
+            return;
+          }
         }
+        batch = await requestRepository.nextBatch(
+          first ? _kFirstBatch : _kNextBatch,
+        );
       }
-      final batch = await requestRepository.nextBatch(
-        first ? _kFirstBatch : _kNextBatch,
-      );
       if (!mounted || !identical(requestRepository, _repo)) return;
       setState(() {
         final existingIds = _items.map((item) => item.id).toSet();
@@ -921,7 +958,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             _items.add(item);
           }
         }
-        if (batch.isEmpty) _exhausted = true;
+        final moreInitialItems = widget.initialItemsOnly &&
+            widget.hasMoreInitialItems?.call() == true;
+        if ((batch.isEmpty && !moreInitialItems) ||
+            (widget.initialItemsOnly && !moreInitialItems)) {
+          _exhausted = true;
+        }
         _loading = false;
       });
       if (_items.isEmpty || !widget.active) return;
@@ -1153,12 +1195,20 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     _syncControllers(_current);
   }
 
-  void _syncControllers(int index) {
+  void _syncControllers(int index, {int? preserveDuringTransition}) {
     if (!widget.active) return;
     final keep = <int>{index};
-    // A second Windows video decoder competes with the active texture for
-    // hardware resources and causes visible frame drops. Load neighbors on
-    // mobile, where preloading improves swipe transitions without that cost.
+    if (preserveDuringTransition != null &&
+        preserveDuringTransition >= 0 &&
+        preserveDuringTransition < _items.length) {
+      keep.add(preserveDuringTransition);
+    }
+    // Keep one page ahead on mobile. During an active transition this makes
+    // the pool: outgoing + incoming + next. The third decoder is deliberately
+    // avoided on Windows, where it competes with the active texture.
+    final maxControllers = defaultTargetPlatform == TargetPlatform.windows
+        ? 2
+        : 3;
     if (defaultTargetPlatform != TargetPlatform.windows) {
       keep.add(index + 1);
     }
@@ -1167,8 +1217,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       if (!keep.contains(i)) _evictController(i);
     }
 
-    // Keep at most two AVPlayer instances: the visible reel and one neighbor.
-    // Initialize the next item after the current one has had a head start.
+    // Mobile keeps at most three AVPlayers while swiping (outgoing, incoming,
+    // and the next reel). Once the page settles the outgoing controller is
+    // evicted, leaving only the visible reel and one prepared neighbor.
     if (keep.contains(index)) _controllerFor(index);
     for (final entry in _controllers.entries) {
       final controller = entry.value;
@@ -1191,50 +1242,50 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       }
     }
 
+    // Prepare the next decoder immediately, not 100–240 ms after the current
+    // page settles. It stays muted and paused until PageView reports that it
+    // has become the centered page. This removes the visible startup pause on
+    // the next swipe while keeping the iOS player pool capped at two.
     final next = index + 1;
-    if (keep.contains(next)) {
-      Future<void>.delayed(_kNeighborPreloadDelay, () {
-        if (!mounted || _current != index || !_controllers.containsKey(index)) {
-          return;
-        }
-        if (_controllers.length < 2) _controllerFor(next);
-      });
+    if (keep.contains(next) && _controllers.length < maxControllers) {
+      _controllerFor(next);
     }
     if (mounted) setState(() {});
   }
 
-  void _onPageChanged(int index) {
-    if (!widget.active) return;
+  /// Switch playback as soon as the next reel becomes the centered page,
+  /// rather than waiting for the ballistic scroll to fully stop. The visible
+  /// page therefore starts as it slides into place, like short-form feeds.
+  void _onReelPageChanged(int page) {
+    if (!widget.active || page < 0 || page >= _items.length) return;
+    if (page == _current) return;
+
     final previous = _current;
     _stopReelAnalytics(previous);
-    _current = index;
-    _syncPending = true;
+    _current = page;
+    _reelScrollInProgress = true;
+    _syncControllers(page, preserveDuringTransition: previous);
 
-    // Keep the outgoing texture through the transition. PageView can still
-    // expose part of that page after onPageChanged fires at the midpoint.
-    // ScrollEnd sync releases it before another neighbor is preloaded.
-    final keep = defaultTargetPlatform == TargetPlatform.windows
-        ? <int>{index}
-        : <int>{previous, index};
-    for (final oldIndex in _controllers.keys.toList()) {
-      if (!keep.contains(oldIndex)) _evictController(oldIndex);
+    if (_current >= _items.length - _kPreloadAhead &&
+        !_loading && !_exhausted &&
+        (!widget.initialItemsOnly || widget.loadMoreInitialItems != null)) {
+      unawaited(_loadMore());
     }
-
-    final current = _controllerFor(index);
-    if (current.value.isInitialized && widget.active && !_adShowing) {
-      unawaited(current.setVolume(_muted ? 0 : 1));
-      unawaited(current.play());
-    }
-    for (final entry in _controllers.entries) {
-      if (entry.key == index || !entry.value.value.isInitialized) continue;
-      unawaited(entry.value.pause());
-      unawaited(entry.value.setVolume(0));
-      unawaited(entry.value.setPlaybackSpeed(1));
-    }
-    if (index >= _items.length - _kPreloadAhead) _loadMore();
-    if (mounted) setState(() {});
   }
 
+  void _activateSettledPage() {
+    if (!widget.active || !_pager.hasClients || _items.isEmpty) return;
+    final settled = (_pager.page ?? _current.toDouble())
+        .round()
+        .clamp(0, _items.length - 1)
+        .toInt();
+    if (settled != _current) {
+      _stopReelAnalytics(_current);
+      _current = settled;
+    }
+    _reelScrollInProgress = false;
+    _syncControllers(_current);
+  }
 
   void _movePage(int direction) {
     if (!_pager.hasClients || _items.isEmpty) return;
@@ -1257,10 +1308,21 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 
   bool _onScrollNotification(ScrollNotification n) {
-    if (n is ScrollEndNotification && n.depth == 0) {
-      if (_syncPending) {
-        _syncPending = false;
-        _syncControllers(_current);
+    if (n.depth != 0 || !widget.active) return false;
+    if (n is ScrollStartNotification) {
+      if (!_reelScrollInProgress) {
+        // Do not pause the outgoing video at drag start: it should continue
+        // moving with the page. Playback switches to the incoming reel in
+        // _onReelPageChanged when that page reaches the center.
+        _reelScrollInProgress = true;
+        if (mounted) setState(() {});
+      }
+    } else if (n is ScrollEndNotification) {
+      _activateSettledPage();
+      if (_current >= _items.length - _kPreloadAhead &&
+          !_loading && !_exhausted &&
+          (!widget.initialItemsOnly || widget.loadMoreInitialItems != null)) {
+        unawaited(_loadMore());
       }
       _trimOldReelsIfNeeded();
     }
@@ -1317,7 +1379,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         ..clear()
         ..addAll(reindexed);
       _current -= shift;
-      _syncPending = false;
+      _reelScrollInProgress = false;
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1337,10 +1399,10 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           loadAccount: () => _repo.getXxxFollowAccount(username),
           loadMorePosts: (account) => _repo.getMoreXxxFollowCreatorPosts(
             account,
-            maxPages: 8,
+            maxPages: 1,
           ),
-          hasMorePages: () => _repo.hasMoreXxxFollowPages,
-          onPlayReels: (items, initialIndex) async {
+          hasMorePages: () => _repo.hasMoreXxxFollowCreatorPages(username),
+          onPlayReels: (items, initialIndex, loadMore) async {
             _pauseForLeaving();
             await Navigator.of(context).push<void>(
               adaptivePageRoute<void>(
@@ -1352,6 +1414,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   initialItems: items,
                   initialIndex: initialIndex,
                   initialItemsOnly: true,
+                  loadMoreInitialItems: loadMore,
+                  hasMoreInitialItems: () => _repo.hasMoreXxxFollowCreatorPages(username),
                 ),
               ),
             );
@@ -1565,7 +1629,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         }
         return KeyEventResult.ignored;
       },
-      child: ColoredBox(
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(decoration: TextDecoration.none),
+        child: ColoredBox(
         color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
@@ -1577,13 +1643,21 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   controller: _pager,
                   scrollDirection: Axis.vertical,
                   pageSnapping: true,
-                  physics: const PageScrollPhysics(
-                    parent: ClampingScrollPhysics(),
-                  ),
+                  // Keep the adjacent page in the viewport cache so its
+                  // thumbnail/layout is ready before the finger reaches it.
+                  allowImplicitScrolling: true,
+                  dragStartBehavior: DragStartBehavior.down,
+                  onPageChanged: _onReelPageChanged,
+                  physics: defaultTargetPlatform == TargetPlatform.iOS
+                      ? const _FastReelsPagePhysics(
+                          parent: BouncingScrollPhysics(),
+                        )
+                      : const _FastReelsPagePhysics(
+                          parent: ClampingScrollPhysics(),
+                        ),
                   padEnds: false,
                   clipBehavior: Clip.hardEdge,
                   itemCount: _items.length,
-                  onPageChanged: _onPageChanged,
                   itemBuilder: (context, i) {
                     final item = _items[i];
                     return RepaintBoundary(
@@ -1593,8 +1667,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         controller: _controllers[i],
                         playbackState:
                             _reelStates[i] ?? _ReelPlaybackState.idle,
-                        isActive:
-                            widget.active && i == _current && !_adShowing,
+                        isActive: widget.active &&
+                            i == _current &&
+                            !_adShowing,
                         muted: _muted,
                         saving: _saving,
                         bottomInset: bottom,
@@ -1684,6 +1759,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
             ),
           ],
+        ),
         ),
       ),
     );

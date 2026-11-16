@@ -1,4 +1,3 @@
-import 'dart:collection';
 import 'dart:convert';
 
 import 'favorites_store.dart';
@@ -129,8 +128,9 @@ class ReelFavorites {
   static const String _key = 'reel_favorites_v1';
   static const int _maxItems = 300;
 
-  final LinkedHashMap<String, ReelItem> _items =
-      LinkedHashMap<String, ReelItem>();
+  // Dart's map literal preserves insertion order, which is used to show the
+  // newest favorite first without needing an explicit linked-map constructor.
+  final Map<String, ReelItem> _items = <String, ReelItem>{};
   bool _loaded = false;
 
   static String videoId(String reelId) => 'reel_$reelId';

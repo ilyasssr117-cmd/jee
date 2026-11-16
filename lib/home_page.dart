@@ -47,7 +47,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage>
-    with WidgetsBindingObserver, TickerProviderStateMixin {
+    with WidgetsBindingObserver {
   static const List<_Section> _sectionOrder = <_Section>[
     _Section.home,
     _Section.reels,
@@ -88,16 +88,8 @@ class _HomePageState extends State<HomePage>
   Widget? _settingsPage;
   FriendlyError? _error;
 
-  final ValueNotifier<double> _dragOffset = ValueNotifier<double>(0);
-  _Section? _dragTarget;
-  final Map<_Section, GlobalKey> _sectionHostKeys = <_Section, GlobalKey>{
-    for (final section in _sectionOrder) section: GlobalKey(),
-  };
-  late final AnimationController _pageSettleController = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 220),
-  );
-  Animation<double>? _pageSettleAnimation;
+  late final PageController _sectionPager = PageController(initialPage: 0, keepPage: false);
+  bool _sectionDragInProgress = false;
 
   String _homeCacheKey(int page) =>
       'home|${videoRepository.source.name}|$page';
@@ -108,11 +100,6 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.addObserver(this);
     RemoteConfigService.instance.addListener(_onRemoteConfigChanged);
     _scroll.addListener(_onScroll);
-    _pageSettleController.addListener(() {
-      final animation = _pageSettleAnimation;
-      if (!mounted || animation == null) return;
-      _dragOffset.value = animation.value;
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_promptForContentSource());
     });
@@ -129,14 +116,18 @@ class _HomePageState extends State<HomePage>
     final source = selected ?? AppSettings.instance.contentSource;
     if (source != videoRepository.source) {
       _changeContentSource(source);
+    } else if (source == ContentSource.trans) {
+      setState(() {
+        _sourceChoiceReady = true;
+        _videos.clear();
+        _recomputeDerived();
+        _loading = false;
+        _hasMore = false;
+        _error = null;
+      });
     } else {
       setState(() => _sourceChoiceReady = true);
       _loadPage(reset: true);
-      if (source == ContentSource.trans) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _transitionToSection(_Section.reels);
-        });
-      }
     }
   }
 
@@ -193,8 +184,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.removeObserver(this);
     RemoteConfigService.instance.removeListener(_onRemoteConfigChanged);
     _offlineTimer?.cancel();
-    _pageSettleController.dispose();
-    _dragOffset.dispose();
+    _sectionPager.dispose();
     _search.dispose();
     _scroll
       ..removeListener(_onScroll)
@@ -211,7 +201,14 @@ class _HomePageState extends State<HomePage>
     if (_searchOpen && !remote.isFeatureEnabled('search')) {
       _search.value = false;
     }
+    _sectionDragInProgress = false;
     setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_sectionPager.hasClients) return;
+      final sections = _availableSections;
+      final index = sections.indexOf(_section);
+      if (index >= 0) _sectionPager.jumpToPage(index);
+    });
   }
 
   bool _heroVisible = true;
@@ -502,105 +499,84 @@ class _HomePageState extends State<HomePage>
     setState(() {});
   }
 
-  _Section? _targetForDrag(double physicalDelta) {
-    if (physicalDelta.abs() < 0.5) return null;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final forward = (physicalDelta < 0) != rtl;
+  void _commitSectionPage([int? requestedIndex]) {
+    if (!mounted) return;
     final sections = _availableSections;
-    final next = sections.indexOf(_section) + (forward ? 1 : -1);
-    if (next < 0 || next >= sections.length) return null;
-    return sections[next];
-  }
-
-  void _onHorizontalDragStart(DragStartDetails details) {
-    if (_searchOpen) return;
-    _pageSettleController.stop();
-    _dragOffset.value = 0;
-    if (_dragTarget != null) setState(() => _dragTarget = null);
-  }
-
-  void _onHorizontalDragUpdate(DragUpdateDetails details) {
-    if (_searchOpen) return;
-    final width = MediaQuery.sizeOf(context).width;
-    final nextOffset = (_dragOffset.value + (details.primaryDelta ?? 0))
-        .clamp(-width, width)
-        .toDouble();
-    final nextTarget = _targetForDrag(nextOffset);
-    if (nextTarget != _dragTarget) {
-      if (nextTarget != null) Haptics.play(Haptic.selection);
-      setState(() => _dragTarget = nextTarget);
-    }
-    _dragOffset.value = nextTarget == null ? nextOffset * 0.2 : nextOffset;
-  }
-
-  void _onHorizontalDragEnd(DragEndDetails details) {
-    if (_searchOpen) return;
-    final width = MediaQuery.sizeOf(context).width;
-    final velocity = details.velocity.pixelsPerSecond.dx;
-    var target = _dragTarget;
-
-    if (target == null && velocity.abs() > 650) {
-      final physicalDirection = velocity.isNegative ? -1.0 : 1.0;
-      target = _targetForDrag(physicalDirection);
-      if (target != null) {
-        _dragOffset.value = physicalDirection * width * 0.08;
-        setState(() => _dragTarget = target);
+    if (sections.isEmpty) return;
+    final page = requestedIndex ??
+        (_sectionPager.hasClients
+            ? (_sectionPager.page ?? 0).round()
+            : sections.indexOf(_section));
+    final safeIndex = page.clamp(0, sections.length - 1).toInt();
+    final destination = sections[safeIndex];
+    final changed = destination != _section;
+    if (_sectionDragInProgress || changed) {
+      setState(() {
+        _section = destination;
+        _sectionDragInProgress = false;
+      });
+      if (changed) {
+        PreviewManager.instance.stopNow(fade: false);
+        Haptics.play(Haptic.selection);
       }
     }
-
-    final shouldCommit = target != null &&
-        (_dragOffset.value.abs() > width * 0.22 || velocity.abs() > 650);
-    _settlePageDrag(shouldCommit ? target : null);
   }
 
-  void _onHorizontalDragCancel() => _settlePageDrag(null);
-
-  void _settlePageDrag(_Section? destination) {
-    final width = MediaQuery.sizeOf(context).width;
-    final start = _dragOffset.value;
-    final end = destination == null ? 0.0 : (start < 0 ? -width : width);
-    _pageSettleController
-      ..stop()
-      ..duration = Duration(
-        milliseconds: (170 + (end - start).abs() / width * 110)
-            .round()
-            .clamp(170, 280)
-            .toInt(),
-      );
-    _pageSettleAnimation = Tween<double>(begin: start, end: end).animate(
-      CurvedAnimation(
-        parent: _pageSettleController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
-    _pageSettleController.forward(from: 0).orCancel.then<void>((_) {
-      if (!mounted) return;
-      setState(() {
-        if (destination != null) _section = destination;
-        _dragTarget = null;
-      });
-      _dragOffset.value = 0;
-      if (destination != null) Haptics.play(Haptic.medium);
-    }).catchError((Object _) {
-      // A new gesture can interrupt an in-flight settle animation. That is a
-      // normal interaction, not an app error.
-    });
+  bool _onSectionScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    if (notification is ScrollStartNotification) {
+      if (!_sectionDragInProgress) {
+        setState(() => _sectionDragInProgress = true);
+      }
+    } else if (notification is ScrollEndNotification) {
+      _commitSectionPage();
+    }
+    return false;
   }
 
   void _transitionToSection(_Section destination) {
-    if (!_availableSections.contains(destination)) return;
-    if (destination == _section) return;
-    final width = MediaQuery.sizeOf(context).width;
-    final currentIndex = _sectionOrder.indexOf(_section);
-    final destinationIndex = _sectionOrder.indexOf(destination);
-    final forward = destinationIndex > currentIndex;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final physicalDirection = (forward != rtl) ? -1.0 : 1.0;
+    final sections = _availableSections;
+    final targetIndex = sections.indexOf(destination);
+    if (targetIndex < 0) return;
+    final currentPage = _sectionPager.hasClients
+        ? (_sectionPager.page ?? sections.indexOf(_section)).round()
+        : sections.indexOf(_section);
+    if (currentPage == targetIndex && _section == destination &&
+        !_sectionDragInProgress) {
+      return;
+    }
 
-    _pageSettleController.stop();
-    setState(() => _dragTarget = destination);
-    _dragOffset.value = physicalDirection * width * 0.06;
-    _settlePageDrag(destination);
+    PreviewManager.instance.stopNow(fade: false);
+    if (!_sectionDragInProgress) {
+      setState(() => _sectionDragInProgress = true);
+    }
+    if (!_sectionPager.hasClients) {
+      setState(() {
+        _section = destination;
+        _sectionDragInProgress = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _sectionPager.hasClients) {
+          _sectionPager.jumpToPage(targetIndex);
+        }
+      });
+      return;
+    }
+    unawaited(
+      _sectionPager
+          .animateToPage(
+            targetIndex,
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+          )
+          .then((_) {
+        if (!mounted || !_sectionPager.hasClients) return;
+        final settled = (_sectionPager.page ?? -1).round();
+        if (settled == targetIndex) _commitSectionPage(targetIndex);
+      }).catchError((Object _) {
+        // A newer tab selection can safely interrupt an in-flight page change.
+      }),
+    );
   }
 
   void _onTabSelect(AppTab tab) {
@@ -608,7 +584,7 @@ class _HomePageState extends State<HomePage>
     switch (tab) {
       case AppTab.home:
         if (_searchOpen) _closeSearch();
-        if (_section == _Section.home) {
+        if (_section == _Section.home && !_sectionDragInProgress) {
           _scrollToTop();
         } else {
           _transitionToSection(_Section.home);
@@ -617,17 +593,17 @@ class _HomePageState extends State<HomePage>
         _openSearch();
       case AppTab.reels:
         if (_searchOpen) _closeSearch();
-        if (_section != _Section.reels) {
+        if (_section != _Section.reels || _sectionDragInProgress) {
           _transitionToSection(_Section.reels);
         }
       case AppTab.library:
         if (_searchOpen) _closeSearch();
-        if (_section != _Section.library) {
+        if (_section != _Section.library || _sectionDragInProgress) {
           _transitionToSection(_Section.library);
         }
       case AppTab.settings:
         if (_searchOpen) _closeSearch();
-        if (_section != _Section.settings) {
+        if (_section != _Section.settings || _sectionDragInProgress) {
           _transitionToSection(_Section.settings);
         }
     }
@@ -688,16 +664,7 @@ class _HomePageState extends State<HomePage>
   }
 
   void _changeContentSource(ContentSource source) {
-    if (source == videoRepository.source) {
-      // Selecting Trans again from Settings should still open its Reels feed.
-      // The normal catalogue scraper is not the XXXFollow Reels provider.
-      if (source == ContentSource.trans) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _transitionToSection(_Section.reels);
-        });
-      }
-      return;
-    }
+    if (source == videoRepository.source) return;
     Haptics.play(Haptic.selection);
     PreviewManager.instance.stopNow(fade: false);
     videoRepository.setSource(source);
@@ -711,15 +678,12 @@ class _HomePageState extends State<HomePage>
       _page = 0;
       _emptyPages = 0;
       _loading = false;
-      _hasMore = true;
+      _hasMore = source != ContentSource.trans;
       _error = null;
     });
     _scrollToTop();
-    unawaited(_loadPage(reset: true));
-    if (source == ContentSource.trans) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _transitionToSection(_Section.reels);
-      });
+    if (source != ContentSource.trans) {
+      unawaited(_loadPage(reset: true));
     }
   }
 
@@ -745,21 +709,18 @@ class _HomePageState extends State<HomePage>
     final darkMode = AppColors.palette.brightness == Brightness.dark;
 
     final reelsActive = _section == _Section.reels;
-    final reelsVisible = reelsActive || _dragTarget == _Section.reels;
     final libraryActive = _section == _Section.library;
     final settingsActive = _section == _Section.settings;
-    final libraryVisible = libraryActive || _dragTarget == _Section.library;
-    final settingsVisible = settingsActive || _dragTarget == _Section.settings;
-    if (reelsVisible || _reelsPage != null) {
-      _reelsPage = ReelsPage(
-        key: const ValueKey<String>('reels'),
-        // Playback runs only while the section is on screen and no search
-        // overlay or other full-screen route covers it.
-        active: reelsActive && !_searchOpen,
-        bottomInset: context.safe.bottom + 4,
-        source: videoRepository.source,
-      );
-    }
+    final libraryVisible = libraryActive || _libraryPage != null;
+    final settingsVisible = settingsActive || _settingsPage != null;
+    // Keep the Reels page available as the real PageView child, not a temporary
+    // empty placeholder. It stays inactive until the user settles on the tab.
+    _reelsPage = ReelsPage(
+      key: const ValueKey<String>('reels'),
+      active: reelsActive && !_searchOpen && !_sectionDragInProgress,
+      bottomInset: context.safe.bottom + 4,
+      source: videoRepository.source,
+    );
     if (libraryVisible || _libraryPage != null) {
       _libraryPage = LibraryView(
         key: const ValueKey<String>('library'),
@@ -790,59 +751,43 @@ class _HomePageState extends State<HomePage>
       _Section.settings: _settingsPage ?? const SizedBox.shrink(),
     };
 
-    Widget positionedSection(_Section section) {
-      final isCurrent = section == _section;
-      final isPreview = section == _dragTarget;
-      final visible = isCurrent || isPreview;
-      return Positioned.fill(
-        child: ValueListenableBuilder<double>(
-          valueListenable: _dragOffset,
-          child: _SectionHost(
-            key: _sectionHostKeys[section],
-            active: visible,
-            child: RepaintBoundary(child: sectionContents[section]!),
-          ),
-          builder: (context, dragOffset, child) {
-            final previewOffset =
-                dragOffset + (dragOffset < 0 ? screen.width : -screen.width);
-            final offset =
-                isCurrent ? dragOffset : (isPreview ? previewOffset : 0.0);
-            return Transform.translate(
-              offset: Offset(offset, 0),
-              child: IgnorePointer(
-                ignoring: !isCurrent || dragOffset.abs() > 1,
-                child: child,
-              ),
+    final sections = _availableSections;
+    final sectionPhysics = defaultTargetPlatform == TargetPlatform.iOS
+        ? const PageScrollPhysics(parent: BouncingScrollPhysics())
+        : const PageScrollPhysics(parent: ClampingScrollPhysics());
+    final content = RepaintBoundary(
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onSectionScrollNotification,
+        child: PageView.builder(
+          key: const PageStorageKey<String>('main-sections-page-view'),
+          controller: _sectionPager,
+          scrollDirection: Axis.horizontal,
+          pageSnapping: true,
+          allowImplicitScrolling: false,
+          physics: sectionPhysics,
+          itemCount: sections.length,
+          findChildIndexCallback: (key) {
+            if (key is ValueKey<_Section>) {
+              final index = sections.indexOf(key.value);
+              return index < 0 ? null : index;
+            }
+            return null;
+          },
+          itemBuilder: (context, index) {
+            final section = sections[index];
+            return _SectionHost(
+              key: ValueKey<_Section>(section),
+              active: section == _section && !_sectionDragInProgress,
+              child: RepaintBoundary(child: sectionContents[section]!),
             );
           },
         ),
-      );
-    }
-
-    final orderedLayers = <Widget>[
-      for (final section in _sectionOrder)
-        if (section != _section && section != _dragTarget)
-          positionedSection(section),
-      positionedSection(_section),
-      if (_dragTarget != null) positionedSection(_dragTarget!),
-    ];
-    final content = RepaintBoundary(
-      child: ClipRect(
-        child: Stack(fit: StackFit.expand, children: orderedLayers),
       ),
     );
 
     return ValueListenableBuilder<bool>(
       valueListenable: _search,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: _onHorizontalDragStart,
-        onHorizontalDragUpdate: _onHorizontalDragUpdate,
-        onHorizontalDragEnd: _onHorizontalDragEnd,
-        onHorizontalDragCancel: _onHorizontalDragCancel,
-        child: content,
-      ),
-      builder: (context, searchOpen, page) {
+      builder: (context, searchOpen, _) {
         final lightIcons = darkMode ||
             (_section == _Section.reels && !searchOpen) ||
             (_section == _Section.home && !searchOpen && _heroVisible);
@@ -871,7 +816,7 @@ class _HomePageState extends State<HomePage>
                           _WindowsNavigationRail(
                             selected: searchOpen
                                 ? AppTab.search
-                                : switch (_dragTarget ?? _section) {
+                                : switch (_section) {
                                     _Section.home => AppTab.home,
                                     _Section.reels => AppTab.reels,
                                     _Section.library => AppTab.library,
@@ -880,11 +825,11 @@ class _HomePageState extends State<HomePage>
                             onSelect: _onTabSelect,
                             isTabEnabled: _isTabEnabled,
                           ),
-                          Expanded(child: page!),
+                          Expanded(child: IgnorePointer(ignoring: searchOpen, child: content)),
                         ],
                       )
                     else
-                      page!,
+                      IgnorePointer(ignoring: searchOpen, child: content),
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 160),
                       child: searchOpen
@@ -916,7 +861,7 @@ class _HomePageState extends State<HomePage>
                         child: _RidingTabBar(
                           selected: searchOpen
                               ? AppTab.search
-                              : switch (_dragTarget ?? _section) {
+                              : switch (_section) {
                                   _Section.home => AppTab.home,
                                   _Section.reels => AppTab.reels,
                                   _Section.library => AppTab.library,
@@ -1002,6 +947,21 @@ class _HomePageState extends State<HomePage>
 
   List<Widget> _contentSlivers(double margin) {
     final gridPadding = EdgeInsets.symmetric(horizontal: margin);
+
+    if (videoRepository.source == ContentSource.trans && _videos.isEmpty) {
+      return [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: StatusView(
+            icon: Icons.smart_display_outlined,
+            title: 'Trans feed is ready',
+            message: 'Open Reels when you are ready to browse this source.',
+            actionLabel: 'Open Reels',
+            onAction: () => _transitionToSection(_Section.reels),
+          ),
+        ),
+      ];
+    }
 
     if (_videos.isEmpty && _loading) {
       return [SliverSkeletonGrid(padding: gridPadding)];
@@ -1111,18 +1071,25 @@ class _HeroStretch extends StatelessWidget {
   }
 }
 
-class _SectionHost extends StatelessWidget {
+class _SectionHost extends StatefulWidget {
   const _SectionHost({super.key, required this.active, required this.child});
 
   final bool active;
   final Widget child;
 
   @override
+  State<_SectionHost> createState() => _SectionHostState();
+}
+
+class _SectionHostState extends State<_SectionHost>
+    with AutomaticKeepAliveClientMixin<_SectionHost> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
-    return Offstage(
-      offstage: !active,
-      child: TickerMode(enabled: active, child: child),
-    );
+    super.build(context);
+    return TickerMode(enabled: widget.active, child: widget.child);
   }
 }
 

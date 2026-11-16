@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,13 +18,12 @@ String? _stringValue(dynamic value) {
   return text;
 }
 
-int _intValue(dynamic value) {
-  if (value is num && value.isFinite) {
-    return value.clamp(0, 2147483647).toInt();
-  }
-  if (value is String) {
-    final parsed = int.tryParse(value.replaceAll(',', '').trim());
-    if (parsed != null) return parsed.clamp(0, 2147483647).toInt();
+int _intValue(dynamic value) => _optionalIntValue(value) ?? 0;
+
+int _firstPositiveCount(Iterable<dynamic> values) {
+  for (final value in values) {
+    final parsed = _optionalIntValue(value);
+    if (parsed != null && parsed > 0) return parsed;
   }
   return 0;
 }
@@ -116,6 +114,8 @@ class XxxFollowCreatorProfile {
     this.followingCount,
     this.postsCount,
     this.likesCount,
+    this.viewsCount,
+    this.lastSeenAt,
   });
 
   final String id;
@@ -132,76 +132,144 @@ class XxxFollowCreatorProfile {
   final int? followingCount;
   final int? postsCount;
   final int? likesCount;
+  final int? viewsCount;
+  final String? lastSeenAt;
 
+  /// Accepts either a compact `user` object from a feed row or the full
+  /// `/api/v1/user/{username}/public?public=1` response.
   factory XxxFollowCreatorProfile.fromJson(
     Map<String, dynamic> json, {
     required Uri baseUri,
   }) {
-    final username = _stringValue(json['username']) ?? '';
+    final wrapped = _mapValue(json['data']);
+    final payload = wrapped.isNotEmpty &&
+            (_mapValue(wrapped['user']).isNotEmpty ||
+                wrapped.containsKey('post_count') ||
+                wrapped.containsKey('content'))
+        ? wrapped
+        : json;
+    final rootUser = _mapValue(payload['user']);
+    final user = rootUser.isNotEmpty ? rootUser : payload;
+    final content = _mapValue(payload['content']);
+    final postCount = _mapValue(
+      payload['post_count'] ?? payload['postCount'] ?? user['post_count'],
+    );
+    final statistics = _mapValue(payload['statistics']);
+    final stats = _mapValue(payload['stats']);
+    final username = _stringValue(user['username']) ??
+        _stringValue(payload['username']) ?? '';
+
+    dynamic firstNonNull(List<dynamic> values) {
+      for (final value in values) {
+        if (value != null) return value;
+      }
+      return null;
+    }
+
+    final followerRaw = firstNonNull([
+      payload['followers_count'],
+      payload['followersCount'],
+      payload['follower_count'],
+      payload['followerCount'],
+      payload['fans_count'],
+      payload['fan_count'],
+      payload['followers'],
+      postCount['follows'], // XXXFollow public API's follower total.
+      postCount['followers'],
+      _mapValue(payload['counts'])['followers'],
+      statistics['followers'],
+      stats['followers'],
+      user['followers_count'],
+      user['followers'],
+    ]);
+    final followingRaw = firstNonNull([
+      payload['following_count'],
+      payload['followingCount'],
+      payload['followings_count'],
+      payload['followingsCount'],
+      payload['following'],
+      payload['followings'],
+      user['following_count'],
+      user['following'],
+      statistics['following'],
+      stats['following'],
+    ]);
+
     return XxxFollowCreatorProfile(
-      id: '${json['id'] ?? ''}',
+      id: '${user['id'] ?? payload['id'] ?? ''}',
       username: username,
-      displayName: _stringValue(json['display_name']) ?? username,
-      gender: _stringValue(json['gender']) ?? '',
-      createdAt: _stringValue(json['created_at']) ?? '',
-      isStreaming: json['is_streaming'] == true,
+      displayName: _stringValue(user['display_name']) ??
+          _stringValue(payload['display_name']) ?? username,
+      gender: _stringValue(user['gender']) ??
+          _stringValue(payload['gender']) ?? '',
+      createdAt: _stringValue(user['created_at']) ??
+          _stringValue(payload['created_at']) ?? '',
+      isStreaming: user['is_streaming'] == true || payload['is_streaming'] == true,
       avatarUrl: _siteUrl(
-        json['public_avatar_url'] ?? json['fans_avatar_url'],
+        user['public_avatar_url'] ??
+            user['fans_avatar_url'] ??
+            payload['public_avatar_url'],
         baseUri: baseUri,
       ),
       coverPictureUrl: _siteUrl(
-        json['public_cover_picture_url'],
+        user['public_cover_picture_url'] ?? payload['public_cover_picture_url'],
         baseUri: baseUri,
       ),
       coverVideoUrl: _siteUrl(
-        json['public_cover_video_url'],
+        user['public_cover_video_url'] ?? payload['public_cover_video_url'],
         baseUri: baseUri,
       ),
-      bio: _stringValue(json['bio'] ?? json['biography'] ?? json['about']),
-      followersCount: _optionalIntValue(
-        json['followers_count'] ??
-            json['followersCount'] ??
-            json['follower_count'] ??
-            json['followerCount'] ??
-            json['fans_count'] ??
-            json['fan_count'] ??
-            json['fansCount'] ??
-            json['followers_total'] ??
-            json['subscribers_count'] ??
-            json['followers'] ??
-            json['fans'] ??
-            _mapValue(json['statistics'])['followers'] ??
-            _mapValue(json['statistics'])['followers_count'] ??
-            _mapValue(json['stats'])['followers'] ??
-            _mapValue(json['stats'])['followers_count'] ??
-            _mapValue(json['counts'])['followers'] ??
-            _mapValue(json['counters'])['followers'],
+      bio: _stringValue(
+        content['public_bio'] ??
+            user['bio'] ??
+            payload['bio'] ??
+            payload['biography'] ??
+            payload['about'],
       ),
-      followingCount: _optionalIntValue(
-        json['following_count'] ??
-            json['followingCount'] ??
-            json['followings_count'] ??
-            json['followingsCount'] ??
-            json['following_total'] ??
-            json['followed_count'] ??
-            json['follow_count'] ??
-            json['following'] ??
-            json['followings'] ??
-            _mapValue(json['statistics'])['following'] ??
-            _mapValue(json['statistics'])['following_count'] ??
-            _mapValue(json['stats'])['following'] ??
-            _mapValue(json['stats'])['following_count'] ??
-            _mapValue(json['counts'])['following'] ??
-            _mapValue(json['counters'])['following'],
-      ),
+      followersCount: _optionalIntValue(followerRaw),
+      followingCount: _optionalIntValue(followingRaw),
       postsCount: _optionalIntValue(
-        json['posts_count'] ?? json['post_count'] ?? json['postsCount'],
+        firstNonNull([
+          payload['posts_count'],
+          payload['postsCount'],
+          postCount['post'],
+          postCount['posts'],
+          user['posts_count'],
+          user['post_count'],
+        ]),
       ),
       likesCount: _optionalIntValue(
-        json['likes_count'] ?? json['post_like_count'] ?? json['like_count'],
+        firstNonNull([
+          payload['likes_count'],
+          payload['post_like_count'],
+          payload['like_count'],
+          postCount['likes'],
+          user['likes_count'],
+        ]),
       ),
+      viewsCount: _optionalIntValue(
+        firstNonNull([
+          payload['views_count'],
+          payload['view_count'],
+          postCount['views'],
+          user['views_count'],
+        ]),
+      ),
+      lastSeenAt: _stringValue(user['last_seen_at'] ?? payload['last_seen_at']),
     );
   }
+}
+
+class XxxFollowCreatorPostsPage {
+  const XxxFollowCreatorPostsPage({
+    required this.posts,
+    required this.beforeTime,
+    required this.hasMore,
+  });
+
+  final List<Map<String, dynamic>> posts;
+  final String? beforeTime;
+  final bool hasMore;
 }
 
 class XxxFollowAccountSnapshot {
@@ -429,8 +497,24 @@ class XxxFollowTransParser {
             thumbUrl: thumb,
             avatarUrl: avatar,
             author: username,
-            views: _intValue(row['view_count']),
-            likes: _intValue(row['like_count'] ?? row['favorite_count']),
+            views: _firstPositiveCount([
+              row['view_count'],
+              row['viewCount'],
+              row['views'],
+              post['view_count'],
+              post['viewCount'],
+              post['views'],
+              _mapValue(post['statistics'])['views'],
+              _mapValue(post['stats'])['views'],
+              media['view_count'],
+            ]),
+            likes: _firstPositiveCount([
+              row['like_count'],
+              row['favorite_count'],
+              post['like_count'],
+              post['likes_count'],
+              post['favorite_count'],
+            ]),
             durationSec: _intValue(
               media['duration_in_second'] ?? post['video_duration_total'],
             ),
@@ -442,23 +526,197 @@ class XxxFollowTransParser {
     return output;
   }
 
+  /// Parses the public author-post API. Responses have appeared as a raw
+  /// array and as objects containing `list`, `posts`, `data`, or `result`.
+  /// This normalizes each entry to the `{post: ..., view_count: ...}` shape
+  /// consumed by [toReelsFromRows].
+  static XxxFollowCreatorPostsPage parseCreatorPostsResponse(
+    String source, {
+    int limit = 18,
+    String? previousBeforeTime,
+  }) {
+    final decoded = jsonDecode(source);
+    final root = _mapValue(decoded);
+
+    List<Map<String, dynamic>> normalize(dynamic candidate) {
+      if (candidate is! List) return const <Map<String, dynamic>>[];
+      final rows = <Map<String, dynamic>>[];
+      for (final raw in candidate) {
+        final row = _mapValue(raw);
+        if (row.isEmpty) continue;
+        final nestedPost = _mapValue(row['post']);
+        final directMedia = row['media'];
+        final post = nestedPost.isNotEmpty
+            ? nestedPost
+            : (directMedia is List ? row : _mapValue(row['data']));
+        if (post.isEmpty) continue;
+        rows.add(nestedPost.isNotEmpty
+            ? row
+            : <String, dynamic>{
+                'post': post,
+                if (row['view_count'] != null) 'view_count': row['view_count'],
+                if (row['viewCount'] != null) 'viewCount': row['viewCount'],
+                if (row['views'] != null) 'views': row['views'],
+                if (row['like_count'] != null) 'like_count': row['like_count'],
+                if (row['favorite_count'] != null) 'favorite_count': row['favorite_count'],
+              });
+      }
+      return rows;
+    }
+
+    List<Map<String, dynamic>>? findRows(dynamic value, [int depth = 0]) {
+      if (depth > 6) return null;
+      if (value is List) {
+        final rows = normalize(value);
+        if (rows.isNotEmpty) return rows;
+        for (final child in value) {
+          final nested = findRows(child, depth + 1);
+          if (nested != null && nested.isNotEmpty) return nested;
+        }
+      } else if (value is Map) {
+        final map = _mapValue(value);
+        for (final key in const ['list', 'posts', 'items', 'data', 'result', 'public_posts']) {
+          if (!map.containsKey(key)) continue;
+          final nested = findRows(map[key], depth + 1);
+          if (nested != null && nested.isNotEmpty) return nested;
+        }
+        for (final child in map.values) {
+          final nested = findRows(child, depth + 1);
+          if (nested != null && nested.isNotEmpty) return nested;
+        }
+      }
+      return null;
+    }
+
+    final rows = decoded is List
+        ? normalize(decoded)
+        : (findRows(root) ?? const <Map<String, dynamic>>[]);
+
+    String? cursorFrom(dynamic value, [int depth = 0]) {
+      if (depth > 6) return null;
+      if (value is Map) {
+        final map = _mapValue(value);
+        for (final key in const [
+          'next_before_time',
+          'nextBeforeTime',
+          'before_time',
+          'beforeTime',
+          'next_cursor',
+          'nextCursor',
+        ]) {
+          final candidate = _stringValue(map[key]);
+          if (candidate != null && candidate != previousBeforeTime) {
+            return candidate;
+          }
+        }
+        for (final child in map.values) {
+          final nested = cursorFrom(child, depth + 1);
+          if (nested != null) return nested;
+        }
+      } else if (value is List) {
+        for (final child in value) {
+          final nested = cursorFrom(child, depth + 1);
+          if (nested != null) return nested;
+        }
+      }
+      return null;
+    }
+
+    String? createdAt(Map<String, dynamic> row) {
+      final post = _mapValue(row['post']);
+      return _stringValue(post['created_at'] ??
+          post['createdAt'] ??
+          row['created_at'] ??
+          row['createdAt']);
+    }
+
+    final explicitCursor = cursorFrom(root);
+    String? oldest;
+    DateTime? oldestDate;
+    for (final row in rows) {
+      final raw = createdAt(row);
+      if (raw == null) continue;
+      final parsed = DateTime.tryParse(raw);
+      if (parsed == null) {
+        oldest ??= raw;
+      } else if (oldestDate == null || parsed.isBefore(oldestDate)) {
+        oldestDate = parsed;
+        oldest = raw;
+      }
+    }
+    final cursor = explicitCursor ?? oldest;
+    final explicitHasMore = _readHasMore(root);
+    final hasMore = explicitHasMore ??
+        (rows.length >= limit && cursor != null && cursor != previousBeforeTime);
+
+    return XxxFollowCreatorPostsPage(
+      posts: List<Map<String, dynamic>>.unmodifiable(rows),
+      beforeTime: cursor,
+      hasMore: hasMore && rows.isNotEmpty && cursor != previousBeforeTime,
+    );
+  }
+
+  static bool? _readHasMore(dynamic value, [int depth = 0]) {
+    if (depth > 6) return null;
+    if (value is Map) {
+      final map = _mapValue(value);
+      for (final key in const ['has_more', 'hasMore', 'has_next', 'hasNext']) {
+        if (map[key] is bool) return map[key] as bool;
+      }
+      for (final key in const ['pagination', 'meta', 'page_info', 'pageInfo']) {
+        final result = _readHasMore(map[key], depth + 1);
+        if (result != null) return result;
+      }
+    }
+    return null;
+  }
+
   /// Converts creator rows gathered from one or more home-feed pages into
   /// playable Reels. Keeping conversion here makes profile grids use exactly
   /// the same URL validation and media selection as the main Trans feed.
   static List<ReelItem> toReelsFromRows(
     List<Map<String, dynamic>> rows, {
     required Uri baseUri,
+    XxxFollowCreatorProfile? creator,
   }) {
+    final enriched = creator == null
+        ? rows
+        : rows.map((row) {
+            final post = _mapValue(row['post']);
+            if (_mapValue(post['user']).isNotEmpty) return row;
+            final withUser = <String, dynamic>{
+              ...post,
+              'user': <String, dynamic>{
+                'id': creator.id,
+                'username': creator.username,
+                'display_name': creator.displayName,
+                'gender': creator.gender,
+                'created_at': creator.createdAt,
+                'is_streaming': creator.isStreaming,
+                'public_avatar_url': creator.avatarUrl,
+                'public_cover_picture_url': creator.coverPictureUrl,
+              },
+            };
+            return <String, dynamic>{...row, 'post': withUser};
+          }).toList(growable: false);
     return toReels(
       XxxFollowPageData(
         page: 1,
         gender: 't',
-        posts: rows,
+        posts: enriched,
         nextUri: null,
       ),
       baseUri: baseUri,
     );
   }
+}
+
+class _CreatorFeedState {
+  final List<Map<String, dynamic>> rows = <Map<String, dynamic>>[];
+  final Set<String> seenPostIds = <String>{};
+  String? beforeTime;
+  bool hasMore = true;
+  Future<List<Map<String, dynamic>>>? request;
 }
 
 /// Direct HTML/SSR scraper for XXXFollow's Trans feed. It uses the exact
@@ -475,11 +733,6 @@ class XxxFollowTransReelsRepository {
   final Set<String> _seenIds = <String>{};
   final Set<String> _seenVideoUrls = <String>{};
   final List<ReelItem> _pending = <ReelItem>[];
-  final Map<String, XxxFollowCreatorProfile> _profiles =
-      <String, XxxFollowCreatorProfile>{};
-  final Map<String, List<Map<String, dynamic>>> _authorPosts =
-      <String, List<Map<String, dynamic>>>{};
-
   Uri? _nextPageUri;
   Future<void>? _pageRequest;
   int _loadedPages = 0;
@@ -558,12 +811,6 @@ class XxxFollowTransReelsRepository {
       final profile = XxxFollowCreatorProfile.fromJson(user, baseUri: _baseUri);
       final key = profile.username.toLowerCase();
       if (key.isEmpty) continue;
-      _profiles[key] = profile;
-      final posts = _authorPosts.putIfAbsent(key, () => <Map<String, dynamic>>[]);
-      final postId = '${post['id'] ?? ''}';
-      if (postId.isNotEmpty && !posts.any((item) => '${_mapValue(item['post'])['id']}' == postId)) {
-        posts.add(row);
-      }
     }
 
     for (final item in items) {
@@ -619,172 +866,167 @@ class XxxFollowTransReelsRepository {
 
   bool get hasMorePages => !_disposed && _hasMore;
 
-  Map<String, dynamic>? _findProfileMap(
-    dynamic node, {
-    required String username,
-    required String id,
-  }) {
-    Map<String, dynamic>? best;
-    var bestScore = -1;
+  final Map<String, _CreatorFeedState> _creatorFeeds =
+      <String, _CreatorFeedState>{};
 
-    void visit(dynamic value) {
-      if (value is Map) {
-        final map = _mapValue(value);
-        final candidateName = (_stringValue(map['username']) ?? '').toLowerCase();
-        final candidateId =
-            '${map['id'] ?? map['user_id'] ?? map['userId'] ?? map['creator_id'] ?? map['creatorId'] ?? ''}';
-        if ((candidateName == username || (id.isNotEmpty && candidateId == id))) {
-          var score = 0;
-          const interesting = <String>[
-            'followers_count', 'followersCount', 'follower_count', 'followerCount',
-            'fans_count', 'fan_count', 'followers', 'fans',
-            'following_count', 'followingCount', 'followings_count', 'followings', 'bio',
-            'biography', 'about', 'posts_count', 'likes_count',
-          ];
-          for (final key in interesting) {
-            if (map.containsKey(key) && map[key] != null) score += 2;
-          }
-          for (final key in const ['statistics', 'stats', 'counts', 'counters']) {
-            if (map[key] is Map) score += 1;
-          }
-          if (score > bestScore) {
-            best = map;
-            bestScore = score;
-          }
-        }
-        for (final child in map.values) {
-          visit(child);
-        }
-      } else if (value is List) {
-        for (final child in value) {
-          visit(child);
-        }
-      }
-    }
+  Uri _creatorProfileUri(String username) => Uri(
+        scheme: _baseUri.scheme,
+        host: _baseUri.host,
+        port: _baseUri.hasPort ? _baseUri.port : null,
+        pathSegments: ['api', 'v1', 'user', username, 'public'],
+        queryParameters: const {'public': '1'},
+      );
 
-    visit(node);
-    return best;
-  }
-
-  Map<String, dynamic> _mergeProfileStats(Map<String, dynamic> profile) {
-    final merged = <String, dynamic>{...profile};
-    const wanted = <String>{
-      'followers_count', 'followersCount', 'follower_count', 'followerCount',
-      'fans_count', 'fan_count', 'fansCount', 'followers_total', 'subscribers_count', 'followers', 'fans',
-      'following_count', 'followingCount', 'followings_count', 'followingsCount', 'followings',
-      'following_total', 'followed_count', 'follow_count',
-      'following', 'posts_count', 'post_count', 'likes_count',
-      'post_like_count', 'like_count', 'bio', 'biography', 'about',
+  Uri _creatorPostsUri(String username, String? beforeTime) {
+    final query = <String, String>{
+      'limit': '18',
+      'sort_by': 'recent',
+      if (beforeTime != null && beforeTime.isNotEmpty) 'before_time': beforeTime,
     };
-
-    void collect(dynamic value) {
-      if (value is Map) {
-        for (final entry in value.entries) {
-          final key = '${entry.key}';
-          if (wanted.contains(key) && entry.value != null) {
-            merged.putIfAbsent(key, () => entry.value);
-          }
-          collect(entry.value);
-        }
-      } else if (value is List) {
-        for (final item in value) {
-          collect(item);
-        }
-      }
-    }
-
-    collect(profile);
-    return merged;
+    return Uri(
+      scheme: _baseUri.scheme,
+      host: _baseUri.host,
+      port: _baseUri.hasPort ? _baseUri.port : null,
+      pathSegments: ['api', 'v1', 'user', username, 'post', 'public'],
+      queryParameters: query,
+    );
   }
 
-  Future<XxxFollowCreatorProfile?> _fetchFullProfile(
-    String username, {
-    required String id,
-  }) async {
-    final uri = _baseUri.resolve(Uri.encodeComponent(username));
+  Map<String, String> _apiHeaders(String username, {required String accept}) => {
+        ..._headers(),
+        'Accept': accept,
+        'Referer': _baseUri.resolve(Uri.encodeComponent(username)).toString(),
+        'Origin': _baseUri.origin,
+      };
+
+  Future<XxxFollowCreatorProfile> _fetchCreatorProfile(String username) async {
+    final uri = _creatorProfileUri(username);
     final response = await _client
-        .get(uri, headers: _headers())
-        .timeout(const Duration(seconds: 18));
+        .get(uri, headers: _apiHeaders(username, accept: 'application/json'))
+        .timeout(const Duration(seconds: 20));
     if (response.statusCode != 200) {
-      throw HttpException('Creator profile returned HTTP ${response.statusCode}.', uri: uri);
+      throw HttpException(
+        'Creator profile API returned HTTP ${response.statusCode}.',
+        uri: uri,
+      );
     }
-    if (response.bodyBytes.length > _maxHtmlBytes) {
+    if (response.bodyBytes.length > 4 * 1024 * 1024) {
       throw const FormatException('Creator profile response is too large.');
     }
-    final html = utf8.decode(response.bodyBytes, allowMalformed: true);
-    final state = XxxFollowTransParser._extractPreloadState(html);
-    final user = _findProfileMap(state, username: username.toLowerCase(), id: id);
-    if (user == null) return null;
-    return XxxFollowCreatorProfile.fromJson(
-      _mergeProfileStats(user),
-      baseUri: _baseUri,
+    final decoded = jsonDecode(utf8.decode(response.bodyBytes, allowMalformed: true));
+    final root = _mapValue(decoded);
+    if (root.isEmpty) {
+      throw const FormatException('Creator profile API returned invalid JSON.');
+    }
+    final profile = XxxFollowCreatorProfile.fromJson(root, baseUri: _baseUri);
+    if (profile.username.isEmpty) {
+      throw const FormatException('Creator profile response did not include a username.');
+    }
+    if (profile.username.toLowerCase() != username.toLowerCase()) {
+      throw const FormatException('Creator profile API returned a different account.');
+    }
+    return profile;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchCreatorPostsPage(
+    String username,
+    _CreatorFeedState feed,
+  ) async {
+    if (_disposed) throw StateError('XXXFollow repository is closed.');
+    if (!feed.hasMore) return const <Map<String, dynamic>>[];
+    final previous = feed.beforeTime;
+    final uri = _creatorPostsUri(username, previous);
+    final response = await _client
+        .get(uri, headers: _apiHeaders(username, accept: 'application/json'))
+        .timeout(const Duration(seconds: 24));
+    if (response.statusCode != 200) {
+      throw HttpException(
+        'Creator posts API returned HTTP ${response.statusCode}.',
+        uri: uri,
+      );
+    }
+    if (response.bodyBytes.length > 8 * 1024 * 1024) {
+      throw const FormatException('Creator posts response is too large.');
+    }
+    final source = utf8.decode(response.bodyBytes, allowMalformed: true);
+    final page = XxxFollowTransParser.parseCreatorPostsResponse(
+      source,
+      limit: 18,
+      previousBeforeTime: previous,
     );
+    if (page.posts.isEmpty) {
+      feed.hasMore = false;
+      return const <Map<String, dynamic>>[];
+    }
+
+    var added = 0;
+    for (final row in page.posts) {
+      final post = _mapValue(row['post']);
+      final postId = '${post['id'] ?? ''}'.trim();
+      if (postId.isEmpty || !feed.seenPostIds.add(postId)) continue;
+      feed.rows.add(row);
+      added++;
+    }
+
+    final nextCursor = page.beforeTime;
+    if (nextCursor == null || nextCursor == previous || added == 0) {
+      feed.hasMore = false;
+    } else {
+      feed.beforeTime = nextCursor;
+      feed.hasMore = page.hasMore;
+    }
+    if (kDebugMode) {
+      debugPrint(
+        '[XXXFOLLOW] author=$username posts=${page.posts.length} '
+        'new=$added hasMore=${feed.hasMore} beforeTime=${feed.beforeTime}',
+      );
+    }
+    return List<Map<String, dynamic>>.unmodifiable(feed.rows);
+  }
+
+  Future<List<Map<String, dynamic>>> _ensureCreatorPage(
+    String username,
+    _CreatorFeedState feed,
+  ) {
+    final existing = feed.request;
+    if (existing != null) return existing;
+    final task = _fetchCreatorPostsPage(username, feed);
+    feed.request = task;
+    return task.whenComplete(() => feed.request = null);
   }
 
   Future<XxxFollowAccountSnapshot> getAccountSnapshot(String username) async {
     final key = username.trim().toLowerCase();
     if (key.isEmpty) throw const FormatException('Creator username is empty.');
-    final cachedProfile = _profiles[key];
-    if (cachedProfile == null) {
-      throw FormatException(
-        'Creator @$username was not present in the loaded Trans feed yet.',
-      );
-    }
-    var profile = cachedProfile;
 
-    // Feed cards intentionally contain only a compact user object. The
-    // creator page often exposes richer counters in its own SSR state, so
-    // request it once and merge only fields the source actually returns.
-    try {
-      final full = await _fetchFullProfile(key, id: profile.id);
-      if (full != null) {
-        profile = XxxFollowCreatorProfile(
-          id: full.id.isNotEmpty ? full.id : profile.id,
-          username: full.username.isNotEmpty ? full.username : profile.username,
-          displayName: full.displayName.isNotEmpty ? full.displayName : profile.displayName,
-          gender: full.gender.isNotEmpty ? full.gender : profile.gender,
-          createdAt: full.createdAt.isNotEmpty ? full.createdAt : profile.createdAt,
-          isStreaming: full.isStreaming || profile.isStreaming,
-          avatarUrl: full.avatarUrl ?? profile.avatarUrl,
-          coverPictureUrl: full.coverPictureUrl ?? profile.coverPictureUrl,
-          coverVideoUrl: full.coverVideoUrl ?? profile.coverVideoUrl,
-          bio: full.bio ?? profile.bio,
-          followersCount: full.followersCount ?? profile.followersCount,
-          followingCount: full.followingCount ?? profile.followingCount,
-          postsCount: full.postsCount ?? profile.postsCount,
-          likesCount: full.likesCount ?? profile.likesCount,
-        );
-        _profiles[key] = profile;
-      }
-    } catch (error) {
-      if (kDebugMode) debugPrint('[XXXFOLLOW] profile hydration failed: $error');
+    // This is the site's real public API. Unlike the compact author object in
+    // the home feed, it carries public_bio and post_count counters.
+    final profile = await _fetchCreatorProfile(key);
+    final feed = _creatorFeeds.putIfAbsent(key, _CreatorFeedState.new);
+    if (feed.rows.isEmpty && feed.hasMore) {
+      await _ensureCreatorPage(key, feed);
     }
-
     return XxxFollowAccountSnapshot(
       profile: profile,
-      firstAuthorPosts: List<Map<String, dynamic>>.unmodifiable(
-        _authorPosts[key] ?? const <Map<String, dynamic>>[],
-      ),
+      firstAuthorPosts: List<Map<String, dynamic>>.unmodifiable(feed.rows),
     );
+  }
+
+  bool hasMoreCreatorPosts(String username) {
+    final feed = _creatorFeeds[username.toLowerCase()];
+    return !_disposed && feed != null && feed.hasMore;
   }
 
   Future<List<Map<String, dynamic>>> getMoreCreatorPosts(
     XxxFollowAccountSnapshot account, {
-    int maxPages = 8,
+    int maxPages = 1,
   }) async {
-    if (maxPages < 1) {
-      return List<Map<String, dynamic>>.unmodifiable(
-        _authorPosts[account.profile.username.toLowerCase()] ??
-            const <Map<String, dynamic>>[],
-      );
-    }
     final key = account.profile.username.toLowerCase();
-    for (var index = 0; index < maxPages && _hasMore; index++) {
-      await _loadNextPage();
+    final feed = _creatorFeeds.putIfAbsent(key, _CreatorFeedState.new);
+    for (var index = 0; index < maxPages && feed.hasMore; index++) {
+      await _ensureCreatorPage(key, feed);
     }
-    return List<Map<String, dynamic>>.unmodifiable(
-      _authorPosts[key] ?? const <Map<String, dynamic>>[],
-    );
+    return List<Map<String, dynamic>>.unmodifiable(feed.rows);
   }
 
   void dispose() {

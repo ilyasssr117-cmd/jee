@@ -167,6 +167,18 @@ class ReelFavorites {
   bool isLiked(String reelId) =>
       FavoritesStore.instance.isFavorite(videoId(reelId));
 
+  /// Saved reels from every genre, newest first.
+  /// The returned snapshot is safe to pass into a standalone ReelsPage queue.
+  List<ReelItem> get allItems {
+    _ensureLoaded();
+    final unique = LinkedHashMap<String, ReelItem>();
+    for (final item in _items.values.toList().reversed) {
+      // Different scraper IDs can still point to the same media URL.
+      unique.putIfAbsent(item.videoUrl, () => item);
+    }
+    return List<ReelItem>.unmodifiable(unique.values);
+  }
+
   /// Adds the reel to favorites. Returns false when it was already there.
   bool like(ReelItem item) {
     if (!RemoteConfigService.instance.isFeatureEnabled('favorites')) {

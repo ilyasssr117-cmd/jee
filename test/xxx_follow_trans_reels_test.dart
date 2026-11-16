@@ -60,6 +60,29 @@ window.__PRELOAD_STATE__ = {
 </html>
 ''';
 
+const String _creatorProfileHtml = r'''
+<!doctype html>
+<html><body><script>
+window.__PRELOAD_STATE__ = {
+  "creator-profile": {
+    "profile": {
+      "id": 22,
+      "username": "sample_creator",
+      "display_name": "Sample Creator",
+      "gender": "t",
+      "created_at": "2026-01-01T00:00:00+0000",
+      "followers_count": 12500,
+      "following_count": 84,
+      "posts_count": 37,
+      "likes_count": 91000,
+      "bio": "Creator biography",
+      "statistics": {"followers": 12500, "following": 84}
+    }
+  }
+};
+</script></body></html>
+''';
+
 void main() {
   group('XXXFollow Trans feed parser', () {
     test('reads posts, direct MP4, creator metadata and pagination', () {
@@ -97,8 +120,11 @@ void main() {
     http.Request? captured;
     final client = MockClient((request) async {
       captured = request;
+      final body = request.url.path == '/sample_creator'
+          ? _creatorProfileHtml
+          : _pageHtml;
       return http.Response(
-        _pageHtml,
+        body,
         200,
         headers: const {'content-type': 'text/html; charset=utf-8'},
       );
@@ -113,6 +139,9 @@ void main() {
 
     final account = await repository.getAccountSnapshot('sample_creator');
     expect(account.profile.displayName, 'Sample Creator');
+    expect(account.profile.followersCount, 12500);
+    expect(account.profile.followingCount, 84);
+    expect(account.profile.postsCount, 37);
     expect(account.firstAuthorPosts, hasLength(1));
   });
 
@@ -138,6 +167,23 @@ void main() {
     expect(profile.postsCount, 37);
     expect(profile.likesCount, 91000);
     expect(profile.bio, 'Creator biography');
+  });
+
+  test('profile parser unwraps nested and formatted follower counters', () {
+    final profile = XxxFollowCreatorProfile.fromJson(
+      <String, dynamic>{
+        'id': 22,
+        'username': 'sample_creator',
+        'display_name': 'Sample Creator',
+        'statistics': {
+          'followers': {'count': '12.5K'},
+          'following': {'total': '84'},
+        },
+      },
+      baseUri: Uri.parse('https://www.xxxfollow.com/'),
+    );
+    expect(profile.followersCount, 12500);
+    expect(profile.followingCount, 84);
   });
 
   test('creator rows can be converted into playable profile-grid reels', () {

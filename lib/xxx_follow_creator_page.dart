@@ -4,9 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'media_headers.dart';
-import 'models.dart';
-import 'playback_launcher.dart';
-import 'playback_source.dart';
 import 'reel_favorites.dart';
 import 'xxx_follow_trans_reels.dart';
 
@@ -19,6 +16,7 @@ class XxxFollowCreatorPage extends StatefulWidget {
     required this.loadAccount,
     required this.loadMorePosts,
     required this.hasMorePages,
+    required this.onPlayReels,
   });
 
   final String username;
@@ -27,6 +25,7 @@ class XxxFollowCreatorPage extends StatefulWidget {
     XxxFollowAccountSnapshot account,
   ) loadMorePosts;
   final bool Function() hasMorePages;
+  final Future<void> Function(List<ReelItem> items, int initialIndex) onPlayReels;
 
   @override
   State<XxxFollowCreatorPage> createState() => _XxxFollowCreatorPageState();
@@ -42,6 +41,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
   final List<Map<String, dynamic>> _rows = <Map<String, dynamic>>[];
   final Set<String> _postIds = <String>{};
   final Set<String> _reelIds = <String>{};
+  final Set<String> _reelUrls = <String>{};
   final List<ReelItem> _reels = <ReelItem>[];
 
   @override
@@ -68,6 +68,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
       if (!mounted) return;
       _account = account;
       _mergeRows(account.firstAuthorPosts);
+      _moreSearched = !widget.hasMorePages();
       setState(() => _loading = false);
     } catch (error) {
       if (!mounted) return;
@@ -102,7 +103,9 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
       baseUri: Uri.parse(_creatorSite),
     );
     for (final reel in parsed) {
-      if (_reelIds.add(reel.id)) _reels.add(reel);
+      if (_reelIds.add(reel.id) && _reelUrls.add(reel.videoUrl)) {
+        _reels.add(reel);
+      }
     }
   }
 
@@ -154,37 +157,11 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
     return value;
   }
 
-  Future<void> _playReel(ReelItem item) async {
-    final account = _account;
-    if (account == null) return;
-    final profileUrl = '$_creatorSite${account.profile.username}';
-    final video = Video(
-      id: 'xxxfollow_${item.id}',
-      title: item.title.isEmpty ? 'Video by @${account.profile.username}' : item.title,
-      streamUrl: item.videoUrl,
-      description: item.tags.map((tag) => '#$tag').join(' '),
-      thumbnailUrl: item.thumbUrl,
-      duration: _duration(item.durationSec),
-      views: item.views > 0 ? reelCompact(item.views) : '',
-      likes: item.likes > 0 ? reelCompact(item.likes) : '',
-      category: 'XXXFollow',
-      pageUrl: profileUrl,
-    );
-    final referer = item.mediaReferer ?? _creatorSite;
-    final origin = Uri.tryParse(referer)?.origin ?? _creatorSite;
-    final source = PlaybackSource(
-      item.videoUrl,
-      <String, String>{
-        'User-Agent': kReelUserAgent,
-        'Referer': referer,
-        'Origin': origin,
-        'Accept': '*/*',
-      },
-    );
-    final error = await launchPlayer(context, video, source: source);
-    if (!mounted || error == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error)),
+  Future<void> _openInReels(int index) async {
+    if (index < 0 || index >= _reels.length || _reels.isEmpty) return;
+    await widget.onPlayReels(
+      List<ReelItem>.unmodifiable(_reels),
+      index,
     );
   }
 
@@ -361,7 +338,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
               const SizedBox(height: 20),
               Row(
                 children: [
-                  _stat('Videos', _compact(_reels.length)),
+                  _stat('Videos', _compact(profile.postsCount ?? _reels.length)),
                   _stat('Followers', _compact(profile.followersCount)),
                   _stat('Following', _compact(profile.followingCount)),
                 ],
@@ -434,10 +411,10 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
         ),
       );
 
-  Widget _videoTile(ReelItem item) {
+  Widget _videoTile(ReelItem item, int index) {
     final thumb = item.thumbUrl;
     return InkWell(
-      onTap: () => unawaited(_playReel(item)),
+      onTap: () => unawaited(_openInReels(index)),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -547,7 +524,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 2),
                         sliver: SliverGrid(
                           delegate: SliverChildBuilderDelegate(
-                            (context, index) => _videoTile(_reels[index]),
+                            (context, index) => _videoTile(_reels[index], index),
                             childCount: _reels.length,
                           ),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(

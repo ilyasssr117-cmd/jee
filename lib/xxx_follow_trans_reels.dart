@@ -35,12 +35,45 @@ int? _optionalIntValue(dynamic value) {
   if (value is num && value.isFinite) {
     return value.clamp(0, 2147483647).toInt();
   }
+  if (value is Map) {
+    // Profile pages sometimes wrap counters as {count: 1234} or
+    // {total: "1.2K"}; unwrap those without treating arbitrary maps as 0.
+    for (final key in const [
+      'count',
+      'total',
+      'value',
+      'formatted',
+      'display',
+      'number',
+    ]) {
+      if (!value.containsKey(key)) continue;
+      final parsed = _optionalIntValue(value[key]);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+  if (value is List) return value.length;
   if (value is String) {
-    final parsed = int.tryParse(value.replaceAll(',', '').trim());
-    if (parsed != null) return parsed.clamp(0, 2147483647).toInt();
+    final normalized = value.replaceAll(',', '').trim().toLowerCase();
+    final match = RegExp(
+      r'^(\d+(?:\.\d+)?)\s*([kmb])?\s*(?:followers?|fans?|following|followings|subscribers?)?$',
+    ).firstMatch(normalized);
+    if (match != null) {
+      final number = double.tryParse(match.group(1)!);
+      if (number == null || !number.isFinite) return null;
+      final multiplier = switch (match.group(2)) {
+        'k' => 1000,
+        'm' => 1000000,
+        'b' => 1000000000,
+        _ => 1,
+      };
+      final parsed = (number * multiplier).round();
+      return parsed.clamp(0, 2147483647).toInt();
+    }
   }
   return null;
 }
+
 
 Map<String, dynamic> _mapValue(dynamic value) {
   if (value is Map<String, dynamic>) return value;
@@ -126,10 +159,40 @@ class XxxFollowCreatorProfile {
       ),
       bio: _stringValue(json['bio'] ?? json['biography'] ?? json['about']),
       followersCount: _optionalIntValue(
-        json['followers_count'] ?? json['follower_count'] ?? json['followers'],
+        json['followers_count'] ??
+            json['followersCount'] ??
+            json['follower_count'] ??
+            json['followerCount'] ??
+            json['fans_count'] ??
+            json['fan_count'] ??
+            json['fansCount'] ??
+            json['followers_total'] ??
+            json['subscribers_count'] ??
+            json['followers'] ??
+            json['fans'] ??
+            _mapValue(json['statistics'])['followers'] ??
+            _mapValue(json['statistics'])['followers_count'] ??
+            _mapValue(json['stats'])['followers'] ??
+            _mapValue(json['stats'])['followers_count'] ??
+            _mapValue(json['counts'])['followers'] ??
+            _mapValue(json['counters'])['followers'],
       ),
       followingCount: _optionalIntValue(
-        json['following_count'] ?? json['followings_count'] ?? json['following'],
+        json['following_count'] ??
+            json['followingCount'] ??
+            json['followings_count'] ??
+            json['followingsCount'] ??
+            json['following_total'] ??
+            json['followed_count'] ??
+            json['follow_count'] ??
+            json['following'] ??
+            json['followings'] ??
+            _mapValue(json['statistics'])['following'] ??
+            _mapValue(json['statistics'])['following_count'] ??
+            _mapValue(json['stats'])['following'] ??
+            _mapValue(json['stats'])['following_count'] ??
+            _mapValue(json['counts'])['following'] ??
+            _mapValue(json['counters'])['following'],
       ),
       postsCount: _optionalIntValue(
         json['posts_count'] ?? json['post_count'] ?? json['postsCount'],
@@ -410,6 +473,7 @@ class XxxFollowTransReelsRepository {
   final http.Client _client;
   final Uri _baseUri;
   final Set<String> _seenIds = <String>{};
+  final Set<String> _seenVideoUrls = <String>{};
   final List<ReelItem> _pending = <ReelItem>[];
   final Map<String, XxxFollowCreatorProfile> _profiles =
       <String, XxxFollowCreatorProfile>{};
@@ -503,7 +567,9 @@ class XxxFollowTransReelsRepository {
     }
 
     for (final item in items) {
-      if (_seenIds.add(item.id)) _pending.add(item);
+      if (_seenIds.add(item.id) && _seenVideoUrls.add(item.videoUrl)) {
+        _pending.add(item);
+      }
     }
 
     if (kDebugMode) {
@@ -553,15 +619,146 @@ class XxxFollowTransReelsRepository {
 
   bool get hasMorePages => !_disposed && _hasMore;
 
+  Map<String, dynamic>? _findProfileMap(
+    dynamic node, {
+    required String username,
+    required String id,
+  }) {
+    Map<String, dynamic>? best;
+    var bestScore = -1;
+
+    void visit(dynamic value) {
+      if (value is Map) {
+        final map = _mapValue(value);
+        final candidateName = (_stringValue(map['username']) ?? '').toLowerCase();
+        final candidateId =
+            '${map['id'] ?? map['user_id'] ?? map['userId'] ?? map['creator_id'] ?? map['creatorId'] ?? ''}';
+        if ((candidateName == username || (id.isNotEmpty && candidateId == id))) {
+          var score = 0;
+          const interesting = <String>[
+            'followers_count', 'followersCount', 'follower_count', 'followerCount',
+            'fans_count', 'fan_count', 'followers', 'fans',
+            'following_count', 'followingCount', 'followings_count', 'followings', 'bio',
+            'biography', 'about', 'posts_count', 'likes_count',
+          ];
+          for (final key in interesting) {
+            if (map.containsKey(key) && map[key] != null) score += 2;
+          }
+          for (final key in const ['statistics', 'stats', 'counts', 'counters']) {
+            if (map[key] is Map) score += 1;
+          }
+          if (score > bestScore) {
+            best = map;
+            bestScore = score;
+          }
+        }
+        for (final child in map.values) {
+          visit(child);
+        }
+      } else if (value is List) {
+        for (final child in value) {
+          visit(child);
+        }
+      }
+    }
+
+    visit(node);
+    return best;
+  }
+
+  Map<String, dynamic> _mergeProfileStats(Map<String, dynamic> profile) {
+    final merged = <String, dynamic>{...profile};
+    const wanted = <String>{
+      'followers_count', 'followersCount', 'follower_count', 'followerCount',
+      'fans_count', 'fan_count', 'fansCount', 'followers_total', 'subscribers_count', 'followers', 'fans',
+      'following_count', 'followingCount', 'followings_count', 'followingsCount', 'followings',
+      'following_total', 'followed_count', 'follow_count',
+      'following', 'followings', 'posts_count', 'post_count', 'likes_count',
+      'post_like_count', 'like_count', 'bio', 'biography', 'about',
+    };
+
+    void collect(dynamic value) {
+      if (value is Map) {
+        for (final entry in value.entries) {
+          final key = '${entry.key}';
+          if (wanted.contains(key) && entry.value != null) {
+            merged.putIfAbsent(key, () => entry.value);
+          }
+          collect(entry.value);
+        }
+      } else if (value is List) {
+        for (final item in value) {
+          collect(item);
+        }
+      }
+    }
+
+    collect(profile);
+    return merged;
+  }
+
+  Future<XxxFollowCreatorProfile?> _fetchFullProfile(
+    String username, {
+    required String id,
+  }) async {
+    final uri = _baseUri.resolve(Uri.encodeComponent(username));
+    final response = await _client
+        .get(uri, headers: _headers())
+        .timeout(const Duration(seconds: 18));
+    if (response.statusCode != 200) {
+      throw HttpException('Creator profile returned HTTP ${response.statusCode}.', uri: uri);
+    }
+    if (response.bodyBytes.length > _maxHtmlBytes) {
+      throw const FormatException('Creator profile response is too large.');
+    }
+    final html = utf8.decode(response.bodyBytes, allowMalformed: true);
+    final state = XxxFollowTransParser._extractPreloadState(html);
+    final user = _findProfileMap(state, username: username.toLowerCase(), id: id);
+    if (user == null) return null;
+    return XxxFollowCreatorProfile.fromJson(
+      _mergeProfileStats(user),
+      baseUri: _baseUri,
+    );
+  }
+
   Future<XxxFollowAccountSnapshot> getAccountSnapshot(String username) async {
     final key = username.trim().toLowerCase();
     if (key.isEmpty) throw const FormatException('Creator username is empty.');
-    final profile = _profiles[key];
+    var profile = _profiles[key];
     if (profile == null) {
       throw FormatException(
         'Creator @$username was not present in the loaded Trans feed yet.',
       );
     }
+
+    // Feed cards intentionally contain only a compact user object. The
+    // creator page often exposes richer counters in its own SSR state, so
+    // request it once and merge only fields the source actually returns.
+    try {
+      final full = await _fetchFullProfile(key, id: profile.id);
+      if (full != null) {
+        profile = XxxFollowCreatorProfile(
+          id: full.id.isNotEmpty ? full.id : profile.id,
+          username: full.username.isNotEmpty ? full.username : profile.username,
+          displayName: full.displayName.isNotEmpty ? full.displayName : profile.displayName,
+          gender: full.gender.isNotEmpty ? full.gender : profile.gender,
+          createdAt: full.createdAt.isNotEmpty ? full.createdAt : profile.createdAt,
+          isStreaming: full.isStreaming || profile.isStreaming,
+          avatarUrl: full.avatarUrl ?? profile.avatarUrl,
+          coverPictureUrl: full.coverPictureUrl ?? profile.coverPictureUrl,
+          coverVideoUrl: full.coverVideoUrl ?? profile.coverVideoUrl,
+          bio: full.bio ?? profile.bio,
+          followersCount: full.followersCount ?? profile.followersCount,
+          followingCount: full.followingCount ?? profile.followingCount,
+          postsCount: full.postsCount ?? profile.postsCount,
+          likesCount: full.likesCount ?? profile.likesCount,
+        );
+        _profiles[key] = profile;
+      }
+    } catch (error) {
+      if (kDebugMode) debugPrint('[XXXFOLLOW] profile hydration failed: $error');
+    }
+
     return XxxFollowAccountSnapshot(
       profile: profile,
       firstAuthorPosts: List<Map<String, dynamic>>.unmodifiable(

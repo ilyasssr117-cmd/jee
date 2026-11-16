@@ -447,22 +447,44 @@ class _HomePageState extends State<HomePage>
     setState(() {});
   }
 
-  /// A favorited/downloaded reel has no web page, so it skips the details
-  /// screen and plays straight from its saved source.
+  /// Saved Reels reopen in a vertical Reels queue so favorites from all
+  /// content genres can be browsed without switching to the standard player.
   Future<void> _openSavedReel(Video video) async {
-    final source = ReelFavorites.instance.sourceFor(video.id);
-    if (source == null && DownloadStore.instance.localPath(video.id) == null) {
-      _toast('This reel can\u2019t be opened anymore.');
+    final playableSource = ReelFavorites.instance.sourceFor(video.id);
+    final items = ReelFavorites.instance.allItems;
+    final selectedIndex = items.indexWhere(
+      (item) => ReelFavorites.videoId(item.id) == video.id,
+    );
+    if (playableSource == null || selectedIndex < 0) {
+      // Keep legacy downloaded-only reels playable through the standard player.
+      if (DownloadStore.instance.localPath(video.id) != null) {
+        final error = await launchPlayer(
+          context,
+          video.copyWith(streamUrl: playableSource?.url ?? ''),
+          source: playableSource,
+        );
+        if (!mounted) return;
+        if (error != null) _toast(error);
+        return;
+      }
+      _toast('This reel can’t be opened anymore.');
       return;
     }
-    final error = await launchPlayer(
-      context,
-      video.copyWith(streamUrl: source?.url ?? ''),
-      source: source,
+
+    await Navigator.of(context).push<void>(
+      adaptivePageRoute<void>(
+        context,
+        builder: (_) => ReelsPage(
+          active: true,
+          bottomInset: 0,
+          source: videoRepository.source,
+          initialItems: items,
+          initialIndex: selectedIndex,
+          initialItemsOnly: true,
+        ),
+      ),
     );
-    if (!mounted) return;
-    setState(() {});
-    if (error != null) _toast(error);
+    if (mounted) setState(() {});
   }
 
   Future<void> _openDetails(Video video, List<Video> queue) async {

@@ -21,10 +21,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
-import 'ads/ad_manager.dart';
 import 'ads/age_gate.dart';
-import 'ads/pre_roll_ad.dart';
-import 'ads/vast.dart';
 import 'app_theme.dart';
 import 'content_source.dart';
 import 'analytics_service.dart';
@@ -667,6 +664,9 @@ class ReelsPage extends StatefulWidget {
     required this.active,
     required this.bottomInset,
     required this.source,
+    this.initialItems,
+    this.initialIndex = 0,
+    this.initialItemsOnly = false,
   });
 
   /// True only while the Reels section is the visible one. When false the
@@ -676,6 +676,9 @@ class ReelsPage extends StatefulWidget {
   /// Safe-area spacing below controls; the tab bar is hidden while Reels is active.
   final double bottomInset;
   final ContentSource source;
+  final List<ReelItem>? initialItems;
+  final int initialIndex;
+  final bool initialItemsOnly;
 
   @override
   State<ReelsPage> createState() => _ReelsPageState();
@@ -684,7 +687,7 @@ class ReelsPage extends StatefulWidget {
 class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   late ReelsRepository _repo;
   final http.Client _media = _makeClient();
-  final PageController _pager = PageController(viewportFraction: 1.0);
+  late final PageController _pager;
   final FocusNode _keyboardFocus = FocusNode(debugLabel: 'Reels keyboard');
   final List<ReelItem> _items = <ReelItem>[];
   final Map<int, VideoPlayerController> _controllers = {};
@@ -709,24 +712,43 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   int _current = 0;
   int? _pendingKeyboardPage;
 
-  // Reel ads: a full-screen video ad every kReelAdEveryN reels. The ad is
-  // prefetched one reel early; if none is ready the reels simply continue.
-  VastAd? _reelAd;
-  VastAd? _readyReelAd;
-  bool _reelAdRequested = false;
-  int _reelsSinceAd = 0;
-  bool get _adShowing => _reelAd != null;
+  // Reels are intentionally ad-free.
+  bool get _adShowing => false;
 
   @override
   void initState() {
     super.initState();
     _repo = ReelsRepository(source: widget.source);
+    final supplied = widget.initialItems;
+    if (supplied != null) {
+      final seenIds = <String>{};
+      final seenUrls = <String>{};
+      for (final item in supplied) {
+        if (seenIds.add(item.id) && seenUrls.add(item.videoUrl)) {
+          _items.add(item);
+        }
+      }
+      _exhausted = widget.initialItemsOnly;
+    }
+    _current = _items.isEmpty
+        ? 0
+        : widget.initialIndex.clamp(0, _items.length - 1).toInt();
+    _pager = PageController(
+      viewportFraction: 1.0,
+      initialPage: _current,
+    );
     WidgetsBinding.instance.addObserver(this);
     _clear = LocalStore.readBool(_kClearKey, fallback: false);
     if (widget.active) {
       _focusForKeyboard();
       _claimPlayback();
-      unawaited(_loadMore(first: true));
+      if (_items.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.active) _syncControllers(_current);
+        });
+      } else if (!widget.initialItemsOnly) {
+        unawaited(_loadMore(first: true));
+      }
     }
   }
 
@@ -755,7 +777,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       }
     } else {
       _pauseForLeaving();
-      _dropReelAd();
     }
   }
 
@@ -778,8 +799,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     _error = null;
     _loading = false;
     _pendingKeyboardPage = null;
-    _reelsSinceAd = 0;
-    _dropReelAd();
     if (mounted) {
       setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -871,7 +890,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   Future<void> _loadMore({bool first = false}) async {
     // Reels pages are kept alive by the tab host. Do not fetch or prepare
     // media while this page is only an off-screen tab preview.
-    if (!widget.active || _loading || _exhausted) return;
+    if (!widget.active || _loading || _exhausted || widget.initialItemsOnly) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -895,7 +914,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       );
       if (!mounted || !identical(requestRepository, _repo)) return;
       setState(() {
-        _items.addAll(batch);
+        final existingIds = _items.map((item) => item.id).toSet();
+        final existingUrls = _items.map((item) => item.videoUrl).toSet();
+        for (final item in batch) {
+          if (existingIds.add(item.id) && existingUrls.add(item.videoUrl)) {
+            _items.add(item);
+          }
+        }
         if (batch.isEmpty) _exhausted = true;
         _loading = false;
       });
@@ -1207,66 +1232,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       unawaited(entry.value.setPlaybackSpeed(1));
     }
     if (index >= _items.length - _kPreloadAhead) _loadMore();
-    _countReelForAds(previous, index);
     if (mounted) setState(() {});
   }
 
-  // ------------------------------------------------------------- Reel ads
-
-  /// Counts forward swipes, prefetches an ad one reel before it is due, and
-  /// shows it full-screen every [kReelAdEveryN] reels.
-  void _countReelForAds(int previous, int index) {
-    if (index <= previous || _adShowing) return;
-    _reelsSinceAd++;
-    if (_reelsSinceAd >= kReelAdEveryN - 1 &&
-        _readyReelAd == null &&
-        !_reelAdRequested) {
-      unawaited(_prefetchReelAd());
-    }
-    if (_reelsSinceAd >= kReelAdEveryN && _readyReelAd != null) {
-      _showReelAd();
-    }
-  }
-
-  Future<void> _prefetchReelAd() async {
-    _reelAdRequested = true;
-    try {
-      final ad = await requestReelAd(context);
-      if (!mounted) return;
-      _readyReelAd = ad;
-      // No fill: wait a few more reels before asking the networks again.
-      if (ad == null) _reelsSinceAd = 0;
-    } catch (_) {
-      _readyReelAd = null;
-      _reelsSinceAd = 0;
-    } finally {
-      _reelAdRequested = false;
-    }
-  }
-
-  void _showReelAd() {
-    final ad = _readyReelAd;
-    if (ad == null || !widget.active || !mounted) return;
-    _readyReelAd = null;
-    _reelsSinceAd = 0;
-    for (final controller in _controllers.values) {
-      if (!controller.value.isInitialized) continue;
-      unawaited(controller.pause());
-      unawaited(controller.setVolume(0));
-    }
-    setState(() => _reelAd = ad);
-  }
-
-  void _finishReelAd() {
-    if (!mounted || _reelAd == null) return;
-    setState(() => _reelAd = null);
-    _syncControllers(_current);
-  }
-
-  void _dropReelAd() {
-    _reelAd = null;
-    _readyReelAd = null;
-  }
 
   void _movePage(int direction) {
     if (!_pager.hasClients || _items.isEmpty) return;
@@ -1300,6 +1268,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 
   void _trimOldReelsIfNeeded() {
+    if (widget.initialItemsOnly) return;
     if (!mounted ||
         _trimming ||
         _items.length <= _kMaxBufferedReels ||
@@ -1371,6 +1340,23 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             maxPages: 8,
           ),
           hasMorePages: () => _repo.hasMoreXxxFollowPages,
+          onPlayReels: (items, initialIndex) async {
+            _pauseForLeaving();
+            await Navigator.of(context).push<void>(
+              adaptivePageRoute<void>(
+                context,
+                builder: (_) => ReelsPage(
+                  active: true,
+                  bottomInset: 0,
+                  source: ContentSource.trans,
+                  initialItems: items,
+                  initialIndex: initialIndex,
+                  initialItemsOnly: true,
+                ),
+              ),
+            );
+            if (mounted && widget.active) _syncControllers(_current);
+          },
         ),
       ),
     );
@@ -1618,7 +1604,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         onRetry: () => _retry(i),
                         onToggleLike: () => _toggleLike(item),
                         onDoubleTapLike: () => _likeFromDoubleTap(item),
-                        onOpenAuthor: widget.source == ContentSource.trans &&
+                        onOpenAuthor: !widget.initialItemsOnly &&
+                                widget.source == ContentSource.trans &&
                                 item.author.isNotEmpty
                             ? () => _openCreatorAccount(item.author)
                             : null,
@@ -1696,14 +1683,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               right: 8,
               child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
             ),
-            if (_reelAd != null && widget.active)
-              Positioned.fill(
-                child: PreRollAd(
-                  key: ObjectKey(_reelAd),
-                  ad: _reelAd!,
-                  onFinished: _finishReelAd,
-                ),
-              ),
           ],
         ),
       ),

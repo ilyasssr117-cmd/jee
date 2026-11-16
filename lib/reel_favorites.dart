@@ -171,7 +171,7 @@ class ReelFavorites {
   /// The returned snapshot is safe to pass into a standalone ReelsPage queue.
   List<ReelItem> get allItems {
     _ensureLoaded();
-    final unique = LinkedHashMap<String, ReelItem>();
+    final unique = <String, ReelItem>{};
     for (final item in _items.values.toList().reversed) {
       // Different scraper IDs can still point to the same media URL.
       unique.putIfAbsent(item.videoUrl, () => item);

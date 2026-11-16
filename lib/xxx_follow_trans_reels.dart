@@ -673,7 +673,7 @@ class XxxFollowTransReelsRepository {
       'fans_count', 'fan_count', 'fansCount', 'followers_total', 'subscribers_count', 'followers', 'fans',
       'following_count', 'followingCount', 'followings_count', 'followingsCount', 'followings',
       'following_total', 'followed_count', 'follow_count',
-      'following', 'followings', 'posts_count', 'post_count', 'likes_count',
+      'following', 'posts_count', 'post_count', 'likes_count',
       'post_like_count', 'like_count', 'bio', 'biography', 'about',
     };
 
@@ -724,12 +724,13 @@ class XxxFollowTransReelsRepository {
   Future<XxxFollowAccountSnapshot> getAccountSnapshot(String username) async {
     final key = username.trim().toLowerCase();
     if (key.isEmpty) throw const FormatException('Creator username is empty.');
-    var profile = _profiles[key];
-    if (profile == null) {
+    final cachedProfile = _profiles[key];
+    if (cachedProfile == null) {
       throw FormatException(
         'Creator @$username was not present in the loaded Trans feed yet.',
       );
     }
+    var profile = cachedProfile;
 
     // Feed cards intentionally contain only a compact user object. The
     // creator page often exposes richer counters in its own SSR state, so
@@ -771,10 +772,12 @@ class XxxFollowTransReelsRepository {
     XxxFollowAccountSnapshot account, {
     int maxPages = 8,
   }) async {
-    if (maxPages < 1) return List<Map<String, dynamic>>.unmodifiable(
-      _authorPosts[account.profile.username.toLowerCase()] ??
-          const <Map<String, dynamic>>[],
-    );
+    if (maxPages < 1) {
+      return List<Map<String, dynamic>>.unmodifiable(
+        _authorPosts[account.profile.username.toLowerCase()] ??
+            const <Map<String, dynamic>>[],
+      );
+    }
     final key = account.profile.username.toLowerCase();
     for (var index = 0; index < maxPages && _hasMore; index++) {
       await _loadNextPage();

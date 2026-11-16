@@ -24,7 +24,6 @@ import 'touch.dart';
 import 'preview_manager.dart';
 import 'video_details_page.dart';
 import 'video_repository.dart';
-import 'xxx_follow_trans_reels.dart';
 import 'widgets/app_button.dart';
 import 'widgets/bottom_bar.dart';
 import 'widgets/continue_row.dart';
@@ -91,7 +90,6 @@ class _HomePageState extends State<HomePage>
 
   late final PageController _sectionPager = PageController(initialPage: 0, keepPage: false);
   bool _sectionDragInProgress = false;
-  XxxFollowTransReelsRepository? _transHomeFeed;
 
   String _homeCacheKey(int page) =>
       'home|${videoRepository.source.name}|$page';
@@ -142,10 +140,6 @@ class _HomePageState extends State<HomePage>
     if (!mounted || _loading || _videos.isNotEmpty) return;
     if (_error?.offline != true) return;
     final source = videoRepository.source;
-    if (source == ContentSource.trans) {
-      unawaited(_loadPage(reset: true));
-      return;
-    }
     final key = _homeCacheKey(0);
     try {
       final result = await listingCache.fetch(
@@ -181,8 +175,6 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.removeObserver(this);
     RemoteConfigService.instance.removeListener(_onRemoteConfigChanged);
     _offlineTimer?.cancel();
-    _transHomeFeed?.dispose();
-    _transHomeFeed = null;
     _sectionPager.dispose();
     _search.dispose();
     _scroll
@@ -258,14 +250,10 @@ class _HomePageState extends State<HomePage>
     final requestGeneration = reset ? ++_generation : _generation;
     final requestedPage = reset ? 0 : _page;
     if (!_sourceChoiceReady) return;
-    final isTrans = videoRepository.source == ContentSource.trans;
+    // Home always uses the selected site's normal catalogue scraper.
+    // XXXFollow is intentionally isolated to the dedicated Trans Reels feed.
     final key = _homeCacheKey(requestedPage);
-    if (isTrans && (reset || _transHomeFeed == null)) {
-      _transHomeFeed?.dispose();
-      _transHomeFeed = XxxFollowTransReelsRepository();
-    }
-
-    final cached = isTrans ? null : listingCache.peek(key);
+    final cached = listingCache.peek(key);
     if (cached != null) {
       setState(() {
         _error = null;
@@ -280,7 +268,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    final offline = isTrans ? null : OfflineListingCache.read(key);
+    final offline = OfflineListingCache.read(key);
     if (offline != null) {
       setState(() {
         _error = null;
@@ -318,17 +306,15 @@ class _HomePageState extends State<HomePage>
     });
 
     try {
-      final result = isTrans
-          ? await _transHomeFeed!.nextHomeBatch(_pageSize)
-          : await listingCache.fetch(
-              key,
-              () => videoRepository.getVideos(
-                page: requestedPage,
-                pageSize: _pageSize,
-              ),
-            );
+      final result = await listingCache.fetch(
+        key,
+        () => videoRepository.getVideos(
+          page: requestedPage,
+          pageSize: _pageSize,
+        ),
+      );
       if (!mounted || requestGeneration != _generation) return;
-      if (!isTrans) OfflineListingCache.write(key, result);
+      OfflineListingCache.write(key, result);
 
       setState(() => _applyPage(result, requestedPage));
       if (_hasMore) _scheduleFillViewport();
@@ -374,23 +360,16 @@ class _HomePageState extends State<HomePage>
     final generation = ++_generation;
     try {
       final key = _homeCacheKey(0);
-      final isTrans = videoRepository.source == ContentSource.trans;
-      if (isTrans) {
-        _transHomeFeed?.dispose();
-        _transHomeFeed = XxxFollowTransReelsRepository();
-      }
-      final result = isTrans
-          ? await _transHomeFeed!.nextHomeBatch(_pageSize)
-          : await listingCache.fetch(
-              key,
-              () => videoRepository.getVideos(
-                page: 0,
-                pageSize: _pageSize,
-              ),
-              force: true,
-            );
+      final result = await listingCache.fetch(
+        key,
+        () => videoRepository.getVideos(
+          page: 0,
+          pageSize: _pageSize,
+        ),
+        force: true,
+      );
       if (!mounted || generation != _generation) return;
-      if (!isTrans) OfflineListingCache.write(key, result);
+      OfflineListingCache.write(key, result);
       final seen = <String>{};
       final fresh = <Video>[
         for (final video in result)
@@ -681,10 +660,6 @@ class _HomePageState extends State<HomePage>
     Haptics.play(Haptic.selection);
     PreviewManager.instance.stopNow(fade: false);
     videoRepository.setSource(source);
-    if (source != ContentSource.trans) {
-      _transHomeFeed?.dispose();
-      _transHomeFeed = null;
-    }
     AppSettings.instance.setContentSource(source);
     clearRequestCaches();
     _libraryPage = null;

@@ -22,6 +22,7 @@ import 'package:video_player/video_player.dart';
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import 'ads/ad_manager.dart';
+import 'ads/age_gate.dart';
 import 'ads/pre_roll_ad.dart';
 import 'ads/vast.dart';
 import 'app_theme.dart';
@@ -36,7 +37,7 @@ import 'models.dart';
 import 'photo_saver.dart';
 import 'preview_manager.dart';
 import 'reel_favorites.dart';
-import 'xfree_trans_reels.dart';
+import 'xxx_follow_trans_reels.dart';
 import 'services/remote_config_service.dart';
 import 'touch.dart';
 import 'widgets/app_button.dart';
@@ -393,8 +394,8 @@ class ReelsRepository {
   ReelsRepository({required this.source});
 
   final ContentSource source;
-  final XFreeTransReelsRepository _transRepository =
-      XFreeTransReelsRepository();
+  final XxxFollowTransReelsRepository _transRepository =
+      XxxFollowTransReelsRepository();
   final LinkedHashSet<String> _seen = LinkedHashSet<String>();
   final http.Client _client = _makeClient();
 
@@ -627,12 +628,12 @@ class ReelsRepository {
     return fresh;
   }
 
-  Future<XFreeAccountSnapshot> getXFreeAccount(String username) =>
+  Future<XxxFollowAccountSnapshot> getXxxFollowAccount(String username) =>
       _transRepository.getAccountSnapshot(username);
 
-  Future<List<Map<String, dynamic>>> getAllXFreeAuthorPosts(
-    XFreeAccountSnapshot account,
-  ) => _transRepository.getAllAuthorPosts(account);
+  Future<List<Map<String, dynamic>>> getMoreXxxFollowCreatorPosts(
+    XxxFollowAccountSnapshot account,
+  ) => _transRepository.getMoreCreatorPosts(account);
 
   void dispose() {
     _client.close();
@@ -737,7 +738,10 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     if (widget.active) {
       _focusForKeyboard();
       _claimPlayback();
-      if (_items.isEmpty && !_loading && !_exhausted) {
+      if (_items.isEmpty && !_loading) {
+        // Retry an empty/failed feed when the user returns to Reels. This is
+        // especially useful after a transient XXXFollow response or timeout.
+        _exhausted = false;
         unawaited(_loadMore(first: true));
       } else if (_items.isNotEmpty) {
         _syncControllers(_current);
@@ -867,13 +871,21 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     });
     final requestRepository = _repo;
     try {
-      // XFree needs one detail-page request per post to resolve the stream
-      // URL. Fetch a small first page so the first reel can appear quickly;
-      // subsequent loads fill the buffer while the user watches.
-      final batchSize = widget.source == ContentSource.trans
-          ? (first ? 1 : 3)
-          : (first ? _kFirstBatch : _kNextBatch);
-      final batch = await requestRepository.nextBatch(batchSize);
+      if (widget.source == ContentSource.trans) {
+        final ageConfirmed = await confirmAge(context);
+        if (!mounted) return;
+        if (!ageConfirmed) {
+          setState(() {
+            _error = 'Confirm that you are 18 or older to open this source.';
+            _loading = false;
+            _pendingKeyboardPage = null;
+          });
+          return;
+        }
+      }
+      final batch = await requestRepository.nextBatch(
+        first ? _kFirstBatch : _kNextBatch,
+      );
       if (!mounted || !identical(requestRepository, _repo)) return;
       setState(() {
         _items.addAll(batch);
@@ -905,7 +917,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       if (!mounted || !identical(requestRepository, _repo)) return;
       if (kDebugMode) debugPrint('[REELS] load failed: $e');
       setState(() {
-        // Keep XFree's native/WebKit error visible while diagnosing iOS.
+        // Keep the Trans source error visible while diagnosing network responses.
         // Other Reels providers retain the existing friendly error copy.
         _error = widget.source == ContentSource.trans
             ? e.toString().replaceFirst('Exception: ', '')
@@ -1338,14 +1350,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     });
   }
 
-  void _openXFreeAccount(String username) {
+  void _openCreatorAccount(String username) {
     if (widget.source != ContentSource.trans || username.trim().isEmpty) return;
     showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _XFreeAccountSheet(
+      builder: (_) => _CreatorAccountSheet(
         repository: _repo,
         username: username,
       ),
@@ -1591,7 +1603,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         onDoubleTapLike: () => _likeFromDoubleTap(item),
                         onOpenAuthor: widget.source == ContentSource.trans &&
                                 item.author.isNotEmpty
-                            ? () => _openXFreeAccount(item.author)
+                            ? () => _openCreatorAccount(item.author)
                             : null,
                       ),
                     );
@@ -1682,8 +1694,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   }
 }
 
-class _XFreeAccountSheet extends StatefulWidget {
-  const _XFreeAccountSheet({
+class _CreatorAccountSheet extends StatefulWidget {
+  const _CreatorAccountSheet({
     required this.repository,
     required this.username,
   });
@@ -1692,49 +1704,39 @@ class _XFreeAccountSheet extends StatefulWidget {
   final String username;
 
   @override
-  State<_XFreeAccountSheet> createState() => _XFreeAccountSheetState();
+  State<_CreatorAccountSheet> createState() => _CreatorAccountSheetState();
 }
 
-class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
-  late Future<XFreeAccountSnapshot> _accountFuture;
-  Future<List<Map<String, dynamic>>>? _allPostsFuture;
+class _CreatorAccountSheetState extends State<_CreatorAccountSheet> {
+  late Future<XxxFollowAccountSnapshot> _accountFuture;
+  Future<List<Map<String, dynamic>>>? _morePostsFuture;
 
   @override
   void initState() {
     super.initState();
-    _accountFuture = widget.repository.getXFreeAccount(widget.username);
+    _accountFuture = widget.repository.getXxxFollowAccount(widget.username);
   }
 
-  String _postTitle(Map<String, dynamic> post) {
-    final title = post['title'] ?? post['name'];
+  String _postTitle(Map<String, dynamic> row) {
+    final post = _mapCreatorPost(row['post']);
+    final title = post['text'] ?? post['slug'];
     if (title is String && title.trim().isNotEmpty) return title.trim();
     return 'Post ${post['id'] ?? ''}';
   }
 
-  Widget _metric(String label, int value) => Expanded(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _compact(value),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.title.copyWith(color: Colors.white, fontSize: 18),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.caption.copyWith(color: Colors.white60),
-            ),
-          ],
-        ),
-      );
+  Map<String, dynamic> _mapCreatorPost(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return value.map((key, value) => MapEntry('$key', value));
+    return <String, dynamic>{};
+  }
 
-  Widget _details(XFreeAccountSnapshot snapshot) {
+  Widget _details(XxxFollowAccountSnapshot snapshot) {
     final profile = snapshot.profile;
-    final allPosts = _allPostsFuture;
+    final morePosts = _morePostsFuture;
+    final visiblePosts = morePosts == null
+        ? snapshot.firstAuthorPosts
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1782,19 +1784,7 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
             ),
           ],
         ),
-        if (profile.bio.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(profile.bio, style: AppText.body.copyWith(color: Colors.white, height: 1.35)),
-        ],
         const SizedBox(height: 18),
-        Row(
-          children: [
-            _metric('Followers', profile.followers),
-            _metric('Following', profile.following),
-            _metric('Posts', profile.postsCount),
-          ],
-        ),
-        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -1804,61 +1794,48 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
           ),
           child: Column(
             children: [
-              _accountDataRow('Published posts', profile.postsPublished),
-              _accountDataRow('Unlisted posts', profile.postsUnlisted),
-              _accountDataRow('Profile hits', profile.hitCount),
-              _accountDataRow('Post views', profile.postViewCount),
-              _accountDataRow('Post likes', profile.postLikeCount),
-              if (profile.lastActive.isNotEmpty)
-                _accountTextRow('Last active', profile.lastActive),
-              if (profile.lastPostDate.isNotEmpty)
-                _accountTextRow('Last post', profile.lastPostDate),
-              _accountDataRow('Pinned posts', snapshot.pinnedPosts.length),
-              _accountDataRow('First author batch', snapshot.firstAuthorPosts.length),
-              if (profile.id.isNotEmpty) _accountTextRow('User ID', profile.id),
-              if (profile.uid.isNotEmpty) _accountTextRow('UID', profile.uid),
+              if (profile.id.isNotEmpty) _accountTextRow('Creator ID', profile.id),
+              if (profile.gender.isNotEmpty) _accountTextRow('Gender', profile.gender),
+              if (profile.createdAt.isNotEmpty) _accountTextRow('Joined', profile.createdAt),
+              _accountTextRow('Live status', profile.isStreaming ? 'Streaming' : 'Offline'),
+              _accountDataRow('Posts found in loaded feed', snapshot.firstAuthorPosts.length),
             ],
           ),
         ),
+        if (profile.coverPictureUrl != null || profile.coverVideoUrl != null) ...[
+          const SizedBox(height: 12),
+          if (profile.coverPictureUrl != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                profile.coverPictureUrl!,
+                width: double.infinity,
+                height: 120,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+        ],
         const SizedBox(height: 18),
         Row(
           children: [
             Expanded(
-              child: Text('Pinned posts', style: AppText.label.copyWith(color: Colors.white, fontSize: 15)),
+              child: Text('Posts by this creator in Trans', style: AppText.label.copyWith(color: Colors.white, fontSize: 15)),
             ),
-            Text('${snapshot.pinnedPosts.length}', style: AppText.caption.copyWith(color: Colors.white60)),
-          ],
-        ),
-        const SizedBox(height: 6),
-        if (snapshot.pinnedPosts.isEmpty)
-          Text('No pinned posts returned.', style: AppText.caption.copyWith(color: Colors.white54))
-        else
-          for (final post in snapshot.pinnedPosts.take(5))
-            _postRow(post),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: Text('Author feed', style: AppText.label.copyWith(color: Colors.white, fontSize: 15)),
-            ),
-            Text('${snapshot.firstAuthorPosts.length} loaded', style: AppText.caption.copyWith(color: Colors.white60)),
+            Text('${snapshot.firstAuthorPosts.length}', style: AppText.caption.copyWith(color: Colors.white60)),
           ],
         ),
         const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
-            onPressed: allPosts != null || snapshot.authorRecommId.isEmpty
+            onPressed: morePosts != null
                 ? null
                 : () => setState(() {
-                      _allPostsFuture = widget.repository.getAllXFreeAuthorPosts(snapshot);
+                      _morePostsFuture = widget.repository.getMoreXxxFollowCreatorPosts(snapshot);
                     }),
             icon: const Icon(CupertinoIcons.cloud_download),
-            label: Text(
-              snapshot.authorRecommId.isEmpty
-                  ? 'Author pagination unavailable'
-                  : 'Load all account posts',
-            ),
+            label: const Text('Search more pages for this creator'),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white,
               side: BorderSide(color: Colors.white.withValues(alpha: 0.24)),
@@ -1866,26 +1843,41 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
             ),
           ),
         ),
-        if (allPosts != null) ...[
+        if (visiblePosts != null) ...[
+          const SizedBox(height: 8),
+          if (visiblePosts.isEmpty)
+            Text('No posts from this creator in the pages loaded so far.', style: AppText.caption.copyWith(color: Colors.white54))
+          else
+            for (final post in visiblePosts.take(12)) _postRow(post),
+        ],
+        if (morePosts != null) ...[
           const SizedBox(height: 8),
           FutureBuilder<List<Map<String, dynamic>>>(
-            future: allPosts,
+            future: morePosts,
             builder: (context, state) {
               if (state.connectionState != ConnectionState.done) {
-                return const Center(child: Padding(
-                  padding: EdgeInsets.all(12),
-                  child: CupertinoActivityIndicator(color: Colors.white70),
-                ));
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: CupertinoActivityIndicator(color: Colors.white70),
+                  ),
+                );
               }
               if (state.hasError) {
-                return Text('Could not load the full author feed.', style: AppText.caption.copyWith(color: Colors.redAccent));
+                return Text(
+                  'Could not search more creator posts: ${state.error}',
+                  style: AppText.caption.copyWith(color: Colors.redAccent),
+                );
               }
               final posts = state.data ?? const <Map<String, dynamic>>[];
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${posts.length} unique posts collected', style: AppText.caption.copyWith(color: Colors.white70)),
-                  for (final post in posts.take(12)) _postRow(post),
+                  Text(
+                    '${posts.length} posts found in scanned Trans pages',
+                    style: AppText.caption.copyWith(color: Colors.white70),
+                  ),
+                  for (final post in posts.take(20)) _postRow(post),
                 ],
               );
             },
@@ -1916,24 +1908,27 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
         ),
       );
 
-  Widget _postRow(Map<String, dynamic> post) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          children: [
-            const Icon(CupertinoIcons.play_rectangle, size: 14, color: Colors.white54),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _postTitle(post),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppText.caption.copyWith(color: const Color(0xCCFFFFFF)),
-              ),
+  Widget _postRow(Map<String, dynamic> row) {
+    final post = _mapCreatorPost(row['post']);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          const Icon(CupertinoIcons.play_rectangle, size: 14, color: Colors.white54),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _postTitle(row),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption.copyWith(color: const Color(0xCCFFFFFF)),
             ),
-            Text('#${post['id'] ?? ''}', style: AppText.caption.copyWith(color: Colors.white38)),
-          ],
-        ),
-      );
+          ),
+          Text('#${post['id'] ?? ''}', style: AppText.caption.copyWith(color: Colors.white38)),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1946,7 +1941,7 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
       ),
       child: SafeArea(
         top: false,
-        child: FutureBuilder<XFreeAccountSnapshot>(
+        child: FutureBuilder<XxxFollowAccountSnapshot>(
           future: _accountFuture,
           builder: (context, state) {
             return SingleChildScrollView(
@@ -1962,15 +1957,20 @@ class _XFreeAccountSheetState extends State<_XFreeAccountSheet> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  Text('XFree account', style: AppText.title.copyWith(color: Colors.white, fontSize: 18)),
+                  Text('XXXFollow creator', style: AppText.title.copyWith(color: Colors.white, fontSize: 18)),
                   const SizedBox(height: 14),
                   if (state.connectionState != ConnectionState.done)
-                    const Center(child: Padding(
-                      padding: EdgeInsets.all(28),
-                      child: CupertinoActivityIndicator(color: Colors.white70, radius: 14),
-                    ))
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(28),
+                        child: CupertinoActivityIndicator(color: Colors.white70, radius: 14),
+                      ),
+                    )
                   else if (state.hasError)
-                    Text('Could not load @${widget.username}: ${state.error}', style: AppText.body.copyWith(color: Colors.white70))
+                    Text(
+                      'Could not load @${widget.username}: ${state.error}',
+                      style: AppText.body.copyWith(color: Colors.white70),
+                    )
                   else if (state.data != null)
                     _details(state.data!),
                 ],

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
@@ -36,6 +37,27 @@ import 'widgets/content_source_picker.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
 import 'services/remote_config_service.dart';
+
+class _FastSectionPagePhysics extends PageScrollPhysics {
+  const _FastSectionPagePhysics({super.parent});
+
+  @override
+  double get minFlingDistance => 8;
+
+  @override
+  double get minFlingVelocity => 180;
+
+  @override
+  SpringDescription get spring => const SpringDescription(
+        mass: 0.32,
+        stiffness: 900,
+        damping: 34,
+      );
+
+  @override
+  _FastSectionPagePhysics applyTo(ScrollPhysics? ancestor) =>
+      _FastSectionPagePhysics(parent: buildParent(ancestor));
+}
 
 enum _Section { home, reels, library, settings }
 
@@ -558,7 +580,7 @@ class _HomePageState extends State<HomePage>
       _sectionPager
           .animateToPage(
             targetIndex,
-            duration: const Duration(milliseconds: 260),
+            duration: const Duration(milliseconds: 170),
             curve: Curves.easeOutCubic,
           )
           .then((_) {
@@ -709,6 +731,7 @@ class _HomePageState extends State<HomePage>
       active: reelsActive && !_searchOpen && !_sectionDragInProgress,
       bottomInset: context.safe.bottom + 4,
       source: videoRepository.source,
+      onExitToPrevious: () => _transitionToSection(_Section.home),
     );
     if (libraryActive || _libraryPage == null) {
       // Prebuild Library once, so the first swipe does not land on a blank
@@ -746,8 +769,8 @@ class _HomePageState extends State<HomePage>
 
     final sections = _availableSections;
     final sectionPhysics = defaultTargetPlatform == TargetPlatform.iOS
-        ? const PageScrollPhysics(parent: BouncingScrollPhysics())
-        : const PageScrollPhysics(parent: ClampingScrollPhysics());
+        ? const _FastSectionPagePhysics(parent: BouncingScrollPhysics())
+        : const _FastSectionPagePhysics(parent: ClampingScrollPhysics());
     final content = RepaintBoundary(
       child: NotificationListener<ScrollNotification>(
         onNotification: _onSectionScrollNotification,

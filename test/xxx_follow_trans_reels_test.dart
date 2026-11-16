@@ -218,6 +218,7 @@ void main() {
     );
     expect(reels, hasLength(1));
     expect(reels.single.views, 1200);
+    expect(reels.single.postId, '77');
   });
 
   test('profile parser accepts a data envelope but does not invent following', () {
@@ -260,7 +261,7 @@ void main() {
     final pageTwo = _pageHtml
         .replaceAll('1001', '1002')
         .replaceAll('2001', '2002')
-        .replaceAll('\"page\": 1', '\"page\": 2')
+        .replaceAll('"page": 1', '"page": 2')
         .replaceAll('?page=2', '?page=3');
     var calls = 0;
     final client = MockClient((request) async {
@@ -277,6 +278,34 @@ void main() {
     expect(reels, hasLength(1));
     expect(reels.single.id, '1002_2002');
     expect(calls, 2);
+  });
+
+
+  test('Trans Reels comments use the public post comments endpoint', () async {
+    final client = MockClient((request) async {
+      expect(request.url.path, '/api/v1/post/1108943/comment');
+      expect(request.url.queryParameters['limit'], '20');
+      expect(request.url.queryParameters['offset'], '0');
+      expect(request.headers['cookie'], 'genders=t');
+      return http.Response(
+        r'''{"count":1,"count_total":1,"list":[{"id":464956,"post_id":1108943,"comment":"sample comment","created_at":"2026-03-16T00:56:45+0000","likes":2,"replies":{"count":0,"list":[]},"user":{"display_name":"Sample User","username":"sampleuser","gender":"m"}}]}''',
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+    final repository = XxxFollowTransReelsRepository(
+      client: client,
+      baseUri: Uri.parse('https://www.xxxfollow.com/'),
+    );
+    addTearDown(repository.dispose);
+
+    final page = await repository.getPostComments('1108943');
+    expect(page.total, 1);
+    expect(page.comments, hasLength(1));
+    expect(page.comments.single.id, '464956');
+    expect(page.comments.single.text, 'sample comment');
+    expect(page.comments.single.displayName, 'Sample User');
+    expect(page.hasMore, isFalse);
   });
 
 }

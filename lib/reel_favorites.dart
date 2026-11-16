@@ -47,6 +47,7 @@ class ReelItem {
     this.fallbackUrl,
     this.downloadUrl,
     this.mediaReferer,
+    this.postId,
   });
 
   final String id;
@@ -54,6 +55,8 @@ class ReelItem {
   final String? fallbackUrl;
   final String? downloadUrl;
   final String? mediaReferer;
+  /// XXXFollow post ID used by its public comments endpoint.
+  final String? postId;
   final String title;
   final String? thumbUrl;
   final String? avatarUrl;
@@ -71,6 +74,7 @@ class ReelItem {
         'fallback': fallbackUrl,
         'download': downloadUrl,
         'mediaReferer': mediaReferer,
+        'postId': postId,
         'title': title,
         'thumb': thumbUrl,
         'avatar': avatarUrl,
@@ -100,6 +104,7 @@ class ReelItem {
       fallbackUrl: optional('fallback'),
       downloadUrl: optional('download'),
       mediaReferer: optional('mediaReferer'),
+      postId: optional('postId'),
       title: map['title'] is String ? map['title'] as String : '',
       thumbUrl: optional('thumb'),
       avatarUrl: optional('avatar'),

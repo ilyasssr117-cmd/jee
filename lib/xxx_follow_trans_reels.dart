@@ -262,6 +262,42 @@ class XxxFollowCreatorProfile {
   }
 }
 
+class XxxFollowComment {
+  const XxxFollowComment({
+    required this.id,
+    required this.text,
+    required this.username,
+    required this.displayName,
+    required this.likes,
+    required this.createdAt,
+    this.avatarUrl,
+    this.replyCount = 0,
+  });
+
+  final String id;
+  final String text;
+  final String username;
+  final String displayName;
+  final int likes;
+  final String createdAt;
+  final String? avatarUrl;
+  final int replyCount;
+}
+
+class XxxFollowCommentsPage {
+  const XxxFollowCommentsPage({
+    required this.comments,
+    required this.total,
+    required this.offset,
+    required this.hasMore,
+  });
+
+  final List<XxxFollowComment> comments;
+  final int total;
+  final int offset;
+  final bool hasMore;
+}
+
 class XxxFollowCreatorPostsPage {
   const XxxFollowCreatorPostsPage({
     required this.posts,
@@ -493,6 +529,7 @@ class XxxFollowTransParser {
             fallbackUrl: fallback == videoUrl ? null : fallback,
             downloadUrl: _siteUrl(media['url'] ?? media['fhd_url'], baseUri: baseUri),
             mediaReferer: baseUri.toString(),
+            postId: postId.isNotEmpty ? postId : null,
             title: _stringValue(post['text']) ??
                 _stringValue(post['slug']) ??
                 (username.isNotEmpty ? 'Post by $displayName' : 'XXXFollow video'),
@@ -1068,6 +1105,75 @@ class XxxFollowTransReelsRepository {
       await _ensureCreatorPage(key, feed);
     }
     return List<Map<String, dynamic>>.unmodifiable(feed.rows);
+  }
+
+  Future<XxxFollowCommentsPage> getPostComments(
+    String postId, {
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    if (_disposed) throw StateError('XXXFollow repository is closed.');
+    final id = postId.trim();
+    if (id.isEmpty || !RegExp(r'^\d+$').hasMatch(id)) {
+      throw const FormatException('Invalid XXXFollow post ID.');
+    }
+    final safeLimit = limit.clamp(1, 50).toInt();
+    final safeOffset = offset.clamp(0, 100000).toInt();
+    final uri = Uri(
+      scheme: _baseUri.scheme,
+      host: _baseUri.host,
+      pathSegments: ['api', 'v1', 'post', id, 'comment'],
+      queryParameters: {'limit': '$safeLimit', 'offset': '$safeOffset'},
+    );
+    final response = await _client.get(uri, headers: {
+      ..._headers(),
+      'Accept': 'application/json',
+      'Referer': _baseUri.toString(),
+      'Origin': _baseUri.origin,
+    }).timeout(const Duration(seconds: 18));
+    if (response.statusCode != 200) {
+      throw HttpException(
+        'XXXFollow comments returned HTTP ${response.statusCode}.',
+        uri: uri,
+      );
+    }
+    if (response.bodyBytes.length > 3 * 1024 * 1024) {
+      throw const FormatException('Comments response is too large.');
+    }
+    final root = _mapValue(jsonDecode(
+      utf8.decode(response.bodyBytes, allowMalformed: true),
+    ));
+    final rawList = root['list'];
+    final rows = rawList is List ? rawList : const <dynamic>[];
+    final comments = <XxxFollowComment>[];
+    for (final raw in rows) {
+      final row = _mapValue(raw);
+      final user = _mapValue(row['user']);
+      final commentId = '${row['id'] ?? ''}'.trim();
+      final text = _stringValue(row['comment']) ?? '';
+      if (commentId.isEmpty || text.isEmpty) continue;
+      comments.add(XxxFollowComment(
+        id: commentId,
+        text: text,
+        username: _stringValue(user['username']) ?? '',
+        displayName: _stringValue(user['display_name']) ??
+            _stringValue(user['username']) ?? 'User',
+        likes: _intValue(row['likes'] ?? row['compound_likes']),
+        createdAt: _stringValue(row['created_at']) ?? '',
+        avatarUrl: _siteUrl(
+          user['public_avatar_url'] ?? user['fans_avatar_url'],
+          baseUri: _baseUri,
+        ),
+        replyCount: _intValue(_mapValue(row['replies'])['count']),
+      ));
+    }
+    final total = _intValue(root['count_total'] ?? root['count']);
+    return XxxFollowCommentsPage(
+      comments: List<XxxFollowComment>.unmodifiable(comments),
+      total: total,
+      offset: safeOffset,
+      hasMore: safeOffset + rows.length < total && rows.isNotEmpty,
+    );
   }
 
   void dispose() {

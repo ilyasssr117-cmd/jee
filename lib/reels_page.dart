@@ -667,6 +667,10 @@ class ReelsRepository {
   Future<XxxFollowAccountSnapshot> getXxxFollowAccount(String username) =>
       _transRepository.getAccountSnapshot(username);
 
+  Future<XxxFollowCommentsPage> getXxxFollowPostComments(
+    String postId, {int offset = 0}
+  ) => _transRepository.getPostComments(postId, offset: offset);
+
   bool hasMoreXxxFollowCreatorPages(String username) =>
       _transRepository.hasMoreCreatorPosts(username);
 
@@ -711,6 +715,7 @@ class ReelsPage extends StatefulWidget {
     this.initialItemsOnly = false,
     this.loadMoreInitialItems,
     this.hasMoreInitialItems,
+    this.onExitToPrevious,
   });
 
   /// True only while the Reels section is the visible one. When false the
@@ -725,6 +730,7 @@ class ReelsPage extends StatefulWidget {
   final bool initialItemsOnly;
   final Future<List<ReelItem>> Function()? loadMoreInitialItems;
   final bool Function()? hasMoreInitialItems;
+  final VoidCallback? onExitToPrevious;
 
   @override
   State<ReelsPage> createState() => _ReelsPageState();
@@ -762,6 +768,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   String? _error;
   int _current = 0;
   int? _pendingKeyboardPage;
+  int? _pendingLoadPage;
 
   // Reels are intentionally ad-free.
   bool get _adShowing => false;
@@ -1009,7 +1016,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       final retryableEmptyTrans = batch.isEmpty &&
           widget.source == ContentSource.trans &&
           requestRepository.hasMoreTransPages &&
-          _items.isEmpty &&
           _initialLoadRetries < 10;
       if (retryableEmptyTrans) {
         _initialLoadRetries++;
@@ -1040,6 +1046,18 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         if (batch.isNotEmpty) _initialLoadRetries = 0;
       });
       if (_items.isEmpty || !widget.active) return;
+      final pendingLoadPage = _pendingLoadPage;
+      if (pendingLoadPage != null) {
+        _pendingLoadPage = null;
+        if (pendingLoadPage < _items.length) {
+          _stopReelAnalytics(_current);
+          _current = pendingLoadPage;
+          _syncControllers(_current, preserveDuringTransition: _current - 1);
+          _rememberCurrentReel();
+        } else if (_exhausted && _pager.hasClients) {
+          _pager.jumpToPage(_current);
+        }
+      }
       if (first) {
         _syncControllers(0);
         _rememberCurrentReel();
@@ -1094,9 +1112,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       milliseconds: 250 + (100 * _initialLoadRetries).clamp(0, 1200).toInt(),
     );
     unawaited(Future<void>.delayed(delay).then((_) {
-      if (!mounted || !widget.active || _items.isNotEmpty || _loading) return;
+      if (!mounted || !widget.active || _loading || _exhausted) return;
       _exhausted = false;
-      unawaited(_loadMore(first: true));
+      unawaited(_loadMore(first: _items.isEmpty));
     }));
   }
 
@@ -1389,7 +1407,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   /// rather than waiting for the ballistic scroll to fully stop. The visible
   /// page therefore starts as it slides into place, like short-form feeds.
   void _onReelPageChanged(int page) {
-    if (!widget.active || page < 0 || page >= _items.length) return;
+    if (!widget.active || page < 0) return;
+    if (page >= _items.length) {
+      _pendingLoadPage = page;
+      if (!_loading && !_exhausted) unawaited(_loadMore());
+      return;
+    }
     if (page == _current) return;
 
     final previous = _current;
@@ -1520,6 +1543,27 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       if (!mounted || !_pager.hasClients) return;
       _pager.jumpToPage(_current);
     });
+  }
+
+  void _showComments(ReelItem item) {
+    final postId = item.postId;
+    if (widget.source != ContentSource.trans || postId == null || postId.isEmpty) {
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF171717),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) => _XxxFollowCommentsSheet(
+        loadPage: (offset) => _repo.getXxxFollowPostComments(
+          postId, offset: offset,
+        ),
+      ),
+    );
   }
 
   void _openCreatorAccount(String username) {
@@ -1791,8 +1835,25 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         ),
                   padEnds: false,
                   clipBehavior: Clip.hardEdge,
-                  itemCount: _items.length,
+                  itemCount: _items.length + (_exhausted ? 0 : 1),
                   itemBuilder: (context, i) {
+                    if (i >= _items.length) {
+                      return ColoredBox(
+                        color: Colors.black,
+                        child: Center(
+                          child: _loading
+                              ? const CupertinoActivityIndicator(
+                                  radius: 14, color: Colors.white70)
+                              : _error != null
+                                  ? _ErrorView(
+                                      message: _error!,
+                                      onRetry: () => _loadMore(),
+                                    )
+                                  : const CupertinoActivityIndicator(
+                                      radius: 14, color: Colors.white70),
+                        ),
+                      );
+                    }
                     final item = _items[i];
                     return RepaintBoundary(
                       child: _ReelView(
@@ -1813,6 +1874,10 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                         onRetry: () => _retry(i),
                         onToggleLike: () => _toggleLike(item),
                         onDoubleTapLike: () => _likeFromDoubleTap(item),
+                        onComments: widget.source == ContentSource.trans &&
+                                item.postId != null && item.postId!.isNotEmpty
+                            ? () => _showComments(item)
+                            : null,
                         onOpenAuthor: !widget.initialItemsOnly &&
                                 widget.source == ContentSource.trans &&
                                 item.author.isNotEmpty
@@ -1840,6 +1905,16 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                 child: Text(
                   'No videos right now.',
                   style: AppText.body.copyWith(color: Colors.white70),
+                ),
+              ),
+            if (widget.onExitToPrevious != null)
+              Positioned(
+                top: 0,
+                bottom: 0,
+                right: 0,
+                width: 18,
+                child: _RightEdgeExitGesture(
+                  onExit: widget.onExitToPrevious!,
                 ),
               ),
             // Soft top/bottom scrims keep the white UI readable on bright clips.
@@ -1982,6 +2057,7 @@ class _ReelView extends StatefulWidget {
     required this.onToggleLike,
     required this.onDoubleTapLike,
     this.onOpenAuthor,
+    this.onComments,
   });
 
   final ReelItem item;
@@ -2000,6 +2076,7 @@ class _ReelView extends StatefulWidget {
   final VoidCallback onToggleLike;
   final bool Function() onDoubleTapLike;
   final VoidCallback? onOpenAuthor;
+  final VoidCallback? onComments;
 
   @override
   State<_ReelView> createState() => _ReelViewState();
@@ -2492,6 +2569,7 @@ class _ReelViewState extends State<_ReelView>
               onToggleLike: widget.onToggleLike,
               onMute: widget.onMute,
               onSaveMenu: widget.onSaveMenu,
+              onComments: widget.onComments,
             ),
           ),
         ),
@@ -2815,6 +2893,7 @@ class _ActionRail extends StatelessWidget {
     required this.onToggleLike,
     required this.onMute,
     required this.onSaveMenu,
+    this.onComments,
   });
 
   final ReelItem item;
@@ -2823,6 +2902,7 @@ class _ActionRail extends StatelessWidget {
   final VoidCallback onToggleLike;
   final VoidCallback onMute;
   final VoidCallback onSaveMenu;
+  final VoidCallback? onComments;
 
   @override
   Widget build(BuildContext context) {
@@ -2907,6 +2987,14 @@ class _ActionRail extends StatelessWidget {
             );
           },
         ),
+        if (onComments != null) ...[
+          const SizedBox(height: 12),
+          _RailButton(
+            icon: CupertinoIcons.chat_bubble_text,
+            label: 'Comments',
+            onTap: onComments,
+          ),
+        ],
         const SizedBox(height: 12),
         _RailButton(
           icon: muted
@@ -3484,6 +3572,232 @@ class _ErrorView extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _RightEdgeExitGesture extends StatefulWidget {
+  const _RightEdgeExitGesture({required this.onExit});
+
+  final VoidCallback onExit;
+
+  @override
+  State<_RightEdgeExitGesture> createState() => _RightEdgeExitGestureState();
+}
+
+class _RightEdgeExitGestureState extends State<_RightEdgeExitGesture> {
+  double? _startX;
+  bool _triggered = false;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (details) {
+          _startX = details.localPosition.dx;
+          _triggered = false;
+        },
+        onHorizontalDragUpdate: (details) {
+          if (_triggered || _startX == null) return;
+          if (details.localPosition.dx - _startX! >= 14) {
+            _triggered = true;
+            Haptics.play(Haptic.selection);
+            widget.onExit();
+          }
+        },
+        onHorizontalDragEnd: (details) {
+          if (!_triggered && (details.primaryVelocity ?? 0) > 260) {
+            _triggered = true;
+            widget.onExit();
+          }
+          _startX = null;
+        },
+        onHorizontalDragCancel: () => _startX = null,
+      );
+}
+
+class _XxxFollowCommentsSheet extends StatefulWidget {
+  const _XxxFollowCommentsSheet({required this.loadPage});
+
+  final Future<XxxFollowCommentsPage> Function(int offset) loadPage;
+
+  @override
+  State<_XxxFollowCommentsSheet> createState() => _XxxFollowCommentsSheetState();
+}
+
+class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
+  final List<XxxFollowComment> _comments = <XxxFollowComment>[];
+  bool _loading = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  String? _error;
+  int _total = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load({bool more = false}) async {
+    if (_loading || _loadingMore || (more && !_hasMore)) return;
+    setState(() {
+      if (more) {
+        _loadingMore = true;
+      } else {
+        _loading = true;
+        _error = null;
+      }
+    });
+    try {
+      final page = await widget.loadPage(_comments.length);
+      if (!mounted) return;
+      setState(() {
+        final ids = _comments.map((e) => e.id).toSet();
+        for (final comment in page.comments) {
+          if (ids.add(comment.id)) _comments.add(comment);
+        }
+        _total = page.total;
+        _hasMore = page.hasMore;
+        _loading = false;
+        _loadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+        _loadingMore = false;
+      });
+    }
+  }
+
+  String _date(String raw) {
+    final date = DateTime.tryParse(raw);
+    if (date == null) return '';
+    final local = date.toLocal();
+    final now = DateTime.now();
+    final difference = now.difference(local);
+    if (difference.inMinutes < 1) return 'now';
+    if (difference.inHours < 1) return '${difference.inMinutes}m';
+    if (difference.inDays < 1) return '${difference.inHours}h';
+    if (difference.inDays < 7) return '${difference.inDays}d';
+    return '${local.day}/${local.month}/${local.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.72,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottom),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 38, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white30,
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              _total > 0 ? 'Comments ($_total)' : 'Comments',
+              style: const TextStyle(
+                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Divider(color: Colors.white12, height: 22),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CupertinoActivityIndicator(color: Colors.white))
+                  : _error != null && _comments.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(_error!, textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white70)),
+                              const SizedBox(height: 12),
+                              TextButton(onPressed: () => _load(), child: const Text('Retry')),
+                            ],
+                          ),
+                        )
+                      : _comments.isEmpty
+                          ? const Center(
+                              child: Text('No comments yet', style: TextStyle(color: Colors.white70)),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              itemCount: _comments.length + (_hasMore ? 1 : 0),
+                              itemBuilder: (context, index) {
+                                if (index >= _comments.length) {
+                                  return Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(14),
+                                      child: _loadingMore
+                                          ? const CupertinoActivityIndicator(color: Colors.white)
+                                          : TextButton(onPressed: () => _load(more: true), child: const Text('Load more')),
+                                    ),
+                                  );
+                                }
+                                final comment = _comments[index];
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 17,
+                                        backgroundColor: Colors.white12,
+                                        backgroundImage: comment.avatarUrl == null
+                                            ? null : NetworkImage(comment.avatarUrl!),
+                                        child: comment.avatarUrl == null
+                                            ? const Icon(CupertinoIcons.person_fill, size: 16, color: Colors.white70)
+                                            : null,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Flexible(child: Text(comment.displayName,
+                                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13))),
+                                                const SizedBox(width: 8),
+                                                Text(_date(comment.createdAt), style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(comment.text, style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.35)),
+                                            if (comment.replyCount > 0) ...[
+                                              const SizedBox(height: 5),
+                                              Text('${comment.replyCount} replies', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Column(
+                                        children: [
+                                          const Icon(CupertinoIcons.heart, size: 17, color: Colors.white60),
+                                          const SizedBox(height: 3),
+                                          Text('${comment.likes}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+            ),
+          ],
         ),
       ),
     );

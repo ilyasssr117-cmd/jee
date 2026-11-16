@@ -24,6 +24,7 @@ import 'touch.dart';
 import 'preview_manager.dart';
 import 'video_details_page.dart';
 import 'video_repository.dart';
+import 'xxx_follow_trans_reels.dart';
 import 'widgets/app_button.dart';
 import 'widgets/bottom_bar.dart';
 import 'widgets/continue_row.dart';
@@ -90,6 +91,7 @@ class _HomePageState extends State<HomePage>
 
   late final PageController _sectionPager = PageController(initialPage: 0, keepPage: false);
   bool _sectionDragInProgress = false;
+  XxxFollowTransReelsRepository? _transHomeFeed;
 
   String _homeCacheKey(int page) =>
       'home|${videoRepository.source.name}|$page';
@@ -116,18 +118,9 @@ class _HomePageState extends State<HomePage>
     final source = selected ?? AppSettings.instance.contentSource;
     if (source != videoRepository.source) {
       _changeContentSource(source);
-    } else if (source == ContentSource.trans) {
-      setState(() {
-        _sourceChoiceReady = true;
-        _videos.clear();
-        _recomputeDerived();
-        _loading = false;
-        _hasMore = false;
-        _error = null;
-      });
     } else {
       setState(() => _sourceChoiceReady = true);
-      _loadPage(reset: true);
+      unawaited(_loadPage(reset: true));
     }
   }
 
@@ -149,6 +142,10 @@ class _HomePageState extends State<HomePage>
     if (!mounted || _loading || _videos.isNotEmpty) return;
     if (_error?.offline != true) return;
     final source = videoRepository.source;
+    if (source == ContentSource.trans) {
+      unawaited(_loadPage(reset: true));
+      return;
+    }
     final key = _homeCacheKey(0);
     try {
       final result = await listingCache.fetch(
@@ -184,6 +181,8 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.removeObserver(this);
     RemoteConfigService.instance.removeListener(_onRemoteConfigChanged);
     _offlineTimer?.cancel();
+    _transHomeFeed?.dispose();
+    _transHomeFeed = null;
     _sectionPager.dispose();
     _search.dispose();
     _scroll
@@ -259,9 +258,14 @@ class _HomePageState extends State<HomePage>
     final requestGeneration = reset ? ++_generation : _generation;
     final requestedPage = reset ? 0 : _page;
     if (!_sourceChoiceReady) return;
+    final isTrans = videoRepository.source == ContentSource.trans;
     final key = _homeCacheKey(requestedPage);
+    if (isTrans && (reset || _transHomeFeed == null)) {
+      _transHomeFeed?.dispose();
+      _transHomeFeed = XxxFollowTransReelsRepository();
+    }
 
-    final cached = listingCache.peek(key);
+    final cached = isTrans ? null : listingCache.peek(key);
     if (cached != null) {
       setState(() {
         _error = null;
@@ -276,7 +280,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    final offline = OfflineListingCache.read(key);
+    final offline = isTrans ? null : OfflineListingCache.read(key);
     if (offline != null) {
       setState(() {
         _error = null;
@@ -314,15 +318,17 @@ class _HomePageState extends State<HomePage>
     });
 
     try {
-      final result = await listingCache.fetch(
-        key,
-        () => videoRepository.getVideos(
-          page: requestedPage,
-          pageSize: _pageSize,
-        ),
-      );
+      final result = isTrans
+          ? await _transHomeFeed!.nextHomeBatch(_pageSize)
+          : await listingCache.fetch(
+              key,
+              () => videoRepository.getVideos(
+                page: requestedPage,
+                pageSize: _pageSize,
+              ),
+            );
       if (!mounted || requestGeneration != _generation) return;
-      OfflineListingCache.write(key, result);
+      if (!isTrans) OfflineListingCache.write(key, result);
 
       setState(() => _applyPage(result, requestedPage));
       if (_hasMore) _scheduleFillViewport();
@@ -368,16 +374,23 @@ class _HomePageState extends State<HomePage>
     final generation = ++_generation;
     try {
       final key = _homeCacheKey(0);
-      final result = await listingCache.fetch(
-        key,
-        () => videoRepository.getVideos(
-          page: 0,
-          pageSize: _pageSize,
-        ),
-        force: true,
-      );
+      final isTrans = videoRepository.source == ContentSource.trans;
+      if (isTrans) {
+        _transHomeFeed?.dispose();
+        _transHomeFeed = XxxFollowTransReelsRepository();
+      }
+      final result = isTrans
+          ? await _transHomeFeed!.nextHomeBatch(_pageSize)
+          : await listingCache.fetch(
+              key,
+              () => videoRepository.getVideos(
+                page: 0,
+                pageSize: _pageSize,
+              ),
+              force: true,
+            );
       if (!mounted || generation != _generation) return;
-      OfflineListingCache.write(key, result);
+      if (!isTrans) OfflineListingCache.write(key, result);
       final seen = <String>{};
       final fresh = <Video>[
         for (final video in result)
@@ -668,6 +681,10 @@ class _HomePageState extends State<HomePage>
     Haptics.play(Haptic.selection);
     PreviewManager.instance.stopNow(fade: false);
     videoRepository.setSource(source);
+    if (source != ContentSource.trans) {
+      _transHomeFeed?.dispose();
+      _transHomeFeed = null;
+    }
     AppSettings.instance.setContentSource(source);
     clearRequestCaches();
     _libraryPage = null;
@@ -678,13 +695,11 @@ class _HomePageState extends State<HomePage>
       _page = 0;
       _emptyPages = 0;
       _loading = false;
-      _hasMore = source != ContentSource.trans;
+      _hasMore = true;
       _error = null;
     });
     _scrollToTop();
-    if (source != ContentSource.trans) {
-      unawaited(_loadPage(reset: true));
-    }
+    unawaited(_loadPage(reset: true));
   }
 
   @override
@@ -697,7 +712,7 @@ class _HomePageState extends State<HomePage>
         ? 24.0
         : appBottomBarHeight(context) + context.safe.bottom;
     final featured = _featured;
-    final firstLoad = _videos.isEmpty && _loading;
+    final firstLoad = _videos.isEmpty && (_loading || !_sourceChoiceReady);
     final resume = featured == null
         ? null
         : PlaybackProgress.instance.resumePosition(featured.id);
@@ -711,7 +726,6 @@ class _HomePageState extends State<HomePage>
     final reelsActive = _section == _Section.reels;
     final libraryActive = _section == _Section.library;
     final settingsActive = _section == _Section.settings;
-    final libraryVisible = libraryActive || _libraryPage != null;
     final settingsVisible = settingsActive || _settingsPage != null;
     // Keep the Reels page available as the real PageView child, not a temporary
     // empty placeholder. It stays inactive until the user settles on the tab.
@@ -721,7 +735,9 @@ class _HomePageState extends State<HomePage>
       bottomInset: context.safe.bottom + 4,
       source: videoRepository.source,
     );
-    if (libraryVisible || _libraryPage != null) {
+    if (libraryActive || _libraryPage == null) {
+      // Prebuild Library once, so the first swipe does not land on a blank
+      // frame while its tab subtree is created. Keep its state alive after.
       _libraryPage = LibraryView(
         key: const ValueKey<String>('library'),
         bottomInset: bottomInset,
@@ -730,7 +746,9 @@ class _HomePageState extends State<HomePage>
         segmentRequest: _libraryRequest,
       );
     }
-    if (settingsVisible || _settingsPage != null) {
+    if (settingsVisible || _settingsPage == null) {
+      // Build Settings before the first swipe reaches it. PageView keeps the
+      // adjacent section alive, avoiding a blank frame on the first visit.
       _settingsPage = SettingsView(
         key: const ValueKey<String>('settings'),
         bottomInset: bottomInset,
@@ -763,7 +781,7 @@ class _HomePageState extends State<HomePage>
           controller: _sectionPager,
           scrollDirection: Axis.horizontal,
           pageSnapping: true,
-          allowImplicitScrolling: false,
+          allowImplicitScrolling: true,
           physics: sectionPhysics,
           itemCount: sections.length,
           findChildIndexCallback: (key) {
@@ -948,22 +966,9 @@ class _HomePageState extends State<HomePage>
   List<Widget> _contentSlivers(double margin) {
     final gridPadding = EdgeInsets.symmetric(horizontal: margin);
 
-    if (videoRepository.source == ContentSource.trans && _videos.isEmpty) {
-      return [
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: StatusView(
-            icon: Icons.smart_display_outlined,
-            title: 'Trans feed is ready',
-            message: 'Open Reels when you are ready to browse this source.',
-            actionLabel: 'Open Reels',
-            onAction: () => _transitionToSection(_Section.reels),
-          ),
-        ),
-      ];
-    }
-
-    if (_videos.isEmpty && _loading) {
+    if (_videos.isEmpty && (_loading || !_sourceChoiceReady)) {
+      // The source picker and first network request happen after the first
+      // frame. Keep a skeleton visible instead of flashing 'No videos found'.
       return [SliverSkeletonGrid(padding: gridPadding)];
     }
 

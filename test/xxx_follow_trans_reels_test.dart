@@ -236,4 +236,47 @@ void main() {
     expect(profile.postsCount, 156);
     expect(profile.bio, 'wrapped bio');
   });
+  test('Home can load the Trans feed as normal Video catalog items', () async {
+    final client = MockClient((request) async {
+      expect(request.url.host, 'www.xxxfollow.com');
+      expect(request.headers['cookie'], 'genders=t');
+      return http.Response(_pageHtml, 200);
+    });
+    final repository = XxxFollowTransReelsRepository(client: client);
+    addTearDown(repository.dispose);
+
+    final videos = await repository.nextHomeBatch(1);
+    expect(videos, hasLength(1));
+    expect(videos.single.id, 'xxx_follow_1001_2001');
+    expect(videos.single.streamUrl, endsWith('2001_fhd.mp4'));
+    expect(videos.single.thumbnailUrl, endsWith('2001_small.webp'));
+    expect(videos.single.views, '1.2K');
+    expect(videos.single.likes, '24');
+    expect(videos.single.category, 'Trans');
+    expect(videos.single.pageUrl, 'https://www.xxxfollow.com/sample_creator');
+  });
+
+  test('Reels repository can skip previously seen Trans IDs after restart', () async {
+    final pageTwo = _pageHtml
+        .replaceAll('1001', '1002')
+        .replaceAll('2001', '2002')
+        .replaceAll('\"page\": 1', '\"page\": 2')
+        .replaceAll('?page=2', '?page=3');
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      return http.Response(calls == 1 ? _pageHtml : pageTwo, 200);
+    });
+    final repository = XxxFollowTransReelsRepository(
+      client: client,
+      initialSeenIds: const <String>['1001_2001'],
+    );
+    addTearDown(repository.dispose);
+
+    final reels = await repository.nextBatch(1);
+    expect(reels, hasLength(1));
+    expect(reels.single.id, '1002_2002');
+    expect(calls, 2);
+  });
+
 }

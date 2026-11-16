@@ -5,11 +5,13 @@ import 'package:cupertino_http/cupertino_http.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'models.dart';
 import 'reel_favorites.dart';
 
 const String _xxxFollowBaseUrl = 'https://www.xxxfollow.com/';
 const String _xxxFollowUserAgent = kReelUserAgent;
 const int _maxHtmlBytes = 12 * 1024 * 1024;
+const int _maxSeenIdsInMemory = 3000;
 
 String? _stringValue(dynamic value) {
   if (value is! String) return null;
@@ -724,9 +726,14 @@ class _CreatorFeedState {
 /// the MP4 URLs already embedded in the returned page. No WKWebView, XFree
 /// recommId, or per-video detail-page request is needed for Reels.
 class XxxFollowTransReelsRepository {
-  XxxFollowTransReelsRepository({http.Client? client, Uri? baseUri})
-      : _client = client ?? _createClient(),
-        _baseUri = baseUri ?? Uri.parse(_xxxFollowBaseUrl);
+  XxxFollowTransReelsRepository({
+    http.Client? client,
+    Uri? baseUri,
+    Iterable<String> initialSeenIds = const <String>[],
+  })  : _client = client ?? _createClient(),
+        _baseUri = baseUri ?? Uri.parse(_xxxFollowBaseUrl) {
+    _seenIds.addAll(initialSeenIds.where((id) => id.isNotEmpty));
+  }
 
   final http.Client _client;
   final Uri _baseUri;
@@ -805,18 +812,19 @@ class XxxFollowTransReelsRepository {
     _hasMore = page.nextUri != null;
 
     final items = XxxFollowTransParser.toReels(page, baseUri: _baseUri);
-    for (final row in page.posts) {
-      final post = _mapValue(row['post']);
-      final user = _mapValue(post['user']);
-      final profile = XxxFollowCreatorProfile.fromJson(user, baseUri: _baseUri);
-      final key = profile.username.toLowerCase();
-      if (key.isEmpty) continue;
-    }
-
     for (final item in items) {
-      if (_seenIds.add(item.id) && _seenVideoUrls.add(item.videoUrl)) {
-        _pending.add(item);
-      }
+      final isNewId = _seenIds.add(item.id);
+      final isNewUrl = _seenVideoUrls.add(item.videoUrl);
+      if (isNewId && isNewUrl) _pending.add(item);
+    }
+    // The page cursor advances monotonically, so old in-session dedup keys
+    // can be discarded safely once this bounded window is exceeded. The
+    // compact persisted seen-ID list in ReelsPage remains the restart guard.
+    while (_seenIds.length > _maxSeenIdsInMemory) {
+      _seenIds.remove(_seenIds.first);
+    }
+    while (_seenVideoUrls.length > _maxSeenIdsInMemory) {
+      _seenVideoUrls.remove(_seenVideoUrls.first);
     }
 
     if (kDebugMode) {
@@ -838,7 +846,7 @@ class XxxFollowTransReelsRepository {
 
     final result = <ReelItem>[];
     var pageAttempts = 0;
-    while (result.length < amount && pageAttempts < 6) {
+    while (result.length < amount && pageAttempts < 8) {
       if (_pending.isEmpty) {
         if (!_hasMore) break;
         await _loadNextPage();
@@ -865,6 +873,39 @@ class XxxFollowTransReelsRepository {
   }
 
   bool get hasMorePages => !_disposed && _hasMore;
+
+  /// Returns the same public Trans feed as lightweight catalogue Video rows.
+  /// This lets Home display Trans normally without routing the user to Reels.
+  Future<List<Video>> nextHomeBatch(int amount) async {
+    final items = await nextBatch(amount);
+    return List<Video>.unmodifiable(items.map((item) {
+      final duration = item.durationSec;
+      final minutes = duration ~/ 60;
+      final seconds = duration % 60;
+      final creatorUri = item.author.isEmpty
+          ? Uri.parse(_xxxFollowBaseUrl)
+          : Uri.https('www.xxxfollow.com', '/${item.author}');
+      final description = <String>[
+        if (item.author.isNotEmpty) '@${item.author}',
+        if (item.tags.isNotEmpty) item.tags.map((tag) => '#$tag').join(' '),
+      ].join(' · ');
+      return Video(
+        id: 'xxx_follow_${item.id}',
+        title: item.title.isEmpty ? 'Video by ${item.author}' : item.title,
+        streamUrl: item.videoUrl,
+        description: description,
+        thumbnailUrl: item.thumbUrl,
+        duration: duration > 0
+            ? '$minutes:${seconds.toString().padLeft(2, '0')}'
+            : '',
+        views: item.views > 0 ? reelCompact(item.views) : '',
+        likes: item.likes > 0 ? reelCompact(item.likes) : '',
+        category: 'Trans',
+        pageUrl: creatorUri.toString(),
+        previewUrl: item.thumbUrl ?? '',
+      );
+    }));
+  }
 
   final Map<String, _CreatorFeedState> _creatorFeeds =
       <String, _CreatorFeedState>{};

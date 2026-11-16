@@ -443,6 +443,13 @@ class HtmlScraperVideoRepository implements VideoCatalogRepository {
     required String userAgent,
     bool refresh = false,
   }) async {
+    final mediaHost = streamUri.host.toLowerCase();
+    final pageHost = Uri.tryParse(pageUrl?.trim() ?? '')?.host.toLowerCase() ?? '';
+    final isXxxFollowMedia =
+        (mediaHost == 'xxxfollow.com' || mediaHost.endsWith('.xxxfollow.com')) &&
+        (pageHost == 'xxxfollow.com' || pageHost.endsWith('.xxxfollow.com'));
+    if (isXxxFollowMedia) return '';
+
     final target = _scraperForUrl(pageUrl ?? streamUri.toString());
     _ensureConfigured(target);
     final configuredUri = Uri.parse(target.config.baseUrl.trim());

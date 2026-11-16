@@ -75,6 +75,9 @@ const int _kReelHistoryKeep = 12;
 const int _kReelTrimTrigger = 48;
 const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
+const int _kMaxPersistedSeenReels = 1500;
+String _reelSeenHistoryKey(ContentSource source) =>
+    'reels_seen_ids_v2_${source.name}';
 const Duration _kReelDoubleTapWindow = Duration(milliseconds: 260);
 const Duration _kReelLongPressDelay = Duration(milliseconds: 140);
 const double _kReelMoveSlop = 14;
@@ -88,9 +91,9 @@ class _FastReelsPagePhysics extends PageScrollPhysics {
 
   @override
   SpringDescription get spring => const SpringDescription(
-        mass: 0.5,
-        stiffness: 500,
-        damping: 34,
+        mass: 0.38,
+        stiffness: 700,
+        damping: 28,
       );
 
   @override
@@ -409,11 +412,26 @@ Uri _validatedReelsApiUri() {
 }
 
 class ReelsRepository {
-  ReelsRepository({required this.source});
+  ReelsRepository({
+    required this.source,
+    Iterable<String> previouslySeenIds = const <String>[],
+  }) : _transRepository = XxxFollowTransReelsRepository(
+          initialSeenIds: source == ContentSource.trans
+              ? previouslySeenIds
+              : const <String>[],
+        ) {
+    // Non-Trans Reels use the generic API's local ID filter. Trans delegates
+    // deduplication to XXXFollow's paged repository, so do not duplicate its
+    // persisted history in a second in-memory set.
+    if (source != ContentSource.trans) {
+      for (final id in previouslySeenIds) {
+        if (id.isNotEmpty) _seen.add('id:$id');
+      }
+    }
+  }
 
   final ContentSource source;
-  final XxxFollowTransReelsRepository _transRepository =
-      XxxFollowTransReelsRepository();
+  final XxxFollowTransReelsRepository _transRepository;
   final LinkedHashSet<String> _seen = LinkedHashSet<String>();
   final http.Client _client = _makeClient();
 
@@ -652,6 +670,9 @@ class ReelsRepository {
   bool hasMoreXxxFollowCreatorPages(String username) =>
       _transRepository.hasMoreCreatorPosts(username);
 
+  bool get hasMoreTransPages =>
+      source == ContentSource.trans && _transRepository.hasMorePages;
+
   Future<List<Map<String, dynamic>>> getMoreXxxFollowCreatorPosts(
     XxxFollowAccountSnapshot account, {
     int maxPages = 8,
@@ -727,6 +748,11 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       ValueNotifier<Map<String, double>>(const {});
 
   bool _loading = false;
+  bool _initialLoadCompleted = false;
+  int _initialLoadRetries = 0;
+  late LinkedHashSet<String> _seenHistory;
+  Timer? _seenHistoryWriteTimer;
+  bool _seenHistoryDirty = false;
   bool _resumeOnForeground = false;
   bool _reelScrollInProgress = false;
   bool _trimming = false;
@@ -743,9 +769,20 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _repo = ReelsRepository(source: widget.source);
+    _seenHistory = LinkedHashSet<String>.of(
+      LocalStore.readList(_reelSeenHistoryKey(widget.source))
+          .where((id) => id.isNotEmpty),
+    );
+    while (_seenHistory.length > _kMaxPersistedSeenReels) {
+      _seenHistory.remove(_seenHistory.first);
+    }
+    _repo = ReelsRepository(
+      source: widget.source,
+      previouslySeenIds: _seenHistory,
+    );
     final supplied = widget.initialItems;
     if (supplied != null) {
+      _initialLoadCompleted = true;
       final seenIds = <String>{};
       final seenUrls = <String>{};
       for (final item in supplied) {
@@ -798,6 +835,8 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         // Retry an empty/failed feed when the user returns to Reels. This is
         // especially useful after a transient XXXFollow response or timeout.
         _exhausted = false;
+        _initialLoadCompleted = false;
+        _initialLoadRetries = 0;
         unawaited(_loadMore(first: true));
       } else if (_items.isNotEmpty) {
         _syncControllers(_current);
@@ -820,12 +859,21 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     _analyticsWatchStarted.clear();
     _analyticsPlayedReels.clear();
     _repo.dispose();
-    _repo = ReelsRepository(source: widget.source);
+    _seenHistory = LinkedHashSet<String>.of(
+      LocalStore.readList(_reelSeenHistoryKey(widget.source))
+          .where((id) => id.isNotEmpty),
+    );
+    _repo = ReelsRepository(
+      source: widget.source,
+      previouslySeenIds: _seenHistory,
+    );
     _items.clear();
     _current = 0;
     _exhausted = false;
     _error = null;
     _loading = false;
+    _initialLoadCompleted = false;
+    _initialLoadRetries = 0;
     _pendingKeyboardPage = null;
     if (mounted) {
       setState(() {});
@@ -860,6 +908,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _rememberCurrentReel();
+    _persistSeenHistory();
+    unawaited(LocalStore.flush());
     WidgetsBinding.instance.removeObserver(this);
     for (final controller in _controllers.values) {
       final listener = _controllerListeners.remove(controller);
@@ -895,6 +946,9 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
+      _rememberCurrentReel();
+      _persistSeenHistory();
+      unawaited(LocalStore.flush());
       if (c != null && c.value.isInitialized && c.value.isPlaying) {
         _resumeOnForeground = true;
         unawaited(c.pause());
@@ -941,6 +995,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
             setState(() {
               _error = 'Confirm that you are 18 or older to open this source.';
               _loading = false;
+              _initialLoadCompleted = true;
               _pendingKeyboardPage = null;
             });
             return;
@@ -951,6 +1006,21 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         );
       }
       if (!mounted || !identical(requestRepository, _repo)) return;
+      final retryableEmptyTrans = batch.isEmpty &&
+          widget.source == ContentSource.trans &&
+          requestRepository.hasMoreTransPages &&
+          _items.isEmpty &&
+          _initialLoadRetries < 10;
+      if (retryableEmptyTrans) {
+        _initialLoadRetries++;
+        setState(() {
+          _loading = false;
+          _exhausted = false;
+          _error = null;
+        });
+        _scheduleInitialTransRetry();
+        return;
+      }
       setState(() {
         final existingIds = _items.map((item) => item.id).toSet();
         final existingUrls = _items.map((item) => item.videoUrl).toSet();
@@ -966,10 +1036,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           _exhausted = true;
         }
         _loading = false;
+        _initialLoadCompleted = true;
+        if (batch.isNotEmpty) _initialLoadRetries = 0;
       });
       if (_items.isEmpty || !widget.active) return;
       if (first) {
         _syncControllers(0);
+        _rememberCurrentReel();
       } else {
         _ensureNeighbors();
       }
@@ -991,7 +1064,20 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     } catch (e) {
       if (!mounted || !identical(requestRepository, _repo)) return;
       if (kDebugMode) debugPrint('[REELS] load failed: $e');
+      if (widget.source == ContentSource.trans &&
+          _items.isEmpty &&
+          _initialLoadRetries < 10) {
+        _initialLoadRetries++;
+        setState(() {
+          _loading = false;
+          _exhausted = false;
+          _error = null;
+        });
+        _scheduleInitialTransRetry();
+        return;
+      }
       setState(() {
+        _initialLoadCompleted = true;
         // Keep the Trans source error visible while diagnosing network responses.
         // Other Reels providers retain the existing friendly error copy.
         _error = widget.source == ContentSource.trans
@@ -1001,6 +1087,51 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         _pendingKeyboardPage = null;
       });
     }
+  }
+
+  void _scheduleInitialTransRetry() {
+    final delay = Duration(
+      milliseconds: 250 + (100 * _initialLoadRetries).clamp(0, 1200).toInt(),
+    );
+    unawaited(Future<void>.delayed(delay).then((_) {
+      if (!mounted || !widget.active || _items.isNotEmpty || _loading) return;
+      _exhausted = false;
+      unawaited(_loadMore(first: true));
+    }));
+  }
+
+  void _rememberCurrentReel() {
+    if (_current < 0 || _current >= _items.length) return;
+    final id = _items[_current].id.trim();
+    if (id.isEmpty || !_seenHistory.add(id)) return;
+    while (_seenHistory.length > _kMaxPersistedSeenReels) {
+      _seenHistory.remove(_seenHistory.first);
+    }
+    // Only compact video IDs are persisted. No thumbnails or MP4 files are
+    // cached, so viewed-history storage stays small and bounded.
+    _scheduleSeenHistorySave();
+  }
+
+  void _scheduleSeenHistorySave() {
+    _seenHistoryDirty = true;
+    _seenHistoryWriteTimer?.cancel();
+    // Batch rapid swipes into one tiny SharedPreferences write. This avoids
+    // serializing the whole ID list for every frame/page event.
+    _seenHistoryWriteTimer = Timer(
+      const Duration(milliseconds: 500),
+      _persistSeenHistory,
+    );
+  }
+
+  void _persistSeenHistory() {
+    _seenHistoryWriteTimer?.cancel();
+    _seenHistoryWriteTimer = null;
+    if (!_seenHistoryDirty) return;
+    _seenHistoryDirty = false;
+    LocalStore.writeList(
+      _reelSeenHistoryKey(widget.source),
+      _seenHistory.toList(growable: false),
+    );
   }
 
   bool _ownsController(int index, VideoPlayerController controller) =>
@@ -1265,6 +1396,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     _stopReelAnalytics(previous);
     _current = page;
     _reelScrollInProgress = true;
+    _rememberCurrentReel();
     _syncControllers(page, preserveDuringTransition: previous);
 
     if (_current >= _items.length - _kPreloadAhead &&
@@ -1285,6 +1417,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       _current = settled;
     }
     _reelScrollInProgress = false;
+    _rememberCurrentReel();
     _syncControllers(_current);
   }
 
@@ -1690,10 +1823,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   },
                 ),
               )
-            else if (_loading)
-              const Center(
-                child: CupertinoActivityIndicator(
-                    radius: 14, color: Colors.white70),
+            else if (_loading || !_initialLoadCompleted)
+              Center(
+                child: widget.active
+                    ? const CupertinoActivityIndicator(
+                        radius: 14,
+                        color: Colors.white70,
+                      )
+                    : const SizedBox.shrink(),
               )
             else if (_error != null)
               _ErrorView(

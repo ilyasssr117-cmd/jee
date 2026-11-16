@@ -319,6 +319,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
 
   Widget _profileHeader(XxxFollowCreatorProfile profile) {
     final name = profile.displayName.isEmpty ? profile.username : profile.displayName;
+    final totalLikes = _reels.fold<int>(0, (total, reel) => total + reel.likes);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

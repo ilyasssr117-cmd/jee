@@ -513,7 +513,10 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
   @override
   Widget build(BuildContext context) {
     final profile = _account?.profile;
-    return Scaffold(
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Scaffold(
       backgroundColor: const Color(0xFF090A0E),
       appBar: AppBar(
         backgroundColor: const Color(0xFF090A0E),
@@ -621,6 +624,60 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                     ),
                   ],
                 ),
+        ),
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 24,
+          child: _CreatorRightEdgeBackGesture(
+            onBack: () => Navigator.of(context).maybePop(),
+          ),
+        ),
+      ],
     );
   }
+}
+
+class _CreatorRightEdgeBackGesture extends StatefulWidget {
+  const _CreatorRightEdgeBackGesture({required this.onBack});
+
+  final VoidCallback onBack;
+
+  @override
+  State<_CreatorRightEdgeBackGesture> createState() =>
+      _CreatorRightEdgeBackGestureState();
+}
+
+class _CreatorRightEdgeBackGestureState
+    extends State<_CreatorRightEdgeBackGesture> {
+  double _distance = 0;
+  bool _didPop = false;
+
+  void _trigger() {
+    if (_didPop) return;
+    _didPop = true;
+    widget.onBack();
+  }
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {
+          _distance = 0;
+          _didPop = false;
+        },
+        onHorizontalDragUpdate: (details) {
+          _distance += details.delta.dx;
+          if (_distance >= 24) _trigger();
+        },
+        onHorizontalDragEnd: (details) {
+          if (!_didPop &&
+              _distance > 8 &&
+              (details.primaryVelocity ?? 0) > 300) {
+            _trigger();
+          }
+        },
+        child: const SizedBox.expand(),
+      );
 }

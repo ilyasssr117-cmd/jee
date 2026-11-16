@@ -492,6 +492,7 @@ class _HomePageState extends State<HomePage>
           initialItems: items,
           initialIndex: selectedIndex,
           initialItemsOnly: true,
+          onExitToPrevious: () => Navigator.of(context).maybePop(),
         ),
       ),
     );

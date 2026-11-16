@@ -1571,6 +1571,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      showDragHandle: false,
       backgroundColor: const Color(0xFF111318),
       barrierColor: Colors.black.withValues(alpha: .62),
       elevation: 24,
@@ -1613,6 +1614,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   initialItemsOnly: true,
                   loadMoreInitialItems: loadMore,
                   hasMoreInitialItems: () => _repo.hasMoreXxxFollowCreatorPages(username),
+                  onExitToPrevious: () => Navigator.of(context).maybePop(),
                 ),
               ),
             );

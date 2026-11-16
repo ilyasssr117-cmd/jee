@@ -100,6 +100,19 @@ String? _siteUrl(dynamic raw, {required Uri baseUri}) {
   return uri.toString();
 }
 
+/// Returns the first URL that is actually usable. A non-null but empty or
+/// malformed fhd_url must not prevent falling back to url / sd_url.
+String? _firstSiteUrl(
+  Iterable<dynamic> candidates, {
+  required Uri baseUri,
+}) {
+  for (final candidate in candidates) {
+    final value = _siteUrl(candidate, baseUri: baseUri);
+    if (value != null) return value;
+  }
+  return null;
+}
+
 class XxxFollowCreatorProfile {
   const XxxFollowCreatorProfile({
     required this.id,
@@ -289,12 +302,15 @@ class XxxFollowCommentsPage {
     required this.comments,
     required this.total,
     required this.offset,
+    required this.nextOffset,
     required this.hasMore,
   });
 
   final List<XxxFollowComment> comments;
   final int total;
   final int offset;
+  /// Offset after consuming raw API rows, including duplicates or filtered rows.
+  final int nextOffset;
   final bool hasMore;
 }
 
@@ -341,6 +357,8 @@ class XxxFollowTransParser {
   const XxxFollowTransParser._();
 
   static Map<String, dynamic> _extractPreloadState(String source) {
+    // Match only the exact variable name. In particular, do not confuse it
+    // with window.__PRELOADED_STATE__ (which has an extra "ED").
     const marker = 'window.__PRELOAD_STATE__';
     final markerIndex = source.indexOf(marker);
     if (markerIndex < 0) {
@@ -349,19 +367,37 @@ class XxxFollowTransParser {
       );
     }
 
+    // Keep parsing inside the script that owns the assignment so malformed
+    // state cannot accidentally consume braces from a later script tag.
+    final scriptStart = source.lastIndexOf('<script', markerIndex);
+    final scriptEnd = source.indexOf('</script>', markerIndex);
+    if (scriptStart < 0 || scriptEnd < 0 || scriptStart >= markerIndex) {
+      throw const FormatException('XXXFollow preload script is incomplete.');
+    }
+
     final equalsIndex = source.indexOf('=', markerIndex + marker.length);
-    if (equalsIndex < 0) {
+    if (equalsIndex < 0 || equalsIndex >= scriptEnd) {
       throw const FormatException('XXXFollow preload state assignment is invalid.');
     }
-    final start = source.indexOf('{', equalsIndex + 1);
-    if (start < 0) {
+
+    var start = equalsIndex + 1;
+    while (start < scriptEnd &&
+        (source.codeUnitAt(start) == 0x20 ||
+            source.codeUnitAt(start) == 0x09 ||
+            source.codeUnitAt(start) == 0x0a ||
+            source.codeUnitAt(start) == 0x0d)) {
+      start++;
+    }
+    if (start >= scriptEnd || source.codeUnitAt(start) != 0x7b) {
       throw const FormatException('XXXFollow preload state JSON is missing.');
     }
 
+    // Walk balanced JSON object braces while respecting quoted strings and
+    // escaped quotes. A regex would stop at braces embedded in post text.
     var depth = 0;
     var inString = false;
     var escaped = false;
-    for (var index = start; index < source.length; index++) {
+    for (var index = start; index < scriptEnd; index++) {
       final char = source.codeUnitAt(index);
       if (inString) {
         if (escaped) {
@@ -397,13 +433,22 @@ class XxxFollowTransParser {
     Map<String, dynamic> state, {
     required String source,
     required Uri pageUri,
+    String? homeCursorId,
   }) {
     String? rawNext;
-    for (final entry in state.entries) {
-      if (!entry.key.startsWith('pagination-home-')) continue;
-      final pagination = _mapValue(entry.value);
+    // The feed pagination key is tied to the first post in list-home. Prefer
+    // that exact cursor instead of accidentally reading another feed's key.
+    if (homeCursorId != null && homeCursorId.isNotEmpty) {
+      final pagination = _mapValue(state['pagination-home-$homeCursorId']);
       rawNext = _stringValue(pagination['next']);
-      if (rawNext != null) break;
+    }
+    if (rawNext == null) {
+      for (final entry in state.entries) {
+        if (!entry.key.startsWith('pagination-home-')) continue;
+        final pagination = _mapValue(entry.value);
+        rawNext = _stringValue(pagination['next']);
+        if (rawNext != null) break;
+      }
     }
 
     rawNext ??= RegExp(
@@ -454,13 +499,20 @@ class XxxFollowTransParser {
         .whereType<Map>()
         .map(_mapValue)
         .toList(growable: false);
+    final firstPost = posts.isEmpty ? <String, dynamic>{} : _mapValue(posts.first['post']);
+    final homeCursorId = _stringValue('${firstPost['id'] ?? ''}');
     final page = _intValue(home['page']);
 
     return XxxFollowPageData(
       page: page,
       gender: gender,
       posts: posts,
-      nextUri: _readNextUri(state, source: source, pageUri: uri),
+      nextUri: _readNextUri(
+        state,
+        source: source,
+        pageUri: uri,
+        homeCursorId: homeCursorId,
+      ),
     );
   }
 
@@ -479,10 +531,19 @@ class XxxFollowTransParser {
 
       for (final rawMedia in mediaList) {
         final media = _mapValue(rawMedia);
-        if (media['type'] != 'video') continue;
+        final mediaType = '${media['type'] ?? ''}'.trim().toLowerCase();
+        if (mediaType != 'video') continue;
 
-        final videoUrl = _siteUrl(
-          media['fhd_url'] ?? media['url'] ?? media['sd_url'] ?? media['uhd_url'],
+        // Quality preference: FHD -> original MP4 -> SD -> UHD fallback.
+        // Try each candidate independently so an empty/invalid FHD value
+        // cannot block a valid original or SD link.
+        final videoUrl = _firstSiteUrl(
+          <dynamic>[
+            media['fhd_url'],
+            media['url'],
+            media['sd_url'],
+            media['uhd_url'],
+          ],
           baseUri: baseUri,
         );
         if (videoUrl == null) continue;
@@ -494,8 +555,8 @@ class XxxFollowTransParser {
             : (mediaId.isNotEmpty ? mediaId : postId);
         if (id.isEmpty) continue;
 
-        final fallback = _siteUrl(
-          media['sd_url'] ?? media['url'],
+        final fallback = _firstSiteUrl(
+          <dynamic>[media['sd_url'], media['url'], media['fhd_url']],
           baseUri: baseUri,
         );
         final tags = <String>[];
@@ -508,13 +569,15 @@ class XxxFollowTransParser {
           }
         }
 
-        final thumb = _siteUrl(
-          media['thumb_webp_url'] ??
-              media['thumb_url'] ??
-              media['start_webp_url'] ??
-              media['start_url'] ??
-              media['blur_webp_url'] ??
-              media['blur_url'],
+        final thumb = _firstSiteUrl(
+          <dynamic>[
+            media['start_webp_url'],
+            media['thumb_webp_url'],
+            media['thumb_url'],
+            media['start_url'],
+            media['blur_webp_url'],
+            media['blur_url'],
+          ],
           baseUri: baseUri,
         );
         final avatar = _siteUrl(
@@ -527,7 +590,10 @@ class XxxFollowTransParser {
             id: id,
             videoUrl: videoUrl,
             fallbackUrl: fallback == videoUrl ? null : fallback,
-            downloadUrl: _siteUrl(media['url'] ?? media['fhd_url'], baseUri: baseUri),
+            downloadUrl: _firstSiteUrl(
+              <dynamic>[media['url'], media['fhd_url'], media['sd_url']],
+              baseUri: baseUri,
+            ),
             mediaReferer: baseUri.toString(),
             postId: postId.isNotEmpty ? postId : null,
             title: _stringValue(post['text']) ??
@@ -546,6 +612,22 @@ class XxxFollowTransParser {
               _mapValue(post['statistics'])['views'],
               _mapValue(post['stats'])['views'],
               media['view_count'],
+            ]),
+            commentCount: _firstPositiveCount([
+              row['comment_count'],
+              row['comments_count'],
+              row['commentCount'],
+              row['comments'],
+              post['comment_count'],
+              post['commentCount'],
+              post['comments_count'],
+              post['commentsCount'],
+              post['total_comments'],
+              post['comments'],
+              _mapValue(post['statistics'])['comments'],
+              _mapValue(post['statistics'])['comments_count'],
+              _mapValue(post['stats'])['comments'],
+              _mapValue(post['stats'])['comment_count'],
             ]),
             likes: _firstPositiveCount([
               row['like_count'],
@@ -769,17 +851,24 @@ class XxxFollowTransReelsRepository {
     Iterable<String> initialSeenIds = const <String>[],
   })  : _client = client ?? _createClient(),
         _baseUri = baseUri ?? Uri.parse(_xxxFollowBaseUrl) {
-    _seenIds.addAll(initialSeenIds.where((id) => id.isNotEmpty));
+    _previouslySeenIds.addAll(initialSeenIds.where((id) => id.isNotEmpty));
   }
 
   final http.Client _client;
   final Uri _baseUri;
+  /// IDs seen in this repository session; used only for page de-duplication.
   final Set<String> _seenIds = <String>{};
   final Set<String> _seenVideoUrls = <String>{};
+  /// Previously watched IDs are deprioritized, not discarded permanently.
+  /// This prevents a feed made entirely of remembered IDs from appearing blank.
+  final Set<String> _previouslySeenIds = <String>{};
+  final List<ReelItem> _seenFallback = <ReelItem>[];
   final List<ReelItem> _pending = <ReelItem>[];
+  final Set<String> _visitedPageUris = <String>{};
   Uri? _nextPageUri;
   Future<void>? _pageRequest;
   int _loadedPages = 0;
+  int _consecutiveNoFreshPages = 0;
   bool _hasMore = true;
   bool _disposed = false;
 
@@ -794,8 +883,9 @@ class XxxFollowTransReelsRepository {
 
   Map<String, String> _headers() => <String, String>{
         'User-Agent': _xxxFollowUserAgent,
-        // The successful Python request uses the default */* Accept header.
         'Accept': '*/*',
+        'Referer': _baseUri.toString(),
+        'Origin': _baseUri.origin,
         'Cookie': 'genders=t',
       };
 
@@ -811,6 +901,12 @@ class XxxFollowTransReelsRepository {
     if (!_hasMore) return;
 
     final uri = _nextPageUri ?? _baseUri;
+    final pageKey = uri.replace(fragment: '').toString();
+    if (_visitedPageUris.contains(pageKey)) {
+      _hasMore = false;
+      _nextPageUri = null;
+      return;
+    }
     final response = await _client
         .get(uri, headers: _headers())
         .timeout(const Duration(seconds: 22));
@@ -840,19 +936,43 @@ class XxxFollowTransReelsRepository {
       source,
       pageUri: effectiveUri,
     );
-    if (page.posts.isEmpty) {
-      throw FormatException('XXXFollow page ${page.page} contains no feed posts.');
+    _visitedPageUris
+      ..add(pageKey)
+      ..add(effectiveUri.replace(fragment: '').toString());
+    _loadedPages = page.page > 0 ? page.page : _loadedPages + 1;
+    final candidateNext = page.nextUri;
+    final candidateKey = candidateNext?.replace(fragment: '').toString();
+    if (candidateNext == null ||
+        candidateKey == pageKey ||
+        (candidateKey != null && _visitedPageUris.contains(candidateKey))) {
+      _nextPageUri = null;
+      _hasMore = false;
+    } else {
+      _nextPageUri = candidateNext;
+      _hasMore = true;
     }
 
-    _loadedPages = page.page > 0 ? page.page : _loadedPages + 1;
-    _nextPageUri = page.nextUri;
-    _hasMore = page.nextUri != null;
-
     final items = XxxFollowTransParser.toReels(page, baseUri: _baseUri);
+    var freshAdded = 0;
     for (final item in items) {
       final isNewId = _seenIds.add(item.id);
       final isNewUrl = _seenVideoUrls.add(item.videoUrl);
-      if (isNewId && isNewUrl) _pending.add(item);
+      if (!isNewId || !isNewUrl) continue;
+      if (_previouslySeenIds.contains(item.id)) {
+        if (_seenFallback.length < 48) _seenFallback.add(item);
+      } else {
+        _pending.add(item);
+        freshAdded++;
+      }
+    }
+    _consecutiveNoFreshPages = freshAdded == 0
+        ? _consecutiveNoFreshPages + 1
+        : 0;
+    // A broken cursor or a long run of already-watched/image-only pages must
+    // never leave the UI's trailing Reels page spinning indefinitely.
+    if (_consecutiveNoFreshPages >= 8) {
+      _hasMore = false;
+      _nextPageUri = null;
     }
     // The page cursor advances monotonically, so old in-session dedup keys
     // can be discarded safely once this bounded window is exceeded. The
@@ -888,6 +1008,7 @@ class XxxFollowTransReelsRepository {
         if (!_hasMore) break;
         await _loadNextPage();
         pageAttempts++;
+        if (!_hasMore && _pending.isEmpty) break;
         continue;
       }
       final remaining = amount - result.length;
@@ -895,21 +1016,37 @@ class XxxFollowTransReelsRepository {
       result.addAll(_pending.take(take));
       _pending.removeRange(0, take);
     }
+
+    // If the user has already watched every item currently present in the
+    // public feed, recycle the oldest skipped items instead of showing a
+    // permanent spinner with an empty list.
+    if (result.isEmpty && _pending.isEmpty && _seenFallback.isNotEmpty) {
+      final take = amount < _seenFallback.length ? amount : _seenFallback.length;
+      result.addAll(_seenFallback.take(take));
+      _seenFallback.removeRange(0, take);
+    }
+
+    // Reaching the bounded scan limit with no fresh or fallback items means
+    // there is nothing safe to append. Mark the source exhausted so ReelsPage
+    // removes its loading sentinel.
+    if (result.isEmpty && _pending.isEmpty && pageAttempts >= 8) {
+      _hasMore = false;
+      _nextPageUri = null;
+    }
     if (result.isEmpty && _loadedPages == 0) {
       throw const FormatException(
-        'XXXFollow did not provide a Trans feed. Check the response and genders=t cookie.',
-      );
-    }
-    if (result.isEmpty && _pending.isEmpty && _hasMore) {
-      throw FormatException(
-        'XXXFollow returned no new playable videos after scanning '
-        '$_loadedPages pages. The site may have changed its feed markup.',
+        'XXXFollow did not provide a Trans feed. Check the genders=t source setting.',
       );
     }
     return result;
   }
 
   bool get hasMorePages => !_disposed && _hasMore;
+
+  /// True while another feed page exists or reels from the current page
+  /// are still waiting in the in-memory queue.
+  bool get hasMoreItems =>
+      !_disposed && (_hasMore || _pending.isNotEmpty || _seenFallback.isNotEmpty);
 
   /// Returns the same public Trans feed as lightweight catalogue Video rows.
   /// This lets Home display Trans normally without routing the user to Reels.
@@ -1167,12 +1304,27 @@ class XxxFollowTransReelsRepository {
         replyCount: _intValue(_mapValue(row['replies'])['count']),
       ));
     }
-    final total = _intValue(root['count_total'] ?? root['count']);
+    // count_total is the authoritative total. `count` can represent either
+    // the page size or the total on older API variants, so use it only for the
+    // display count and fall back to page-size inference when total is absent.
+    final totalFromApi = _optionalIntValue(root['count_total']);
+    final total = totalFromApi ?? _intValue(root['count']);
+    final nextOffset = safeOffset + rows.length;
+    final explicitHasMore = root['has_more'] is bool
+        ? root['has_more'] as bool
+        : (root['hasMore'] is bool ? root['hasMore'] as bool : null);
+    final hasKnownTotal = totalFromApi != null && totalFromApi > 0;
+    final hasMore = rows.isNotEmpty &&
+        nextOffset > safeOffset &&
+        (hasKnownTotal
+            ? nextOffset < totalFromApi
+            : (explicitHasMore ?? rows.length >= safeLimit));
     return XxxFollowCommentsPage(
       comments: List<XxxFollowComment>.unmodifiable(comments),
       total: total,
       offset: safeOffset,
-      hasMore: safeOffset + rows.length < total && rows.isNotEmpty,
+      nextOffset: nextOffset,
+      hasMore: hasMore,
     );
   }
 

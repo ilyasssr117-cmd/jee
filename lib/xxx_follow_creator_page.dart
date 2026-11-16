@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import 'error_text.dart';
 import 'media_headers.dart';
 import 'reel_favorites.dart';
 import 'xxx_follow_trans_reels.dart';
@@ -40,7 +41,7 @@ class XxxFollowCreatorPage extends StatefulWidget {
 
 class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
   XxxFollowAccountSnapshot? _account;
-  Object? _error;
+  String? _error;
   bool _loading = true;
   bool _loadingMore = false;
   bool _moreSearched = false;
@@ -98,7 +99,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error;
+        _error = describeError(error, subject: 'creator profile').message;
         _loading = false;
       });
     }
@@ -170,7 +171,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
       if (!mounted) return;
       setState(() {
         _loadingMore = false;
-        _error = error;
+        _error = describeError(error, subject: 'creator videos').message;
       });
     }
   }
@@ -537,7 +538,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                         const Icon(CupertinoIcons.exclamationmark_triangle, color: Colors.white60, size: 30),
                         const SizedBox(height: 12),
                         Text(
-                          'Could not load @${widget.username}\n$_error',
+                          'Could not load @${widget.username}.\n$_error',
                           textAlign: TextAlign.center,
                           style: const TextStyle(color: Colors.white70, height: 1.4),
                         ),
@@ -556,7 +557,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Text(
-                            'Could not load more posts: $_error',
+                            'Could not load more posts. $_error',
                             style: const TextStyle(color: Colors.redAccent, fontSize: 12),
                           ),
                         ),
@@ -597,17 +598,19 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                                 ),
                               )
                             : _moreSearched
-                                ? const Center(
-                                    child: Text(
-                                      'You are seeing all creator videos found in the scanned feed pages.',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(color: Colors.white38, fontSize: 11),
-                                    ),
-                                  )
+                                ? const SizedBox.shrink()
                                 : OutlinedButton.icon(
                                     onPressed: _loadMore,
-                                    icon: const Icon(CupertinoIcons.cloud_download),
-                                    label: const Text('Load more videos from this creator'),
+                                    icon: Icon(
+                                      _error != null
+                                          ? CupertinoIcons.refresh
+                                          : CupertinoIcons.cloud_download,
+                                    ),
+                                    label: Text(
+                                      _error != null
+                                          ? 'Try again'
+                                          : 'Load more videos from this creator',
+                                    ),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: Colors.white,
                                       side: BorderSide(color: Colors.white.withValues(alpha: .24)),

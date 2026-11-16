@@ -11,7 +11,7 @@ window.__PRELOAD_STATE__ = {
   "list-home": {
     "genders": "t", "page": 1,
     "list": [{
-      "like_count": 24, "favorite_count": 4, "view_count": 1200,
+      "like_count": 24, "favorite_count": 4, "view_count": 1200, "comment_count": 308,
       "post": {
         "id": 1001, "text": "Sample Trans post", "video_duration_total": 12,
         "media": [{
@@ -78,9 +78,30 @@ void main() {
       expect(items.single.thumbUrl, endsWith('2001_small.webp'));
       expect(items.single.author, 'sample_creator');
       expect(items.single.likes, 24);
+      expect(items.single.commentCount, 308);
       expect(items.single.views, 1200);
       expect(items.single.durationSec, 12);
+      expect(items.single.mediaReferer, 'https://www.xxxfollow.com/');
       expect(items.single.tags, ['trans', 'sample']);
+    });
+
+    test('ignores PRELOADED_STATE decoy and falls back from empty FHD URL', () {
+      final html = _pageHtml
+          .replaceFirst(
+            'window.__PRELOAD_STATE__ =',
+            'window.__PRELOADED_STATE__ = {\"wrong\":true};\nwindow.__PRELOAD_STATE__ =',
+          )
+          .replaceFirst(
+            '"fhd_url": "https://www.xxxfollow.com/media/fans/post_public/1/2/2001_fhd.mp4"',
+            '"fhd_url": ""',
+          );
+      final page = XxxFollowTransParser.parsePage(html);
+      final reels = XxxFollowTransParser.toReels(
+        page,
+        baseUri: Uri.parse('https://www.xxxfollow.com/'),
+      );
+      expect(reels, hasLength(1));
+      expect(reels.single.videoUrl, endsWith('/2001.mp4'));
     });
 
     test('requires the Trans gender cookie state', () {
@@ -241,6 +262,8 @@ void main() {
     final client = MockClient((request) async {
       expect(request.url.host, 'www.xxxfollow.com');
       expect(request.headers['cookie'], 'genders=t');
+      expect(request.headers['referer'], 'https://www.xxxfollow.com/');
+      expect(request.headers['origin'], 'https://www.xxxfollow.com');
       return http.Response(_pageHtml, 200);
     });
     final repository = XxxFollowTransReelsRepository(client: client);
@@ -281,6 +304,30 @@ void main() {
   });
 
 
+  test('Reels falls back to remembered videos instead of returning an empty feed', () async {
+    final onePage = _pageHtml
+        .replaceFirst(
+          '<link rel="next" href="https://www.xxxfollow.com/?page=2" />',
+          '',
+        )
+        .replaceFirst(
+          '"next": "https://www.xxxfollow.com/?page=2"',
+          '"next": null',
+        );
+    final client = MockClient((request) async => http.Response(onePage, 200));
+    final repository = XxxFollowTransReelsRepository(
+      client: client,
+      initialSeenIds: const <String>['1001_2001'],
+    );
+    addTearDown(repository.dispose);
+
+    final reels = await repository.nextBatch(1);
+    expect(reels, hasLength(1));
+    expect(reels.single.id, '1001_2001');
+    expect(repository.hasMoreItems, isFalse);
+  });
+
+
   test('Trans Reels comments use the public post comments endpoint', () async {
     final client = MockClient((request) async {
       expect(request.url.path, '/api/v1/post/1108943/comment');
@@ -305,7 +352,46 @@ void main() {
     expect(page.comments.single.id, '464956');
     expect(page.comments.single.text, 'sample comment');
     expect(page.comments.single.displayName, 'Sample User');
+    expect(page.nextOffset, 1);
     expect(page.hasMore, isFalse);
+  });
+
+
+  test('comments pagination consumes raw rows and detects the final page', () async {
+    final offsets = <String?>[];
+    final client = MockClient((request) async {
+      offsets.add(request.url.queryParameters['offset']);
+      if (request.url.queryParameters['offset'] == '0') {
+        return http.Response(
+          r'''{"count_total":3,"list":[{"id":1,"comment":"one","user":{}},{"id":2,"comment":"two","user":{}}]}''',
+          200,
+        );
+      }
+      return http.Response(
+        r'''{"count_total":3,"list":[{"id":3,"comment":"three","user":{}}]}''',
+        200,
+      );
+    });
+    final repository = XxxFollowTransReelsRepository(
+      client: client,
+      baseUri: Uri.parse('https://www.xxxfollow.com/'),
+    );
+    addTearDown(repository.dispose);
+
+    final first = await repository.getPostComments('1108943', limit: 2);
+    expect(first.comments, hasLength(2));
+    expect(first.nextOffset, 2);
+    expect(first.hasMore, isTrue);
+
+    final last = await repository.getPostComments(
+      '1108943',
+      offset: first.nextOffset,
+      limit: 2,
+    );
+    expect(last.comments, hasLength(1));
+    expect(last.nextOffset, 3);
+    expect(last.hasMore, isFalse);
+    expect(offsets, ['0', '2']);
   });
 
 }

@@ -675,7 +675,7 @@ class ReelsRepository {
       _transRepository.hasMoreCreatorPosts(username);
 
   bool get hasMoreTransPages =>
-      source == ContentSource.trans && _transRepository.hasMorePages;
+      source == ContentSource.trans && _transRepository.hasMoreItems;
 
   Future<List<Map<String, dynamic>>> getMoreXxxFollowCreatorPosts(
     XxxFollowAccountSnapshot account, {
@@ -1016,7 +1016,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       final retryableEmptyTrans = batch.isEmpty &&
           widget.source == ContentSource.trans &&
           requestRepository.hasMoreTransPages &&
-          _initialLoadRetries < 10;
+          _initialLoadRetries < 2;
       if (retryableEmptyTrans) {
         _initialLoadRetries++;
         setState(() {
@@ -1025,6 +1025,20 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           _error = null;
         });
         _scheduleInitialTransRetry();
+        return;
+      }
+      if (batch.isEmpty &&
+          widget.source == ContentSource.trans &&
+          requestRepository.hasMoreTransPages) {
+        // A source that keeps returning pages without adding playable videos
+        // must show a retry message, not an endless activity indicator.
+        setState(() {
+          _loading = false;
+          _initialLoadCompleted = true;
+          _exhausted = false;
+          _error = 'No new videos could be found. Tap to try again.';
+          _pendingKeyboardPage = null;
+        });
         return;
       }
       setState(() {
@@ -1037,8 +1051,15 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         }
         final moreInitialItems = widget.initialItemsOnly &&
             widget.hasMoreInitialItems?.call() == true;
-        if ((batch.isEmpty && !moreInitialItems) ||
-            (widget.initialItemsOnly && !moreInitialItems)) {
+        final moreTransItems = widget.source == ContentSource.trans &&
+            requestRepository.hasMoreTransPages;
+        if (widget.initialItemsOnly) {
+          if (!moreInitialItems) _exhausted = true;
+        } else if (widget.source == ContentSource.trans) {
+          // Do not leave a phantom loading page after the final API page and
+          // its pending reels have both been consumed.
+          _exhausted = !moreTransItems;
+        } else if (batch.isEmpty) {
           _exhausted = true;
         }
         _loading = false;
@@ -1084,7 +1105,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       if (kDebugMode) debugPrint('[REELS] load failed: $e');
       if (widget.source == ContentSource.trans &&
           _items.isEmpty &&
-          _initialLoadRetries < 10) {
+          _initialLoadRetries < 2) {
         _initialLoadRetries++;
         setState(() {
           _loading = false;
@@ -1096,11 +1117,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       }
       setState(() {
         _initialLoadCompleted = true;
-        // Keep the Trans source error visible while diagnosing network responses.
-        // Other Reels providers retain the existing friendly error copy.
-        _error = widget.source == ContentSource.trans
-            ? e.toString().replaceFirst('Exception: ', '')
-            : describeError(e, subject: 'reels').message;
+        _error = describeError(e, subject: 'reels').message;
         _loading = false;
         _pendingKeyboardPage = null;
       });
@@ -1554,9 +1571,11 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: const Color(0xFF171717),
+      backgroundColor: const Color(0xFF111318),
+      barrierColor: Colors.black.withValues(alpha: .62),
+      elevation: 24,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
       builder: (_) => _XxxFollowCommentsSheet(
         loadPage: (offset) => _repo.getXxxFollowPostComments(
@@ -2990,8 +3009,9 @@ class _ActionRail extends StatelessWidget {
         if (onComments != null) ...[
           const SizedBox(height: 12),
           _RailButton(
-            icon: CupertinoIcons.chat_bubble_text,
-            label: 'Comments',
+            icon: CupertinoIcons.chat_bubble,
+            label: _compact(item.commentCount),
+            semanticLabel: 'Comments',
             onTap: onComments,
           ),
         ],
@@ -3106,6 +3126,7 @@ class _RailButton extends StatelessWidget {
     this.progress,
     this.pop,
     this.haptic = Haptic.light,
+    this.semanticLabel,
   });
 
   final IconData icon;
@@ -3116,6 +3137,7 @@ class _RailButton extends StatelessWidget {
   final double? progress;
   final bool? pop;
   final Haptic haptic;
+  final String? semanticLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -3126,7 +3148,7 @@ class _RailButton extends StatelessWidget {
       shadows: const [Shadow(blurRadius: 14, color: Color(0x80000000))],
     );
     return Pressable(
-      semanticLabel: label,
+      semanticLabel: semanticLabel ?? label,
       onTap: onTap,
       haptic: haptic,
       pressedScale: 0.86,
@@ -3624,7 +3646,8 @@ class _XxxFollowCommentsSheet extends StatefulWidget {
   final Future<XxxFollowCommentsPage> Function(int offset) loadPage;
 
   @override
-  State<_XxxFollowCommentsSheet> createState() => _XxxFollowCommentsSheetState();
+  State<_XxxFollowCommentsSheet> createState() =>
+      _XxxFollowCommentsSheetState();
 }
 
 class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
@@ -3634,6 +3657,7 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
   bool _hasMore = true;
   String? _error;
   int _total = 0;
+  int _nextOffset = 0;
 
   @override
   void initState() {
@@ -3643,31 +3667,39 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
 
   Future<void> _load({bool more = false}) async {
     if (_loading || _loadingMore || (more && !_hasMore)) return;
+    final requestedOffset = _nextOffset;
     setState(() {
       if (more) {
         _loadingMore = true;
       } else {
         _loading = true;
-        _error = null;
       }
+      _error = null;
     });
     try {
-      final page = await widget.loadPage(_comments.length);
+      final page = await widget.loadPage(requestedOffset);
       if (!mounted) return;
       setState(() {
-        final ids = _comments.map((e) => e.id).toSet();
+        final ids = _comments.map((comment) => comment.id).toSet();
         for (final comment in page.comments) {
           if (ids.add(comment.id)) _comments.add(comment);
         }
-        _total = page.total;
-        _hasMore = page.hasMore;
+        _nextOffset = page.nextOffset > requestedOffset
+            ? page.nextOffset
+            : requestedOffset;
+        _total = page.total > 0 ? page.total : _comments.length;
+        final reachedKnownEnd = page.total > 0 && _nextOffset >= page.total;
+        _hasMore = page.hasMore &&
+            page.comments.isNotEmpty &&
+            _nextOffset > requestedOffset &&
+            !reachedKnownEnd;
         _loading = false;
         _loadingMore = false;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error.toString().replaceFirst('Exception: ', '');
+        _error = describeError(error, subject: 'comments').message;
         _loading = false;
         _loadingMore = false;
       });
@@ -3678,121 +3710,248 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
     final date = DateTime.tryParse(raw);
     if (date == null) return '';
     final local = date.toLocal();
-    final now = DateTime.now();
-    final difference = now.difference(local);
-    if (difference.inMinutes < 1) return 'now';
-    if (difference.inHours < 1) return '${difference.inMinutes}m';
-    if (difference.inDays < 1) return '${difference.inHours}h';
-    if (difference.inDays < 7) return '${difference.inDays}d';
+    final difference = DateTime.now().difference(local);
+    if (difference.isNegative || difference.inMinutes < 1) return 'now';
+    if (difference.inHours < 1) return '${difference.inMinutes}m ago';
+    if (difference.inDays < 1) return '${difference.inHours}h ago';
+    if (difference.inDays < 7) return '${difference.inDays}d ago';
     return '${local.day}/${local.month}/${local.year}';
+  }
+
+  Widget _avatar(XxxFollowComment comment) {
+    final url = comment.avatarUrl;
+    if (url == null) {
+      return const CircleAvatar(
+        radius: 19,
+        backgroundColor: Color(0xFF292D36),
+        child: Icon(CupertinoIcons.person_fill, size: 17, color: Colors.white70),
+      );
+    }
+    return CircleAvatar(
+      radius: 19,
+      backgroundColor: const Color(0xFF292D36),
+      backgroundImage: NetworkImage(url),
+      onBackgroundImageError: (_, __) {},
+    );
+  }
+
+  Widget _footer() {
+    if (_loadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 22),
+        child: CupertinoActivityIndicator(color: Colors.white70),
+      );
+    }
+    if (_error != null && _comments.isNotEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 22),
+        child: Column(
+          children: [
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+            TextButton(
+              onPressed: () => _load(more: true),
+              child: const Text('Try again'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_hasMore) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: TextButton(
+          onPressed: () => _load(more: true),
+          child: const Text('Load more comments'),
+        ),
+      );
+    }
+    return const SizedBox(height: 22);
   }
 
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final shownCount = _total > 0 ? _total : _comments.length;
     return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.72,
+      height: MediaQuery.sizeOf(context).height * .78,
       child: Padding(
         padding: EdgeInsets.only(bottom: bottom),
         child: Column(
           children: [
             const SizedBox(height: 10),
             Container(
-              width: 38, height: 4,
+              width: 38,
+              height: 4,
               decoration: BoxDecoration(
-                color: Colors.white30,
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(99),
               ),
             ),
-            const SizedBox(height: 14),
-            Text(
-              _total > 0 ? 'Comments ($_total)' : 'Comments',
-              style: const TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Comments',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -.2,
+                      ),
+                    ),
+                  ),
+                  if (shownCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: .09),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        reelCompact(shownCount),
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Close comments',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(CupertinoIcons.xmark, size: 18),
+                    color: Colors.white70,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
               ),
             ),
-            const Divider(color: Colors.white12, height: 22),
+            const Divider(color: Colors.white10, height: 1),
             Expanded(
               child: _loading
-                  ? const Center(child: CupertinoActivityIndicator(color: Colors.white))
+                  ? const Center(
+                      child: CupertinoActivityIndicator(color: Colors.white70, radius: 13),
+                    )
                   : _error != null && _comments.isEmpty
                       ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(_error!, textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.white70)),
-                              const SizedBox(height: 12),
-                              TextButton(onPressed: () => _load(), child: const Text('Retry')),
-                            ],
+                          child: Padding(
+                            padding: const EdgeInsets.all(28),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(CupertinoIcons.wifi_slash, color: Colors.white38, size: 30),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _error!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white70, height: 1.4),
+                                ),
+                                const SizedBox(height: 10),
+                                FilledButton.tonal(
+                                  onPressed: () => _load(),
+                                  child: const Text('Try again'),
+                                ),
+                              ],
+                            ),
                           ),
                         )
                       : _comments.isEmpty
                           ? const Center(
-                              child: Text('No comments yet', style: TextStyle(color: Colors.white70)),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(CupertinoIcons.chat_bubble, color: Colors.white30, size: 34),
+                                  SizedBox(height: 12),
+                                  Text('No comments yet', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                                  SizedBox(height: 4),
+                                  Text('Be the first to leave a comment.', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                                ],
+                              ),
                             )
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              itemCount: _comments.length + (_hasMore ? 1 : 0),
+                          : ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                              itemCount: _comments.length + 1,
+                              separatorBuilder: (_, __) => const SizedBox(height: 18),
                               itemBuilder: (context, index) {
-                                if (index >= _comments.length) {
-                                  return Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(14),
-                                      child: _loadingMore
-                                          ? const CupertinoActivityIndicator(color: Colors.white)
-                                          : TextButton(onPressed: () => _load(more: true), child: const Text('Load more')),
-                                    ),
-                                  );
-                                }
+                                if (index == _comments.length) return _footer();
                                 final comment = _comments[index];
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 17,
-                                        backgroundColor: Colors.white12,
-                                        backgroundImage: comment.avatarUrl == null
-                                            ? null : NetworkImage(comment.avatarUrl!),
-                                        child: comment.avatarUrl == null
-                                            ? const Icon(CupertinoIcons.person_fill, size: 16, color: Colors.white70)
-                                            : null,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Flexible(child: Text(comment.displayName,
-                                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13))),
-                                                const SizedBox(width: 8),
-                                                Text(_date(comment.createdAt), style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(comment.text, style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.35)),
-                                            if (comment.replyCount > 0) ...[
-                                              const SizedBox(height: 5),
-                                              Text('${comment.replyCount} replies', style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                                            ],
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Column(
+                                return Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _avatar(comment),
+                                    const SizedBox(width: 11),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const Icon(CupertinoIcons.heart, size: 17, color: Colors.white60),
-                                          const SizedBox(height: 3),
-                                          Text('${comment.likes}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  comment.displayName,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (_date(comment.createdAt).isNotEmpty) ...[
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  _date(comment.createdAt),
+                                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            comment.text,
+                                            style: const TextStyle(
+                                              color: Color(0xFFE7E8EC),
+                                              fontSize: 14,
+                                              height: 1.4,
+                                            ),
+                                          ),
+                                          if (comment.replyCount > 0) ...[
+                                            const SizedBox(height: 7),
+                                            Text(
+                                              '${comment.replyCount} replies',
+                                              style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
                                         ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Column(
+                                        children: [
+                                          const Icon(CupertinoIcons.heart, size: 17, color: Colors.white38),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            reelCompact(comment.likes),
+                                            style: const TextStyle(color: Colors.white38, fontSize: 10),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 );
                               },
                             ),
@@ -3803,3 +3962,4 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
     );
   }
 }
+

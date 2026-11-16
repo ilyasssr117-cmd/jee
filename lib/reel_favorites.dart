@@ -48,6 +48,7 @@ class ReelItem {
     this.downloadUrl,
     this.mediaReferer,
     this.postId,
+    this.commentCount = 0,
   });
 
   final String id;
@@ -57,6 +58,8 @@ class ReelItem {
   final String? mediaReferer;
   /// XXXFollow post ID used by its public comments endpoint.
   final String? postId;
+  /// Public comment count supplied by the source, when available.
+  final int commentCount;
   final String title;
   final String? thumbUrl;
   final String? avatarUrl;
@@ -75,6 +78,7 @@ class ReelItem {
         'download': downloadUrl,
         'mediaReferer': mediaReferer,
         'postId': postId,
+        'commentCount': commentCount,
         'title': title,
         'thumb': thumbUrl,
         'avatar': avatarUrl,
@@ -105,6 +109,7 @@ class ReelItem {
       downloadUrl: optional('download'),
       mediaReferer: optional('mediaReferer'),
       postId: optional('postId'),
+      commentCount: number('commentCount'),
       title: map['title'] is String ? map['title'] as String : '',
       thumbUrl: optional('thumb'),
       avatarUrl: optional('avatar'),

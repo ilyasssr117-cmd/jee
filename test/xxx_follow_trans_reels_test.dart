@@ -115,4 +115,40 @@ void main() {
     expect(account.profile.displayName, 'Sample Creator');
     expect(account.firstAuthorPosts, hasLength(1));
   });
+
+  test('profile parser preserves optional social counters when supplied', () {
+    final profile = XxxFollowCreatorProfile.fromJson(
+      <String, dynamic>{
+        'id': 22,
+        'username': 'sample_creator',
+        'display_name': 'Sample Creator',
+        'gender': 't',
+        'created_at': '2026-01-01T00:00:00+0000',
+        'is_streaming': true,
+        'followers_count': 12500,
+        'following_count': 84,
+        'posts_count': 37,
+        'likes_count': 91000,
+        'bio': 'Creator biography',
+      },
+      baseUri: Uri.parse('https://www.xxxfollow.com/'),
+    );
+    expect(profile.followersCount, 12500);
+    expect(profile.followingCount, 84);
+    expect(profile.postsCount, 37);
+    expect(profile.likesCount, 91000);
+    expect(profile.bio, 'Creator biography');
+  });
+
+  test('creator rows can be converted into playable profile-grid reels', () {
+    final page = XxxFollowTransParser.parsePage(_pageHtml);
+    final reels = XxxFollowTransParser.toReelsFromRows(
+      page.posts,
+      baseUri: Uri.parse('https://www.xxxfollow.com/'),
+    );
+    expect(reels, hasLength(1));
+    expect(reels.single.author, 'sample_creator');
+    expect(reels.single.videoUrl, contains('.mp4'));
+  });
+
 }

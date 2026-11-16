@@ -30,6 +30,18 @@ int _intValue(dynamic value) {
   return 0;
 }
 
+int? _optionalIntValue(dynamic value) {
+  if (value == null) return null;
+  if (value is num && value.isFinite) {
+    return value.clamp(0, 2147483647).toInt();
+  }
+  if (value is String) {
+    final parsed = int.tryParse(value.replaceAll(',', '').trim());
+    if (parsed != null) return parsed.clamp(0, 2147483647).toInt();
+  }
+  return null;
+}
+
 Map<String, dynamic> _mapValue(dynamic value) {
   if (value is Map<String, dynamic>) return value;
   if (value is Map) {
@@ -66,6 +78,11 @@ class XxxFollowCreatorProfile {
     this.avatarUrl,
     this.coverPictureUrl,
     this.coverVideoUrl,
+    this.bio,
+    this.followersCount,
+    this.followingCount,
+    this.postsCount,
+    this.likesCount,
   });
 
   final String id;
@@ -77,6 +94,11 @@ class XxxFollowCreatorProfile {
   final String? avatarUrl;
   final String? coverPictureUrl;
   final String? coverVideoUrl;
+  final String? bio;
+  final int? followersCount;
+  final int? followingCount;
+  final int? postsCount;
+  final int? likesCount;
 
   factory XxxFollowCreatorProfile.fromJson(
     Map<String, dynamic> json, {
@@ -101,6 +123,19 @@ class XxxFollowCreatorProfile {
       coverVideoUrl: _siteUrl(
         json['public_cover_video_url'],
         baseUri: baseUri,
+      ),
+      bio: _stringValue(json['bio'] ?? json['biography'] ?? json['about']),
+      followersCount: _optionalIntValue(
+        json['followers_count'] ?? json['follower_count'] ?? json['followers'],
+      ),
+      followingCount: _optionalIntValue(
+        json['following_count'] ?? json['followings_count'] ?? json['following'],
+      ),
+      postsCount: _optionalIntValue(
+        json['posts_count'] ?? json['post_count'] ?? json['postsCount'],
+      ),
+      likesCount: _optionalIntValue(
+        json['likes_count'] ?? json['post_like_count'] ?? json['like_count'],
       ),
     );
   }
@@ -343,6 +378,24 @@ class XxxFollowTransParser {
     }
     return output;
   }
+
+  /// Converts creator rows gathered from one or more home-feed pages into
+  /// playable Reels. Keeping conversion here makes profile grids use exactly
+  /// the same URL validation and media selection as the main Trans feed.
+  static List<ReelItem> toReelsFromRows(
+    List<Map<String, dynamic>> rows, {
+    required Uri baseUri,
+  }) {
+    return toReels(
+      XxxFollowPageData(
+        page: 1,
+        gender: 't',
+        posts: rows,
+        nextUri: null,
+      ),
+      baseUri: baseUri,
+    );
+  }
 }
 
 /// Direct HTML/SSR scraper for XXXFollow's Trans feed. It uses the exact
@@ -498,6 +551,8 @@ class XxxFollowTransReelsRepository {
     return result;
   }
 
+  bool get hasMorePages => !_disposed && _hasMore;
+
   Future<XxxFollowAccountSnapshot> getAccountSnapshot(String username) async {
     final key = username.trim().toLowerCase();
     if (key.isEmpty) throw const FormatException('Creator username is empty.');
@@ -519,6 +574,10 @@ class XxxFollowTransReelsRepository {
     XxxFollowAccountSnapshot account, {
     int maxPages = 8,
   }) async {
+    if (maxPages < 1) return List<Map<String, dynamic>>.unmodifiable(
+      _authorPosts[account.profile.username.toLowerCase()] ??
+          const <Map<String, dynamic>>[],
+    );
     final key = account.profile.username.toLowerCase();
     for (var index = 0; index < maxPages && _hasMore; index++) {
       await _loadNextPage();

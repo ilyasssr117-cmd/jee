@@ -38,6 +38,7 @@ import 'photo_saver.dart';
 import 'preview_manager.dart';
 import 'reel_favorites.dart';
 import 'xxx_follow_trans_reels.dart';
+import 'xxx_follow_creator_page.dart';
 import 'services/remote_config_service.dart';
 import 'touch.dart';
 import 'widgets/app_button.dart';
@@ -631,9 +632,15 @@ class ReelsRepository {
   Future<XxxFollowAccountSnapshot> getXxxFollowAccount(String username) =>
       _transRepository.getAccountSnapshot(username);
 
+  bool get hasMoreXxxFollowPages => _transRepository.hasMorePages;
+
   Future<List<Map<String, dynamic>>> getMoreXxxFollowCreatorPosts(
-    XxxFollowAccountSnapshot account,
-  ) => _transRepository.getMoreCreatorPosts(account);
+    XxxFollowAccountSnapshot account, {
+    int maxPages = 8,
+  }) => _transRepository.getMoreCreatorPosts(
+        account,
+        maxPages: maxPages,
+      );
 
   void dispose() {
     _client.close();
@@ -1352,15 +1359,25 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
 
   void _openCreatorAccount(String username) {
     if (widget.source != ContentSource.trans || username.trim().isEmpty) return;
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _CreatorAccountSheet(
-        repository: _repo,
-        username: username,
+    _pauseForLeaving();
+    final route = Navigator.of(context).push<void>(
+      adaptivePageRoute<void>(
+        context,
+        builder: (_) => XxxFollowCreatorPage(
+          username: username,
+          loadAccount: () => _repo.getXxxFollowAccount(username),
+          loadMorePosts: (account) => _repo.getMoreXxxFollowCreatorPosts(
+            account,
+            maxPages: 8,
+          ),
+          hasMorePages: () => _repo.hasMoreXxxFollowPages,
+        ),
       ),
+    );
+    unawaited(
+      route.then<void>((_) {
+        if (mounted && widget.active) _syncControllers(_current);
+      }),
     );
   }
 
@@ -1688,295 +1705,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                 ),
               ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CreatorAccountSheet extends StatefulWidget {
-  const _CreatorAccountSheet({
-    required this.repository,
-    required this.username,
-  });
-
-  final ReelsRepository repository;
-  final String username;
-
-  @override
-  State<_CreatorAccountSheet> createState() => _CreatorAccountSheetState();
-}
-
-class _CreatorAccountSheetState extends State<_CreatorAccountSheet> {
-  late Future<XxxFollowAccountSnapshot> _accountFuture;
-  Future<List<Map<String, dynamic>>>? _morePostsFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _accountFuture = widget.repository.getXxxFollowAccount(widget.username);
-  }
-
-  String _postTitle(Map<String, dynamic> row) {
-    final post = _mapCreatorPost(row['post']);
-    final title = post['text'] ?? post['slug'];
-    if (title is String && title.trim().isNotEmpty) return title.trim();
-    return 'Post ${post['id'] ?? ''}';
-  }
-
-  Map<String, dynamic> _mapCreatorPost(dynamic value) {
-    if (value is Map<String, dynamic>) return value;
-    if (value is Map) return value.map((key, value) => MapEntry('$key', value));
-    return <String, dynamic>{};
-  }
-
-  Widget _details(XxxFollowAccountSnapshot snapshot) {
-    final profile = snapshot.profile;
-    final morePosts = _morePostsFuture;
-    final visiblePosts = morePosts == null
-        ? snapshot.firstAuthorPosts
-        : null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            ClipOval(
-              child: SizedBox(
-                width: 64,
-                height: 64,
-                child: profile.avatarUrl == null
-                    ? const ColoredBox(
-                        color: Color(0xFF30343B),
-                        child: Icon(CupertinoIcons.person_fill, color: Colors.white70, size: 30),
-                      )
-                    : Image.network(
-                        profile.avatarUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const ColoredBox(
-                          color: Color(0xFF30343B),
-                          child: Icon(CupertinoIcons.person_fill, color: Colors.white70, size: 30),
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    profile.displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.title.copyWith(color: Colors.white, fontSize: 20),
-                  ),
-                  Text(
-                    '@${profile.username}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.caption.copyWith(color: Colors.white60),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
-          child: Column(
-            children: [
-              if (profile.id.isNotEmpty) _accountTextRow('Creator ID', profile.id),
-              if (profile.gender.isNotEmpty) _accountTextRow('Gender', profile.gender),
-              if (profile.createdAt.isNotEmpty) _accountTextRow('Joined', profile.createdAt),
-              _accountTextRow('Live status', profile.isStreaming ? 'Streaming' : 'Offline'),
-              _accountDataRow('Posts found in loaded feed', snapshot.firstAuthorPosts.length),
-            ],
-          ),
-        ),
-        if (profile.coverPictureUrl != null || profile.coverVideoUrl != null) ...[
-          const SizedBox(height: 12),
-          if (profile.coverPictureUrl != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                profile.coverPictureUrl!,
-                width: double.infinity,
-                height: 120,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-              ),
-            ),
-        ],
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            Expanded(
-              child: Text('Posts by this creator in Trans', style: AppText.label.copyWith(color: Colors.white, fontSize: 15)),
-            ),
-            Text('${snapshot.firstAuthorPosts.length}', style: AppText.caption.copyWith(color: Colors.white60)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: morePosts != null
-                ? null
-                : () => setState(() {
-                      _morePostsFuture = widget.repository.getMoreXxxFollowCreatorPosts(snapshot);
-                    }),
-            icon: const Icon(CupertinoIcons.cloud_download),
-            label: const Text('Search more pages for this creator'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.24)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-          ),
-        ),
-        if (visiblePosts != null) ...[
-          const SizedBox(height: 8),
-          if (visiblePosts.isEmpty)
-            Text('No posts from this creator in the pages loaded so far.', style: AppText.caption.copyWith(color: Colors.white54))
-          else
-            for (final post in visiblePosts.take(12)) _postRow(post),
-        ],
-        if (morePosts != null) ...[
-          const SizedBox(height: 8),
-          FutureBuilder<List<Map<String, dynamic>>>(
-            future: morePosts,
-            builder: (context, state) {
-              if (state.connectionState != ConnectionState.done) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(12),
-                    child: CupertinoActivityIndicator(color: Colors.white70),
-                  ),
-                );
-              }
-              if (state.hasError) {
-                return Text(
-                  'Could not search more creator posts: ${state.error}',
-                  style: AppText.caption.copyWith(color: Colors.redAccent),
-                );
-              }
-              final posts = state.data ?? const <Map<String, dynamic>>[];
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${posts.length} posts found in scanned Trans pages',
-                    style: AppText.caption.copyWith(color: Colors.white70),
-                  ),
-                  for (final post in posts.take(20)) _postRow(post),
-                ],
-              );
-            },
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _accountDataRow(String label, int value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: AppText.caption.copyWith(color: Colors.white60))),
-            Text(_compact(value), style: AppText.label.copyWith(color: Colors.white)),
-          ],
-        ),
-      );
-
-  Widget _accountTextRow(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: Text(label, style: AppText.caption.copyWith(color: Colors.white60))),
-            Flexible(child: Text(value, textAlign: TextAlign.end, style: AppText.caption.copyWith(color: Colors.white))),
-          ],
-        ),
-      );
-
-  Widget _postRow(Map<String, dynamic> row) {
-    final post = _mapCreatorPost(row['post']);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          const Icon(CupertinoIcons.play_rectangle, size: 14, color: Colors.white54),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _postTitle(row),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.caption.copyWith(color: const Color(0xCCFFFFFF)),
-            ),
-          ),
-          Text('#${post['id'] ?? ''}', style: AppText.caption.copyWith(color: Colors.white38)),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.84),
-      decoration: BoxDecoration(
-        color: const Color(0xFF15171D),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: FutureBuilder<XxxFollowAccountSnapshot>(
-          future: _accountFuture,
-          builder: (context, state) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 38,
-                      height: 4,
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(9)),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Text('XXXFollow creator', style: AppText.title.copyWith(color: Colors.white, fontSize: 18)),
-                  const SizedBox(height: 14),
-                  if (state.connectionState != ConnectionState.done)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(28),
-                        child: CupertinoActivityIndicator(color: Colors.white70, radius: 14),
-                      ),
-                    )
-                  else if (state.hasError)
-                    Text(
-                      'Could not load @${widget.username}: ${state.error}',
-                      style: AppText.body.copyWith(color: Colors.white70),
-                    )
-                  else if (state.data != null)
-                    _details(state.data!),
-                ],
-              ),
-            );
-          },
         ),
       ),
     );

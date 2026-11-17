@@ -11,7 +11,9 @@ import 'reel_favorites.dart';
 const String _xxxFollowBaseUrl = 'https://www.xxxfollow.com/';
 const String _xxxFollowUserAgent = kReelUserAgent;
 const int _maxHtmlBytes = 12 * 1024 * 1024;
-const int _maxSeenIdsInMemory = 3000;
+const int _maxSeenIdsInMemory = 1200;
+
+typedef SeenReelLookup = Future<Set<String>> Function(Iterable<String> ids);
 
 String? _stringValue(dynamic value) {
   if (value is! String) return null;
@@ -848,21 +850,19 @@ class XxxFollowTransReelsRepository {
   XxxFollowTransReelsRepository({
     http.Client? client,
     Uri? baseUri,
-    Iterable<String> initialSeenIds = const <String>[],
+    SeenReelLookup? findPreviouslySeenIds,
   })  : _client = client ?? _createClient(),
-        _baseUri = baseUri ?? Uri.parse(_xxxFollowBaseUrl) {
-    _previouslySeenIds.addAll(initialSeenIds.where((id) => id.isNotEmpty));
-  }
+        _baseUri = baseUri ?? Uri.parse(_xxxFollowBaseUrl),
+        _findPreviouslySeenIds = findPreviouslySeenIds;
 
   final http.Client _client;
   final Uri _baseUri;
   /// IDs seen in this repository session; used only for page de-duplication.
   final Set<String> _seenIds = <String>{};
   final Set<String> _seenVideoUrls = <String>{};
-  /// Previously watched IDs are deprioritized, not discarded permanently.
-  /// This prevents a feed made entirely of remembered IDs from appearing blank.
-  final Set<String> _previouslySeenIds = <String>{};
-  final List<ReelItem> _seenFallback = <ReelItem>[];
+  /// Persisted history is queried for only the IDs in the current page.
+  /// The full history is never copied into RAM.
+  final SeenReelLookup? _findPreviouslySeenIds;
   final List<ReelItem> _pending = <ReelItem>[];
   final Set<String> _visitedPageUris = <String>{};
   Uri? _nextPageUri;
@@ -953,17 +953,19 @@ class XxxFollowTransReelsRepository {
     }
 
     final items = XxxFollowTransParser.toReels(page, baseUri: _baseUri);
+    final previouslySeen = _findPreviouslySeenIds == null || items.isEmpty
+        ? const <String>{}
+        : await _findPreviouslySeenIds!(items.map((item) => item.id));
     var freshAdded = 0;
     for (final item in items) {
       final isNewId = _seenIds.add(item.id);
       final isNewUrl = _seenVideoUrls.add(item.videoUrl);
       if (!isNewId || !isNewUrl) continue;
-      if (_previouslySeenIds.contains(item.id)) {
-        if (_seenFallback.length < 48) _seenFallback.add(item);
-      } else {
-        _pending.add(item);
-        freshAdded++;
-      }
+      // Never recycle an already-viewed reel. Only the compact ID is
+      // persisted; media, thumbnails and post data are not retained.
+      if (previouslySeen.contains(item.id)) continue;
+      _pending.add(item);
+      freshAdded++;
     }
     _consecutiveNoFreshPages = freshAdded == 0
         ? _consecutiveNoFreshPages + 1
@@ -976,7 +978,7 @@ class XxxFollowTransReelsRepository {
     }
     // The page cursor advances monotonically, so old in-session dedup keys
     // can be discarded safely once this bounded window is exceeded. The
-    // compact persisted seen-ID list in ReelsPage remains the restart guard.
+    // compact disk-backed seen-ID file remains the restart guard.
     while (_seenIds.length > _maxSeenIdsInMemory) {
       _seenIds.remove(_seenIds.first);
     }
@@ -1017,22 +1019,9 @@ class XxxFollowTransReelsRepository {
       _pending.removeRange(0, take);
     }
 
-    // If the user has already watched every item currently present in the
-    // public feed, recycle the oldest skipped items instead of showing a
-    // permanent spinner with an empty list.
-    if (result.isEmpty && _pending.isEmpty && _seenFallback.isNotEmpty) {
-      final take = amount < _seenFallback.length ? amount : _seenFallback.length;
-      result.addAll(_seenFallback.take(take));
-      _seenFallback.removeRange(0, take);
-    }
-
-    // Reaching the bounded scan limit with no fresh or fallback items means
-    // there is nothing safe to append. Mark the source exhausted so ReelsPage
-    // removes its loading sentinel.
-    if (result.isEmpty && _pending.isEmpty && pageAttempts >= 8) {
-      _hasMore = false;
-      _nextPageUri = null;
-    }
+    // Reaching this scan limit returns an empty batch to the UI, which shows
+    // a retry action while preserving the next page cursor. Never recycle
+    // watched reels merely to fill the screen.
     if (result.isEmpty && _loadedPages == 0) {
       throw const FormatException(
         'XXXFollow did not provide a Trans feed. Check the genders=t source setting.',
@@ -1045,8 +1034,7 @@ class XxxFollowTransReelsRepository {
 
   /// True while another feed page exists or reels from the current page
   /// are still waiting in the in-memory queue.
-  bool get hasMoreItems =>
-      !_disposed && (_hasMore || _pending.isNotEmpty || _seenFallback.isNotEmpty);
+  bool get hasMoreItems => !_disposed && (_hasMore || _pending.isNotEmpty);
 
   /// Returns the same public Trans feed as lightweight catalogue Video rows.
   /// This lets Home display Trans normally without routing the user to Reels.

@@ -629,7 +629,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
           top: 0,
           bottom: 0,
           right: 0,
-          width: 24,
+          width: 22,
           child: _CreatorRightEdgeBackGesture(
             onBack: () => Navigator.of(context).maybePop(),
           ),
@@ -669,12 +669,13 @@ class _CreatorRightEdgeBackGestureState
         },
         onHorizontalDragUpdate: (details) {
           _distance += details.delta.dx;
-          if (_distance >= 24) _trigger();
+          // Start at the RIGHT edge and pull LEFT to go back.
+          if (_distance <= -24) _trigger();
         },
         onHorizontalDragEnd: (details) {
           if (!_didPop &&
-              _distance > 8 &&
-              (details.primaryVelocity ?? 0) > 300) {
+              _distance <= -8 &&
+              (details.primaryVelocity ?? 0) < -260) {
             _trigger();
           }
         },

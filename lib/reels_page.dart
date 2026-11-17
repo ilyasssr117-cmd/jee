@@ -36,6 +36,7 @@ import 'models.dart';
 import 'photo_saver.dart';
 import 'preview_manager.dart';
 import 'reel_favorites.dart';
+import 'reel_seen_store.dart';
 import 'xxx_follow_trans_reels.dart';
 import 'xxx_follow_creator_page.dart';
 import 'services/remote_config_service.dart';
@@ -75,9 +76,6 @@ const int _kReelHistoryKeep = 12;
 const int _kReelTrimTrigger = 48;
 const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
-const int _kMaxPersistedSeenReels = 1500;
-String _reelSeenHistoryKey(ContentSource source) =>
-    'reels_seen_ids_v2_${source.name}';
 const Duration _kReelDoubleTapWindow = Duration(milliseconds: 260);
 const Duration _kReelLongPressDelay = Duration(milliseconds: 140);
 const double _kReelMoveSlop = 14;
@@ -414,23 +412,15 @@ Uri _validatedReelsApiUri() {
 class ReelsRepository {
   ReelsRepository({
     required this.source,
-    Iterable<String> previouslySeenIds = const <String>[],
-  }) : _transRepository = XxxFollowTransReelsRepository(
-          initialSeenIds: source == ContentSource.trans
-              ? previouslySeenIds
-              : const <String>[],
-        ) {
-    // Non-Trans Reels use the generic API's local ID filter. Trans delegates
-    // deduplication to XXXFollow's paged repository, so do not duplicate its
-    // persisted history in a second in-memory set.
-    if (source != ContentSource.trans) {
-      for (final id in previouslySeenIds) {
-        if (id.isNotEmpty) _seen.add('id:$id');
-      }
-    }
-  }
+    SeenReelLookup? findPreviouslySeenIds,
+  })  : _findPreviouslySeenIds = findPreviouslySeenIds,
+        _transRepository = XxxFollowTransReelsRepository(
+          findPreviouslySeenIds:
+              source == ContentSource.trans ? findPreviouslySeenIds : null,
+        );
 
   final ContentSource source;
+  final SeenReelLookup? _findPreviouslySeenIds;
   final XxxFollowTransReelsRepository _transRepository;
   final LinkedHashSet<String> _seen = LinkedHashSet<String>();
   final http.Client _client = _makeClient();
@@ -645,6 +635,9 @@ class ReelsRepository {
         emptyRounds < _kMaxRefetchTries) {
       rounds++;
       final fetched = await _fetch(amount - fresh.length);
+      final persistedSeen = _findPreviouslySeenIds == null || fetched.isEmpty
+          ? const <String>{}
+          : await _findPreviouslySeenIds!(fetched.map((item) => item.id));
       var added = 0;
       for (final item in fetched) {
         final idKey = 'id:${item.id}';
@@ -653,6 +646,7 @@ class ReelsRepository {
         _seen
           ..add(idKey)
           ..add(urlKey);
+        if (persistedSeen.contains(item.id)) continue;
         fresh.add(item);
         added++;
       }
@@ -756,9 +750,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _loading = false;
   bool _initialLoadCompleted = false;
   int _initialLoadRetries = 0;
-  late LinkedHashSet<String> _seenHistory;
-  Timer? _seenHistoryWriteTimer;
-  bool _seenHistoryDirty = false;
+  late ReelSeenStore _seenStore;
+  bool _hasBeenActive = false;
+  bool _refreshingSeenOnReturn = false;
+  final LinkedHashSet<String> _loadedReelIds = LinkedHashSet<String>();
+  final LinkedHashSet<String> _markedSeenThisSession =
+      LinkedHashSet<String>();
   bool _resumeOnForeground = false;
   bool _reelScrollInProgress = false;
   bool _trimming = false;
@@ -776,16 +773,11 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _seenHistory = LinkedHashSet<String>.of(
-      LocalStore.readList(_reelSeenHistoryKey(widget.source))
-          .where((id) => id.isNotEmpty),
-    );
-    while (_seenHistory.length > _kMaxPersistedSeenReels) {
-      _seenHistory.remove(_seenHistory.first);
-    }
+    _hasBeenActive = widget.active;
+    _seenStore = ReelSeenStore(widget.source);
     _repo = ReelsRepository(
       source: widget.source,
-      previouslySeenIds: _seenHistory,
+      findPreviouslySeenIds: _seenStore.findSeenIds,
     );
     final supplied = widget.initialItems;
     if (supplied != null) {
@@ -835,21 +827,31 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
     if (oldWidget.active == widget.active) return;
     if (widget.active) {
+      final returningToFeed = _hasBeenActive;
+      _hasBeenActive = true;
       _reelScrollInProgress = false;
       _focusForKeyboard();
       _claimPlayback();
       if (_items.isEmpty && !_loading) {
         // Retry an empty/failed feed when the user returns to Reels. This is
-        // especially useful after a transient XXXFollow response or timeout.
+        // especially useful after a transient response or timeout.
         _exhausted = false;
         _initialLoadCompleted = false;
         _initialLoadRetries = 0;
         unawaited(_loadMore(first: true));
+      } else if (_items.isNotEmpty &&
+          returningToFeed &&
+          !widget.initialItemsOnly) {
+        // Drop reels already displayed before the user left this feed. The
+        // lookup streams the disk-backed ID file and never loads the history
+        // into memory as one large collection.
+        unawaited(_resumeAtNextUnseenReel());
       } else if (_items.isNotEmpty) {
         _syncControllers(_current);
       }
     } else {
       _reelScrollInProgress = false;
+      _rememberCurrentReel();
       _pauseForLeaving();
     }
   }
@@ -866,13 +868,12 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     _analyticsWatchStarted.clear();
     _analyticsPlayedReels.clear();
     _repo.dispose();
-    _seenHistory = LinkedHashSet<String>.of(
-      LocalStore.readList(_reelSeenHistoryKey(widget.source))
-          .where((id) => id.isNotEmpty),
-    );
+    _seenStore = ReelSeenStore(widget.source);
+    _loadedReelIds.clear();
+    _markedSeenThisSession.clear();
     _repo = ReelsRepository(
       source: widget.source,
-      previouslySeenIds: _seenHistory,
+      findPreviouslySeenIds: _seenStore.findSeenIds,
     );
     _items.clear();
     _current = 0;
@@ -916,7 +917,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     _rememberCurrentReel();
-    _persistSeenHistory();
     unawaited(LocalStore.flush());
     WidgetsBinding.instance.removeObserver(this);
     for (final controller in _controllers.values) {
@@ -954,7 +954,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _rememberCurrentReel();
-      _persistSeenHistory();
       unawaited(LocalStore.flush());
       if (c != null && c.value.isInitialized && c.value.isPlaying) {
         _resumeOnForeground = true;
@@ -1000,7 +999,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           if (!mounted) return;
           if (!ageConfirmed) {
             setState(() {
-              _error = 'Confirm that you are 18 or older to open this source.';
+              _error = 'Confirm that you are 18 or older to watch these videos.';
               _loading = false;
               _initialLoadCompleted = true;
               _pendingKeyboardPage = null;
@@ -1036,7 +1035,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           _loading = false;
           _initialLoadCompleted = true;
           _exhausted = false;
-          _error = 'No new videos could be found. Tap to try again.';
+          _error = 'You’re all caught up. Try again later.';
           _pendingKeyboardPage = null;
         });
         return;
@@ -1045,8 +1044,13 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
         final existingIds = _items.map((item) => item.id).toSet();
         final existingUrls = _items.map((item) => item.videoUrl).toSet();
         for (final item in batch) {
-          if (existingIds.add(item.id) && existingUrls.add(item.videoUrl)) {
+          if (existingIds.add(item.id) &&
+              existingUrls.add(item.videoUrl) &&
+              _loadedReelIds.add(item.id)) {
             _items.add(item);
+            while (_loadedReelIds.length > 192) {
+              _loadedReelIds.remove(_loadedReelIds.first);
+            }
           }
         }
         final moreInitialItems = widget.initialItemsOnly &&
@@ -1135,38 +1139,90 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }));
   }
 
+  Future<void> _resumeAtNextUnseenReel() async {
+    if (_refreshingSeenOnReturn ||
+        !mounted ||
+        !widget.active ||
+        widget.initialItemsOnly ||
+        _items.isEmpty) {
+      return;
+    }
+    _refreshingSeenOnReturn = true;
+    try {
+      final seenIds = await _seenStore.findSeenIds(
+        _items.map((item) => item.id),
+      );
+      if (!mounted || !widget.active || seenIds.isEmpty) {
+        if (mounted && widget.active) _syncControllers(_current);
+        return;
+      }
+
+      final remaining = _items
+          .where((item) => !seenIds.contains(item.id))
+          .toList(growable: false);
+      if (remaining.length == _items.length) {
+        _syncControllers(_current);
+        return;
+      }
+
+      _stopReelAnalytics(_current);
+      for (final controller in _controllers.values.toList()) {
+        final listener = _controllerListeners.remove(controller);
+        if (listener != null) controller.removeListener(listener);
+        unawaited(_disposeReelController(controller));
+      }
+      _controllers.clear();
+      _reelStates.clear();
+      _analyticsWatchStarted.clear();
+
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(remaining);
+        _loadedReelIds
+          ..clear()
+          ..addAll(remaining.map((item) => item.id));
+        _current = 0;
+        _pendingLoadPage = null;
+        _pendingKeyboardPage = null;
+        _reelScrollInProgress = false;
+        if (remaining.isEmpty) {
+          _exhausted = false;
+        }
+      });
+
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !widget.active) return;
+      if (_items.isNotEmpty) {
+        if (_pager.hasClients) _pager.jumpToPage(0);
+        _syncControllers(0);
+      } else if (!_loading) {
+        unawaited(_loadMore(first: true));
+      }
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('[REELS] could not refresh seen history: ${error.runtimeType}');
+      }
+      if (mounted && widget.active && _items.isNotEmpty) {
+        _syncControllers(_current);
+      }
+    } finally {
+      _refreshingSeenOnReturn = false;
+    }
+  }
+
   void _rememberCurrentReel() {
     if (_current < 0 || _current >= _items.length) return;
     final id = _items[_current].id.trim();
-    if (id.isEmpty || !_seenHistory.add(id)) return;
-    while (_seenHistory.length > _kMaxPersistedSeenReels) {
-      _seenHistory.remove(_seenHistory.first);
+    if (id.isEmpty || !_markedSeenThisSession.add(id)) return;
+    // Keep only a tiny session window in RAM. The complete watch history is
+    // streamed from disk by ID when a page arrives; no video data is cached.
+    while (_markedSeenThisSession.length > 128) {
+      _markedSeenThisSession.remove(_markedSeenThisSession.first);
     }
-    // Only compact video IDs are persisted. No thumbnails or MP4 files are
-    // cached, so viewed-history storage stays small and bounded.
-    _scheduleSeenHistorySave();
-  }
-
-  void _scheduleSeenHistorySave() {
-    _seenHistoryDirty = true;
-    _seenHistoryWriteTimer?.cancel();
-    // Batch rapid swipes into one tiny SharedPreferences write. This avoids
-    // serializing the whole ID list for every frame/page event.
-    _seenHistoryWriteTimer = Timer(
-      const Duration(milliseconds: 500),
-      _persistSeenHistory,
-    );
-  }
-
-  void _persistSeenHistory() {
-    _seenHistoryWriteTimer?.cancel();
-    _seenHistoryWriteTimer = null;
-    if (!_seenHistoryDirty) return;
-    _seenHistoryDirty = false;
-    LocalStore.writeList(
-      _reelSeenHistoryKey(widget.source),
-      _seenHistory.toList(growable: false),
-    );
+    unawaited(_seenStore.markSeen(id).catchError((Object error) {
+      if (kDebugMode) debugPrint('[REELS] history write failed: ${error.runtimeType}');
+    }));
   }
 
   bool _ownsController(int index, VideoPlayerController controller) =>
@@ -1572,6 +1628,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: false,
+      enableDrag: false,
       backgroundColor: const Color(0xFF111318),
       barrierColor: Colors.black.withValues(alpha: .62),
       elevation: 24,
@@ -1928,16 +1985,6 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                   style: AppText.body.copyWith(color: Colors.white70),
                 ),
               ),
-            if (widget.onExitToPrevious != null)
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: 18,
-                child: _RightEdgeExitGesture(
-                  onExit: widget.onExitToPrevious!,
-                ),
-              ),
             // Soft top/bottom scrims keep the white UI readable on bright clips.
             IgnorePointer(
               child: AnimatedOpacity(
@@ -1992,6 +2039,16 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               right: 8,
               child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
             ),
+            if (widget.onExitToPrevious != null)
+              Positioned(
+                top: 0,
+                bottom: 0,
+                right: 0,
+                width: 22,
+                child: _RightEdgeExitGesture(
+                  onExit: widget.onExitToPrevious!,
+                ),
+              ),
           ],
         ),
         ),
@@ -3613,32 +3670,40 @@ class _RightEdgeExitGesture extends StatefulWidget {
 }
 
 class _RightEdgeExitGestureState extends State<_RightEdgeExitGesture> {
-  double? _startX;
+  double _distance = 0;
   bool _triggered = false;
+
+  void _trigger() {
+    if (_triggered) return;
+    _triggered = true;
+    Haptics.play(Haptic.selection);
+    widget.onExit();
+  }
 
   @override
   Widget build(BuildContext context) => GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: (details) {
-          _startX = details.localPosition.dx;
+        onHorizontalDragStart: (_) {
+          _distance = 0;
           _triggered = false;
         },
         onHorizontalDragUpdate: (details) {
-          if (_triggered || _startX == null) return;
-          if (details.localPosition.dx - _startX! >= 14) {
-            _triggered = true;
-            Haptics.play(Haptic.selection);
-            widget.onExit();
-          }
+          // The gesture starts at the RIGHT edge and moves LEFT.
+          _distance += details.delta.dx;
+          if (_distance <= -24) _trigger();
         },
         onHorizontalDragEnd: (details) {
-          if (!_triggered && (details.primaryVelocity ?? 0) > 260) {
-            _triggered = true;
-            widget.onExit();
+          if (!_triggered &&
+              _distance <= -8 &&
+              (details.primaryVelocity ?? 0) <= -260) {
+            _trigger();
           }
-          _startX = null;
         },
-        onHorizontalDragCancel: () => _startX = null,
+        onHorizontalDragCancel: () {
+          _distance = 0;
+          _triggered = false;
+        },
+        child: const SizedBox.expand(),
       );
 }
 
@@ -3660,11 +3725,39 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
   String? _error;
   int _total = 0;
   int _nextOffset = 0;
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
+  bool _closingSheet = false;
 
   @override
   void initState() {
     super.initState();
     unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _sheetController.dispose();
+    super.dispose();
+  }
+
+  void _dragSheetFromHandle(DragUpdateDetails details) {
+    if (!_sheetController.isAttached) return;
+    final height = MediaQuery.sizeOf(context).height;
+    final next = (_sheetController.size - details.delta.dy / height)
+        .clamp(.18, .95)
+        .toDouble();
+    _sheetController.jumpTo(next);
+  }
+
+  void _closeWhenCollapsed(DraggableScrollableNotification notification) {
+    if (_closingSheet || notification.extent > .185 || !mounted) return;
+    _closingSheet = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    });
   }
 
   Future<void> _load({bool more = false}) async {
@@ -3774,191 +3867,241 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
     return const SizedBox(height: 22);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    final shownCount = _total > 0 ? _total : _comments.length;
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * .78,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: bottom),
-        child: Column(
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(99),
-              ),
+  Widget _buildCommentsContent(ScrollController scrollController) {
+    if (_loading) {
+      return ListView(
+        controller: scrollController,
+        physics: const ClampingScrollPhysics(),
+        children: const [
+          SizedBox(height: 120),
+          Center(
+            child: CupertinoActivityIndicator(
+              color: Colors.white70,
+              radius: 13,
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
-              child: Row(
+          ),
+        ],
+      );
+    }
+
+    if (_error != null && _comments.isEmpty) {
+      return ListView(
+        controller: scrollController,
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(24, 70, 24, 24),
+        children: [
+          Icon(CupertinoIcons.wifi_slash, color: Colors.white38, size: 30),
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          const SizedBox(height: 10),
+          Center(
+            child: FilledButton.tonal(
+              onPressed: () => _load(),
+              child: const Text('Try again'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_comments.isEmpty) {
+      return ListView(
+        controller: scrollController,
+        physics: const ClampingScrollPhysics(),
+        children: const [
+          SizedBox(height: 100),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(CupertinoIcons.chat_bubble, color: Colors.white30, size: 34),
+                SizedBox(height: 12),
+                Text('No comments yet', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                SizedBox(height: 4),
+                Text('Be the first to leave a comment.', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.separated(
+      controller: scrollController,
+      physics: const ClampingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      itemCount: _comments.length + 1,
+      separatorBuilder: (_, __) => const SizedBox(height: 18),
+      itemBuilder: (context, index) {
+        if (index == _comments.length) return _footer();
+        final comment = _comments[index];
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _avatar(comment),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Expanded(
-                    child: Text(
-                      'Comments',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -.2,
-                      ),
-                    ),
-                  ),
-                  if (shownCount > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: .09),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        reelCompact(shownCount),
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          comment.displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
+                      if (_date(comment.createdAt).isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          _date(comment.createdAt),
+                          style: const TextStyle(color: Colors.white38, fontSize: 11),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    comment.text,
+                    style: const TextStyle(
+                      color: Color(0xFFE7E8EC),
+                      fontSize: 14,
+                      height: 1.4,
                     ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Close comments',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(CupertinoIcons.xmark, size: 18),
-                    color: Colors.white70,
-                    visualDensity: VisualDensity.compact,
+                  ),
+                  if (comment.replyCount > 0) ...[
+                    const SizedBox(height: 7),
+                    Text(
+                      '${comment.replyCount} replies',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Column(
+                children: [
+                  const Icon(CupertinoIcons.heart, size: 17, color: Colors.white38),
+                  const SizedBox(height: 4),
+                  Text(
+                    reelCompact(comment.likes),
+                    style: const TextStyle(color: Colors.white38, fontSize: 10),
                   ),
                 ],
               ),
             ),
-            const Divider(color: Colors.white10, height: 1),
-            Expanded(
-              child: _loading
-                  ? const Center(
-                      child: CupertinoActivityIndicator(color: Colors.white70, radius: 13),
-                    )
-                  : _error != null && _comments.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(28),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(CupertinoIcons.wifi_slash, color: Colors.white38, size: 30),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _error!,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.white70, height: 1.4),
-                                ),
-                                const SizedBox(height: 10),
-                                FilledButton.tonal(
-                                  onPressed: () => _load(),
-                                  child: const Text('Try again'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : _comments.isEmpty
-                          ? const Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(CupertinoIcons.chat_bubble, color: Colors.white30, size: 34),
-                                  SizedBox(height: 12),
-                                  Text('No comments yet', style: TextStyle(color: Colors.white70, fontSize: 14)),
-                                  SizedBox(height: 4),
-                                  Text('Be the first to leave a comment.', style: TextStyle(color: Colors.white38, fontSize: 12)),
-                                ],
-                              ),
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-                              itemCount: _comments.length + 1,
-                              separatorBuilder: (_, __) => const SizedBox(height: 18),
-                              itemBuilder: (context, index) {
-                                if (index == _comments.length) return _footer();
-                                final comment = _comments[index];
-                                return Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _avatar(comment),
-                                    const SizedBox(width: 11),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  comment.displayName,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ),
-                                              if (_date(comment.createdAt).isNotEmpty) ...[
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  _date(comment.createdAt),
-                                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                          const SizedBox(height: 5),
-                                          Text(
-                                            comment.text,
-                                            style: const TextStyle(
-                                              color: Color(0xFFE7E8EC),
-                                              fontSize: 14,
-                                              height: 1.4,
-                                            ),
-                                          ),
-                                          if (comment.replyCount > 0) ...[
-                                            const SizedBox(height: 7),
-                                            Text(
-                                              '${comment.replyCount} replies',
-                                              style: const TextStyle(
-                                                color: Colors.white54,
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Column(
-                                        children: [
-                                          const Icon(CupertinoIcons.heart, size: 17, color: Colors.white38),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            reelCompact(comment.likes),
-                                            style: const TextStyle(color: Colors.white38, fontSize: 10),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              },
-                            ),
-            ),
           ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final shownCount = _total > 0 ? _total : _comments.length;
+    return NotificationListener<DraggableScrollableNotification>(
+      onNotification: (notification) {
+        _closeWhenCollapsed(notification);
+        return false;
+      },
+      child: DraggableScrollableSheet(
+        controller: _sheetController,
+        expand: false,
+        initialChildSize: .78,
+        minChildSize: .18,
+        maxChildSize: .95,
+        snap: true,
+        snapSizes: const [.48, .78, .95],
+        builder: (context, scrollController) => Padding(
+          padding: EdgeInsets.only(bottom: bottom),
+          child: Column(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragUpdate: _dragSheetFromHandle,
+                onVerticalDragEnd: (details) {
+                  if (_sheetController.isAttached &&
+                      _sheetController.size <= .22) {
+                    Navigator.of(context).maybePop();
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 10, 0, 3),
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Comments',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -.2,
+                        ),
+                      ),
+                    ),
+                    if (shownCount > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: .09),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          reelCompact(shownCount),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Close comments',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(CupertinoIcons.xmark, size: 18),
+                      color: Colors.white70,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: Colors.white10, height: 1),
+              Expanded(child: _buildCommentsContent(scrollController)),
+            ],
+          ),
         ),
       ),
     );

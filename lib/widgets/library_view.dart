@@ -141,24 +141,38 @@ class _LibraryViewState extends State<LibraryView> {
           ),
         ),
         Expanded(
-          child: AnimatedSwitcher(
-            duration: Motion.normal,
-            child: KeyedSubtree(
-              key: ValueKey<LibrarySegment>(activeSegment),
-              child: switch (activeSegment) {
-                LibrarySegment.favorites => _buildFavorites(margin),
-                LibrarySegment.history => _buildHistory(margin),
-                LibrarySegment.downloads => _buildDownloads(margin),
-                LibrarySegment.models => FavoriteModelsView(
-                    onBrowse: widget.onBrowse,
-                    bottomInset: widget.bottomInset,
+          child: Stack(
+            children: [
+              AnimatedSwitcher(
+                duration: Motion.normal,
+                child: KeyedSubtree(
+                  key: ValueKey<LibrarySegment>(activeSegment),
+                  child: switch (activeSegment) {
+                    LibrarySegment.favorites => _buildFavorites(margin),
+                    LibrarySegment.history => _buildHistory(margin),
+                    LibrarySegment.downloads => _buildDownloads(margin),
+                    LibrarySegment.models => FavoriteModelsView(
+                        onBrowse: widget.onBrowse,
+                        bottomInset: widget.bottomInset,
+                      ),
+                    LibrarySegment.albums => SavedAlbumsView(
+                        onBrowse: widget.onBrowse,
+                        bottomInset: widget.bottomInset,
+                      ),
+                  },
+                ),
+              ),
+              if (activeSegment == LibrarySegment.favorites)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  width: 22,
+                  child: _LibraryRightEdgeBackGesture(
+                    onBack: widget.onBrowse,
                   ),
-                LibrarySegment.albums => SavedAlbumsView(
-                    onBrowse: widget.onBrowse,
-                    bottomInset: widget.bottomInset,
-                  ),
-              },
-            ),
+                ),
+            ],
           ),
         ),
       ],
@@ -730,4 +744,49 @@ class _IconAction extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// Swipe from the right screen edge toward the left to leave Favorites.
+/// This recognizer only occupies a narrow edge strip, so normal scrolling and
+/// taps elsewhere in the saved-video grid remain unchanged.
+class _LibraryRightEdgeBackGesture extends StatefulWidget {
+  const _LibraryRightEdgeBackGesture({required this.onBack});
+
+  final VoidCallback onBack;
+
+  @override
+  State<_LibraryRightEdgeBackGesture> createState() =>
+      _LibraryRightEdgeBackGestureState();
+}
+
+class _LibraryRightEdgeBackGestureState
+    extends State<_LibraryRightEdgeBackGesture> {
+  double _distance = 0;
+  bool _didNavigate = false;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {
+          _distance = 0;
+          _didNavigate = false;
+        },
+        onHorizontalDragUpdate: (details) {
+          _distance += details.delta.dx;
+          if (!_didNavigate && _distance <= -24) {
+            _didNavigate = true;
+            widget.onBack();
+          }
+        },
+        onHorizontalDragEnd: (details) {
+          if (!_didNavigate &&
+              _distance <= -8 &&
+              (details.primaryVelocity ?? 0) < -260) {
+            _didNavigate = true;
+            widget.onBack();
+          }
+        },
+        child: const SizedBox.expand(),
+      );
 }

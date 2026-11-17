@@ -374,23 +374,17 @@ class _ModelPageState extends State<ModelPage> {
     final videoCount = _totalVideoCount;
     final photoCount = _totalPhotoCount;
     final albumCount = _totalAlbumCount;
-    // For X-X-X, the number currently rendered in the grid is only the
-    // loaded batch (usually 30), not the catalogue total. Never expose that
-    // transient batch size as the model's total; show a counting state until
-    // the independent metadata-only summary has completed.
+    // The grid may load in batches; show the exact total only when it is
+    // available, otherwise keep the profile labels clean and neutral.
     final videoLabel = videoCount != null
         ? '${_formatCount(videoCount)} videos'
-        : _summaryFinished
-            ? 'video total unavailable'
-            : 'counting total videos…';
+        : 'Videos';
     // The Photos tab renders album cards. Its stable total is the number of
     // albums, not the number of cards loaded so far and not a sum of photos
     // inside albums. Optional photoCount is shown only as extra metadata.
     final albumLabel = albumCount != null
         ? '${_formatCount(albumCount)} albums'
-        : _summaryFinished
-            ? 'album total unavailable'
-            : 'counting total albums…';
+        : 'Albums';
     final photoDetail = photoCount == null
         ? ''
         : ' · ${_formatCount(photoCount)} photos';

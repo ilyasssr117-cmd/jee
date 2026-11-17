@@ -293,7 +293,8 @@ void main() {
     });
     final repository = XxxFollowTransReelsRepository(
       client: client,
-      initialSeenIds: const <String>['1001_2001'],
+      findPreviouslySeenIds: (ids) async =>
+          ids.where((id) => id == '1001_2001').toSet(),
     );
     addTearDown(repository.dispose);
 
@@ -304,7 +305,36 @@ void main() {
   });
 
 
-  test('Reels falls back to remembered videos instead of returning an empty feed', () async {
+  test('stops scanning when multiple pages contain only seen reels', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      final pageNumber = int.tryParse(
+            request.url.queryParameters['page'] ?? '1',
+          ) ??
+          1;
+      final postId = 1000 + pageNumber;
+      final mediaId = 2000 + pageNumber;
+      final html = _pageHtml
+          .replaceAll('1001', '$postId')
+          .replaceAll('2001', '$mediaId')
+          .replaceAll('"page": 1', '"page": $pageNumber')
+          .replaceAll('?page=2', '?page=${pageNumber + 1}');
+      return http.Response(html, 200);
+    });
+    final repository = XxxFollowTransReelsRepository(
+      client: client,
+      findPreviouslySeenIds: (ids) async => ids.toSet(),
+    );
+    addTearDown(repository.dispose);
+
+    final reels = await repository.nextBatch(1);
+    expect(reels, isEmpty);
+    expect(calls, 8);
+    expect(repository.hasMoreItems, isFalse);
+  });
+
+  test('Reels never recycle a previously watched video when the feed ends', () async {
     final onePage = _pageHtml
         .replaceFirst(
           '<link rel="next" href="https://www.xxxfollow.com/?page=2" />',
@@ -317,13 +347,12 @@ void main() {
     final client = MockClient((request) async => http.Response(onePage, 200));
     final repository = XxxFollowTransReelsRepository(
       client: client,
-      initialSeenIds: const <String>['1001_2001'],
+      findPreviouslySeenIds: (ids) async => ids.toSet(),
     );
     addTearDown(repository.dispose);
 
     final reels = await repository.nextBatch(1);
-    expect(reels, hasLength(1));
-    expect(reels.single.id, '1001_2001');
+    expect(reels, isEmpty);
     expect(repository.hasMoreItems, isFalse);
   });
 

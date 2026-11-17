@@ -20,6 +20,17 @@ class ReelSeenStore {
   Future<void> get _writeTail =>
       _writeTails[source.name] ?? Future<void>.value();
 
+  /// Stable, compact key for a reel's media URL (query/fragment stripped), so
+  /// the same clip is recognised even if the source hands out a new ID.
+  static String urlKey(String url) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || uri.host.isEmpty) return '';
+    return 'u:${uri.host}${uri.path}';
+  }
+
+  static const int _maxFileBytes = 1024 * 1024; // ~1 MB of IDs
+  static const int _keepTailBytes = 640 * 1024;
+
   String _encode(String id) =>
       base64Url.encode(utf8.encode(id)).replaceAll('=', '');
 
@@ -64,16 +75,58 @@ class ReelSeenStore {
     }
   }
 
-  Future<void> markSeen(String id) {
-    final value = id.trim();
-    if (value.isEmpty) return Future<void>.value();
-    final encoded = _encode(value);
+  /// Marks a reel as watched by ID and (optionally) media URL.
+  Future<void> markSeen(String id, {String? url}) {
+    final keys = <String>[
+      if (id.trim().isNotEmpty) id.trim(),
+      if (url != null && urlKey(url).isNotEmpty) urlKey(url),
+    ];
+    if (keys.isEmpty) return Future<void>.value();
+    final payload = keys.map((k) => '${_encode(k)}\n').join();
     final previous = _writeTail;
     final task = previous.then((_) async {
       final file = await _file();
-      await file.writeAsString('$encoded\n', mode: FileMode.append, flush: true);
+      await file.writeAsString(payload, mode: FileMode.append, flush: true);
+      await _trimIfNeeded(file);
     });
     _writeTails[source.name] = task.catchError((Object _) {});
     return task;
+  }
+
+  /// Keeps the history file small: when it grows past the limit only the most
+  /// recent entries are kept. Only a ~640 KB tail is ever read into memory.
+  Future<void> _trimIfNeeded(File file) async {
+    try {
+      final length = await file.length();
+      if (length <= _maxFileBytes) return;
+      final raf = await file.open();
+      List<int> tail;
+      try {
+        await raf.setPosition(length - _keepTailBytes);
+        tail = await raf.read(_keepTailBytes);
+      } finally {
+        await raf.close();
+      }
+      final newline = tail.indexOf(0x0A);
+      final trimmed = newline < 0 ? tail : tail.sublist(newline + 1);
+      final tmp = File('${file.path}.tmp');
+      await tmp.writeAsBytes(trimmed, flush: true);
+      await tmp.rename(file.path);
+    } catch (_) {}
+  }
+
+  /// Deletes the watched-reels history of every content source.
+  static Future<void> clearAll() async {
+    try {
+      final directory = await getApplicationSupportDirectory();
+      if (!await directory.exists()) return;
+      await for (final entity in directory.list()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (name.startsWith('reels_seen_')) {
+          await entity.delete();
+        }
+      }
+    } catch (_) {}
   }
 }

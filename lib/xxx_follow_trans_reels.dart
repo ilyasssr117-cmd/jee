@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import 'models.dart';
 import 'reel_favorites.dart';
+import 'reel_seen_store.dart';
 
 const String _xxxFollowBaseUrl = 'https://www.xxxfollow.com/';
 const String _xxxFollowUserAgent = kReelUserAgent;
@@ -600,7 +601,7 @@ class XxxFollowTransParser {
             postId: postId.isNotEmpty ? postId : null,
             title: _stringValue(post['text']) ??
                 _stringValue(post['slug']) ??
-                (username.isNotEmpty ? 'Post by $displayName' : 'XXXFollow video'),
+                (username.isNotEmpty ? 'Post by $displayName' : 'Video'),
             thumbUrl: thumb,
             avatarUrl: avatar,
             author: username,
@@ -955,7 +956,10 @@ class XxxFollowTransReelsRepository {
     final items = XxxFollowTransParser.toReels(page, baseUri: _baseUri);
     final previouslySeen = _findPreviouslySeenIds == null || items.isEmpty
         ? const <String>{}
-        : await _findPreviouslySeenIds!(items.map((item) => item.id));
+        : await _findPreviouslySeenIds!(items.expand((item) => [
+              item.id,
+              ReelSeenStore.urlKey(item.videoUrl),
+            ]).where((key) => key.isNotEmpty));
     var freshAdded = 0;
     for (final item in items) {
       final isNewId = _seenIds.add(item.id);
@@ -963,7 +967,10 @@ class XxxFollowTransReelsRepository {
       if (!isNewId || !isNewUrl) continue;
       // Never recycle an already-viewed reel. Only the compact ID is
       // persisted; media, thumbnails and post data are not retained.
-      if (previouslySeen.contains(item.id)) continue;
+      if (previouslySeen.contains(item.id) ||
+          previouslySeen.contains(ReelSeenStore.urlKey(item.videoUrl))) {
+        continue;
+      }
       _pending.add(item);
       freshAdded++;
     }

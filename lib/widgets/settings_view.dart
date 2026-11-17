@@ -9,6 +9,7 @@ import '../download_store.dart';
 import '../history_store.dart';
 import '../playback_progress.dart';
 import '../preview_manager.dart';
+import '../reel_seen_store.dart';
 import '../request_cache.dart';
 import '../search_history.dart';
 import '../touch.dart';
@@ -66,6 +67,19 @@ class _SettingsViewState extends State<SettingsView> {
     HistoryStore.instance.clear();
     PlaybackProgress.instance.clearAll();
     showToast(context, 'Watch history cleared');
+  }
+
+  Future<void> _resetWatchedReels() async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Reset watched Reels?',
+      message: 'Reels you already watched can appear again.',
+      confirmLabel: 'Reset',
+    );
+    if (!ok || !mounted) return;
+    await ReelSeenStore.clearAll();
+    if (!mounted) return;
+    showToast(context, 'Watched Reels reset');
   }
 
   Future<void> _deleteDownloads() async {
@@ -206,6 +220,13 @@ class _SettingsViewState extends State<SettingsView> {
                   color: AppColors.accentMuted,
                   title: 'Clear search history',
                   onTap: _clearSearches,
+                ),
+                _Row(
+                  icon: Icons.restart_alt_rounded,
+                  color: AppColors.accentMuted,
+                  title: 'Reset watched Reels',
+                  subtitle: 'Let seen Reels appear again',
+                  onTap: _resetWatchedReels,
                 ),
                 _Row(
                   icon: Icons.history_toggle_off_rounded,

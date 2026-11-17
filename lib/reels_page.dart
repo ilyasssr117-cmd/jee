@@ -637,7 +637,10 @@ class ReelsRepository {
       final fetched = await _fetch(amount - fresh.length);
       final persistedSeen = _findPreviouslySeenIds == null || fetched.isEmpty
           ? const <String>{}
-          : await _findPreviouslySeenIds!(fetched.map((item) => item.id));
+          : await _findPreviouslySeenIds!(fetched.expand((item) => [
+                item.id,
+                ReelSeenStore.urlKey(item.videoUrl),
+              ]).where((key) => key.isNotEmpty));
       var added = 0;
       for (final item in fetched) {
         final idKey = 'id:${item.id}';
@@ -646,7 +649,10 @@ class ReelsRepository {
         _seen
           ..add(idKey)
           ..add(urlKey);
-        if (persistedSeen.contains(item.id)) continue;
+        if (persistedSeen.contains(item.id) ||
+            persistedSeen.contains(ReelSeenStore.urlKey(item.videoUrl))) {
+          continue;
+        }
         fresh.add(item);
         added++;
       }
@@ -1149,9 +1155,18 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
     _refreshingSeenOnReturn = true;
     try {
-      final seenIds = await _seenStore.findSeenIds(
-        _items.map((item) => item.id),
+      final seenKeys = await _seenStore.findSeenIds(
+        _items.expand((item) => [
+              item.id,
+              ReelSeenStore.urlKey(item.videoUrl),
+            ]).where((key) => key.isNotEmpty),
       );
+      final seenIds = <String>{
+        for (final item in _items)
+          if (seenKeys.contains(item.id) ||
+              seenKeys.contains(ReelSeenStore.urlKey(item.videoUrl)))
+            item.id,
+      };
       if (!mounted || !widget.active || seenIds.isEmpty) {
         if (mounted && widget.active) _syncControllers(_current);
         return;
@@ -1214,13 +1229,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   void _rememberCurrentReel() {
     if (_current < 0 || _current >= _items.length) return;
     final id = _items[_current].id.trim();
+    final url = _items[_current].videoUrl;
     if (id.isEmpty || !_markedSeenThisSession.add(id)) return;
     // Keep only a tiny session window in RAM. The complete watch history is
     // streamed from disk by ID when a page arrives; no video data is cached.
     while (_markedSeenThisSession.length > 128) {
       _markedSeenThisSession.remove(_markedSeenThisSession.first);
     }
-    unawaited(_seenStore.markSeen(id).catchError((Object error) {
+    unawaited(_seenStore.markSeen(id, url: url).catchError((Object error) {
       if (kDebugMode) debugPrint('[REELS] history write failed: ${error.runtimeType}');
     }));
   }
@@ -1629,12 +1645,11 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       useSafeArea: true,
       showDragHandle: false,
       enableDrag: false,
-      backgroundColor: const Color(0xFF111318),
+      // The sheet paints its own background so the whole popup (not just its
+      // contents) follows the finger when it is pulled down.
+      backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: .62),
-      elevation: 24,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-      ),
+      elevation: 0,
       builder: (_) => _XxxFollowCommentsSheet(
         loadPage: (offset) => _repo.getXxxFollowPostComments(
           postId, offset: offset,
@@ -2044,7 +2059,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
                 top: 0,
                 bottom: 0,
                 right: 0,
-                width: 22,
+                width: 36,
                 child: _RightEdgeExitGesture(
                   onExit: widget.onExitToPrevious!,
                 ),
@@ -3670,7 +3685,8 @@ class _RightEdgeExitGesture extends StatefulWidget {
 }
 
 class _RightEdgeExitGestureState extends State<_RightEdgeExitGesture> {
-  double _distance = 0;
+  Offset _start = Offset.zero;
+  bool _tracking = false;
   bool _triggered = false;
 
   void _trigger() {
@@ -3680,29 +3696,28 @@ class _RightEdgeExitGestureState extends State<_RightEdgeExitGesture> {
     widget.onExit();
   }
 
+  // A raw Listener is used on purpose: it sits outside the gesture arena, so
+  // the vertical reels PageView and the tab PageView cannot steal the swipe.
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Listener(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: (_) {
-          _distance = 0;
+        onPointerDown: (e) {
+          _start = e.position;
+          _tracking = true;
           _triggered = false;
         },
-        onHorizontalDragUpdate: (details) {
-          // The gesture starts at the RIGHT edge and moves LEFT.
-          _distance += details.delta.dx;
-          if (_distance <= -24) _trigger();
-        },
-        onHorizontalDragEnd: (details) {
-          if (!_triggered &&
-              _distance <= -8 &&
-              (details.primaryVelocity ?? 0) <= -260) {
+        onPointerMove: (e) {
+          if (!_tracking || _triggered) return;
+          final dx = e.position.dx - _start.dx;
+          final dy = e.position.dy - _start.dy;
+          // Swipe from the right edge towards the left, mostly horizontal.
+          if (dx <= -40 && dx.abs() > dy.abs() * 1.4) {
+            _tracking = false;
             _trigger();
           }
         },
-        onHorizontalDragCancel: () {
-          _distance = 0;
-          _triggered = false;
-        },
+        onPointerUp: (_) => _tracking = false,
+        onPointerCancel: (_) => _tracking = false,
         child: const SizedBox.expand(),
       );
 }
@@ -3717,7 +3732,8 @@ class _XxxFollowCommentsSheet extends StatefulWidget {
       _XxxFollowCommentsSheetState();
 }
 
-class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
+class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet>
+    with SingleTickerProviderStateMixin {
   final List<XxxFollowComment> _comments = <XxxFollowComment>[];
   bool _loading = false;
   bool _loadingMore = false;
@@ -3725,9 +3741,16 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
   String? _error;
   int _total = 0;
   int _nextOffset = 0;
-  final DraggableScrollableController _sheetController =
-      DraggableScrollableController();
-  bool _closingSheet = false;
+  final ScrollController _listController = ScrollController();
+  late final AnimationController _settle = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  double _dy = 0; // how far the whole sheet has been pulled down
+  double _velocity = 0;
+  Duration? _lastMoveTime;
+  bool _tracking = false;
+  bool _closing = false;
 
   @override
   void initState() {
@@ -3737,27 +3760,74 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
 
   @override
   void dispose() {
-    _sheetController.dispose();
+    _settle.dispose();
+    _listController.dispose();
     super.dispose();
   }
 
-  void _dragSheetFromHandle(DragUpdateDetails details) {
-    if (!_sheetController.isAttached) return;
-    final height = MediaQuery.sizeOf(context).height;
-    final next = (_sheetController.size - details.delta.dy / height)
-        .clamp(.18, .95)
-        .toDouble();
-    _sheetController.jumpTo(next);
+  bool get _listAtTop =>
+      !_listController.hasClients || _listController.offset <= 0.5;
+
+  void _animateTo(double target, {VoidCallback? then}) {
+    final from = _dy;
+    _settle
+      ..stop()
+      ..reset();
+    final tween = Tween<double>(begin: from, end: target);
+    void tick() {
+      if (!mounted) return;
+      setState(() => _dy = tween.transform(Curves.easeOutCubic.transform(_settle.value)));
+    }
+
+    _settle.addListener(tick);
+    _settle.forward().whenComplete(() {
+      _settle.removeListener(tick);
+      then?.call();
+    });
   }
 
-  void _closeWhenCollapsed(DraggableScrollableNotification notification) {
-    if (_closingSheet || notification.extent > .185 || !mounted) return;
-    _closingSheet = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
+  void _dismiss() {
+    if (_closing || !mounted) return;
+    _closing = true;
+    final height = MediaQuery.sizeOf(context).height;
+    _animateTo(height, then: () {
+      if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
     });
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (_closing) return;
+    _settle.stop();
+    _tracking = true;
+    _velocity = 0;
+    _lastMoveTime = event.timeStamp;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (!_tracking || _closing) return;
+    final dy = event.delta.dy;
+    final dt = _lastMoveTime == null
+        ? 0
+        : (event.timeStamp - _lastMoveTime!).inMicroseconds;
+    _lastMoveTime = event.timeStamp;
+    if (dt > 0) _velocity = dy / (dt / 1e6); // px per second
+    // Pulling down while the list is at its first comment (or while the sheet
+    // is already displaced) moves the whole popup, never the comment list.
+    if ((dy > 0 && _listAtTop) || _dy > 0) {
+      setState(() => _dy = (_dy + dy).clamp(0.0, double.infinity));
+    }
+  }
+
+  void _onPointerEnd(PointerEvent event) {
+    if (!_tracking || _closing) return;
+    _tracking = false;
+    if (_dy <= 0) return;
+    final height = MediaQuery.sizeOf(context).height;
+    if (_dy > height * 0.18 || _velocity > 900) {
+      _dismiss();
+    } else {
+      _animateTo(0);
+    }
   }
 
   Future<void> _load({bool more = false}) async {
@@ -3867,11 +3937,15 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
     return const SizedBox(height: 22);
   }
 
-  Widget _buildCommentsContent(ScrollController scrollController) {
+  Widget _buildCommentsContent() {
+    final scrollController = _listController;
+    final physics = _dy > 0
+        ? const NeverScrollableScrollPhysics()
+        : const ClampingScrollPhysics();
     if (_loading) {
       return ListView(
         controller: scrollController,
-        physics: const ClampingScrollPhysics(),
+        physics: physics,
         children: const [
           SizedBox(height: 120),
           Center(
@@ -3887,7 +3961,7 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
     if (_error != null && _comments.isEmpty) {
       return ListView(
         controller: scrollController,
-        physics: const ClampingScrollPhysics(),
+        physics: physics,
         padding: const EdgeInsets.fromLTRB(24, 70, 24, 24),
         children: [
           Icon(CupertinoIcons.wifi_slash, color: Colors.white38, size: 30),
@@ -3911,7 +3985,7 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
     if (_comments.isEmpty) {
       return ListView(
         controller: scrollController,
-        physics: const ClampingScrollPhysics(),
+        physics: physics,
         children: const [
           SizedBox(height: 100),
           Center(
@@ -3932,7 +4006,7 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
 
     return ListView.separated(
       controller: scrollController,
-      physics: const ClampingScrollPhysics(),
+      physics: physics,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
       itemCount: _comments.length + 1,
       separatorBuilder: (_, __) => const SizedBox(height: 18),
@@ -4016,35 +4090,30 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final media = MediaQuery.of(context);
+    final bottom = media.viewInsets.bottom;
     final shownCount = _total > 0 ? _total : _comments.length;
-    return NotificationListener<DraggableScrollableNotification>(
-      onNotification: (notification) {
-        _closeWhenCollapsed(notification);
-        return false;
-      },
-      child: DraggableScrollableSheet(
-        controller: _sheetController,
-        expand: false,
-        initialChildSize: .78,
-        minChildSize: .18,
-        maxChildSize: .95,
-        snap: true,
-        snapSizes: const [.48, .78, .95],
-        builder: (context, scrollController) => Padding(
-          padding: EdgeInsets.only(bottom: bottom),
-          child: Column(
-            children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onVerticalDragUpdate: _dragSheetFromHandle,
-                onVerticalDragEnd: (details) {
-                  if (_sheetController.isAttached &&
-                      _sheetController.size <= .22) {
-                    Navigator.of(context).maybePop();
-                  }
-                },
-                child: Padding(
+    final sheetHeight = (media.size.height - media.padding.top) * .78;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPointerDown,
+      onPointerMove: _onPointerMove,
+      onPointerUp: _onPointerEnd,
+      onPointerCancel: _onPointerEnd,
+      child: Transform.translate(
+        offset: Offset(0, _dy),
+        child: Container(
+          height: sheetHeight,
+          clipBehavior: Clip.antiAlias,
+          decoration: const BoxDecoration(
+            color: Color(0xFF111318),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(bottom: bottom),
+            child: Column(
+              children: [
+                Padding(
                   padding: const EdgeInsets.fromLTRB(0, 10, 0, 3),
                   child: Container(
                     width: 38,
@@ -4055,52 +4124,53 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet> {
                     ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Comments',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -.2,
-                        ),
-                      ),
-                    ),
-                    if (shownCount > 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: .09),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 8, 12),
+                  child: Row(
+                    children: [
+                      const Expanded(
                         child: Text(
-                          reelCompact(shownCount),
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
+                          'Comments',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
                             fontWeight: FontWeight.w700,
+                            letterSpacing: -.2,
                           ),
                         ),
                       ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      tooltip: 'Close comments',
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(CupertinoIcons.xmark, size: 18),
-                      color: Colors.white70,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
+                      if (shownCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: .09),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            reelCompact(shownCount),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Close comments',
+                        onPressed: _dismiss,
+                        icon: const Icon(CupertinoIcons.xmark, size: 18),
+                        color: Colors.white70,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(color: Colors.white10, height: 1),
-              Expanded(child: _buildCommentsContent(scrollController)),
-            ],
+                const Divider(color: Colors.white10, height: 1),
+                Expanded(child: _buildCommentsContent()),
+              ],
+            ),
           ),
         ),
       ),

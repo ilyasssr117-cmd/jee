@@ -395,10 +395,6 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                     _metaChip('Joined ${_joined(profile.createdAt)}', CupertinoIcons.calendar),
                   if (profile.isStreaming)
                     _metaChip('Streaming now', CupertinoIcons.dot_radiowaves_left_right),
-                  if ((profile.lastSeenAt ?? '').isNotEmpty)
-                    _metaChip('Seen ${_joined(profile.lastSeenAt!)}', CupertinoIcons.clock),
-                  if (profile.id.isNotEmpty)
-                    _metaChip('ID ${profile.id}', CupertinoIcons.number),
                 ],
               ),
               const SizedBox(height: 18),
@@ -414,7 +410,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                   ),
                   const Spacer(),
                   Text(
-                    '${_reels.length} loaded',
+                    '${_reels.length}',
                     style: const TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                 ],
@@ -422,12 +418,12 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
               const SizedBox(height: 12),
               if (profile.likesCount != null)
                 Text(
-                  '${_compact(profile.likesCount)} total likes reported by the source',
+                  '${_compact(profile.likesCount)} likes',
                   style: const TextStyle(color: Colors.white54, fontSize: 11),
                 )
               else if (totalLikes > 0)
                 Text(
-                  '${_compact(totalLikes)} likes across loaded posts',
+                  '${_compact(totalLikes)} likes',
                   style: const TextStyle(color: Colors.white54, fontSize: 11),
                 ),
             ],
@@ -560,7 +556,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Text(
-                            'Could not load more posts. $_error',
+                            _error!,
                             style: const TextStyle(color: Colors.redAccent, fontSize: 12),
                           ),
                         ),
@@ -586,7 +582,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                         child: Padding(
                           padding: EdgeInsets.all(28),
                           child: Center(
-                            child: Text('No videos from this creator are loaded yet.', style: TextStyle(color: Colors.white60)),
+                            child: Text('No videos yet.', style: TextStyle(color: Colors.white60)),
                           ),
                         ),
                       ),

@@ -463,7 +463,7 @@ class XFreeTransReelsRepository {
         title: _xfreeString(media['name']) ??
             _xfreeString(post['name']) ??
             _xfreeString(post['title']) ??
-            'XFree video',
+            'Video',
         thumbUrl: thumb,
         avatarUrl: avatarUrl,
         author: username.isNotEmpty ? username : displayName,

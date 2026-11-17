@@ -370,8 +370,9 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       constraints: BoxConstraints(
         minHeight: _headerHeight(MediaQuery.sizeOf(context)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(windowsDesktop ? 0 : 28),
+      // Edge-to-edge: no rounded corners (they showed the page background at the
+      // top corners and cut the header off abruptly at the bottom).
+      child: ClipRect(
         child: Stack(
           alignment: Alignment.bottomLeft,
           children: [
@@ -455,6 +456,27 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                         ),
                       ),
                     ),
+                    // Dissolve the bottom of the header into the page so the
+                    // screen reads as one continuous surface.
+                    if (!windowsDesktop)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: 44,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                AppColors.background.withValues(alpha: 0),
+                                AppColors.background,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -464,7 +486,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 margin,
                 context.safe.top + Gaps.sm + kMinTapSize + Gaps.md,
                 margin,
-                Gaps.lg,
+                Gaps.lg + (windowsDesktop ? 0 : 30),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,

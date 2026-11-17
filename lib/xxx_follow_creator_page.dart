@@ -618,11 +618,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                   ],
                 ),
         ),
-        Positioned(
-          top: 0,
-          bottom: 0,
-          right: 0,
-          width: 22,
+        Positioned.fill(
           child: _CreatorRightEdgeBackGesture(
             onBack: () => Navigator.of(context).maybePop(),
           ),
@@ -644,8 +640,10 @@ class _CreatorRightEdgeBackGesture extends StatefulWidget {
 
 class _CreatorRightEdgeBackGestureState
     extends State<_CreatorRightEdgeBackGesture> {
-  double _distance = 0;
+  Offset _start = Offset.zero;
+  bool _tracking = false;
   bool _didPop = false;
+  int _pointers = 0;
 
   void _trigger() {
     if (_didPop) return;
@@ -653,24 +651,34 @@ class _CreatorRightEdgeBackGestureState
     widget.onBack();
   }
 
+  // Raw pointer listener: it is outside the gesture arena, so the scrolling
+  // grid can never steal the swipe. Works from anywhere on the page, in either
+  // direction; the far-left edge is left to the native iOS back swipe.
   @override
-  Widget build(BuildContext context) => GestureDetector(
+  Widget build(BuildContext context) => Listener(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: (_) {
-          _distance = 0;
+        onPointerDown: (e) {
+          _pointers++;
+          _tracking = _pointers == 1 && e.position.dx >= 28;
+          _start = e.position;
           _didPop = false;
         },
-        onHorizontalDragUpdate: (details) {
-          _distance += details.delta.dx;
-          // Start at the RIGHT edge and pull LEFT to go back.
-          if (_distance <= -24) _trigger();
-        },
-        onHorizontalDragEnd: (details) {
-          if (!_didPop &&
-              _distance <= -8 &&
-              (details.primaryVelocity ?? 0) < -260) {
+        onPointerMove: (e) {
+          if (!_tracking || _didPop) return;
+          final dx = e.position.dx - _start.dx;
+          final dy = e.position.dy - _start.dy;
+          if (dx.abs() >= 70 && dx.abs() > dy.abs() * 1.8) {
+            _tracking = false;
             _trigger();
           }
+        },
+        onPointerUp: (_) {
+          _pointers = (_pointers - 1).clamp(0, 10);
+          _tracking = false;
+        },
+        onPointerCancel: (_) {
+          _pointers = (_pointers - 1).clamp(0, 10);
+          _tracking = false;
         },
         child: const SizedBox.expand(),
       );

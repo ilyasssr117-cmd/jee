@@ -129,6 +129,12 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _promptForContentSource() async {
     if (!mounted || _sourceChoiceReady) return;
+    if (AppSettings.instance.hasChosenContentSource) {
+      // Chosen before: go straight in. It can be changed from Settings.
+      setState(() => _sourceChoiceReady = true);
+      unawaited(_loadPage(reset: true));
+      return;
+    }
     final selected = await showContentSourcePicker(
       context,
       initialSource: AppSettings.instance.contentSource,
@@ -136,6 +142,7 @@ class _HomePageState extends State<HomePage>
     );
     if (!mounted) return;
     final source = selected ?? AppSettings.instance.contentSource;
+    AppSettings.instance.markContentSourceChosen();
     if (source != videoRepository.source) {
       _changeContentSource(source);
     } else {

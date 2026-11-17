@@ -956,7 +956,7 @@ class XxxFollowTransReelsRepository {
     final items = XxxFollowTransParser.toReels(page, baseUri: _baseUri);
     final previouslySeen = _findPreviouslySeenIds == null || items.isEmpty
         ? const <String>{}
-        : await _findPreviouslySeenIds!(items.expand((item) => [
+        : await _findPreviouslySeenIds(items.expand((item) => [
               item.id,
               ReelSeenStore.urlKey(item.videoUrl),
             ]).where((key) => key.isNotEmpty));

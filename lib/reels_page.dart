@@ -637,7 +637,7 @@ class ReelsRepository {
       final fetched = await _fetch(amount - fresh.length);
       final persistedSeen = _findPreviouslySeenIds == null || fetched.isEmpty
           ? const <String>{}
-          : await _findPreviouslySeenIds!(fetched.expand((item) => [
+          : await _findPreviouslySeenIds(fetched.expand((item) => [
                 item.id,
                 ReelSeenStore.urlKey(item.videoUrl),
               ]).where((key) => key.isNotEmpty));
@@ -4014,7 +4014,7 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet>
         physics: physics,
         padding: const EdgeInsets.fromLTRB(24, 70, 24, 24),
         children: [
-          Icon(CupertinoIcons.wifi_slash, color: Colors.white38, size: 30),
+          const Icon(CupertinoIcons.wifi_slash, color: Colors.white38, size: 30),
           const SizedBox(height: 12),
           Text(
             _error!,

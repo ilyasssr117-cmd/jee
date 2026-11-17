@@ -16,18 +16,24 @@ class AppSettings extends ChangeNotifier {
   static const String _autoplayKey = 'settings_autoplay_v1';
   static const String _soundKey = 'settings_preview_sound_v1';
   static const String _contentSourceKey = 'settings_content_source_v1';
+  static const String _sourceChosenKey = 'settings_content_source_chosen_v1';
 
   AppThemeMode _themeMode = AppThemeMode.system;
   bool _haptics = true;
   bool _autoplayNext = true;
   bool _previewSound = true;
   ContentSource _contentSource = ContentSource.fetish;
+  bool _sourceChosen = false;
 
   AppThemeMode get themeMode => _themeMode;
   bool get haptics => _haptics;
   bool get autoplayNext => _autoplayNext;
   bool get previewSound => _previewSound;
   ContentSource get contentSource => _contentSource;
+
+  /// True once the user has picked a category. The first-launch picker is then
+  /// never shown again; the category is changed from Settings only.
+  bool get hasChosenContentSource => _sourceChosen;
 
   void load() {
     final saved = LocalStore.readString(_themeKey);
@@ -41,7 +47,16 @@ class AppSettings extends ChangeNotifier {
     _contentSource = ContentSource.fromStoredValue(
       LocalStore.readString(_contentSourceKey),
     );
+    _sourceChosen =
+        LocalStore.readBool(_sourceChosenKey, fallback: false) ||
+            LocalStore.readString(_contentSourceKey) != null;
     Haptics.enabled = _haptics;
+  }
+
+  void markContentSourceChosen() {
+    if (_sourceChosen) return;
+    _sourceChosen = true;
+    LocalStore.writeBool(_sourceChosenKey, true);
   }
 
   void setThemeMode(AppThemeMode mode) {
@@ -74,6 +89,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   void setContentSource(ContentSource source) {
+    markContentSourceChosen();
     if (_contentSource == source) return;
     _contentSource = source;
     LocalStore.writeString(_contentSourceKey, source.name);

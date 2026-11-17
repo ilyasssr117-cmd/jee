@@ -47,6 +47,7 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
   bool _moreSearched = false;
   Future<void>? _loadMoreRequest;
   final ScrollController _scroll = ScrollController();
+  int _emptyLoads = 0;
   final List<Map<String, dynamic>> _rows = <Map<String, dynamic>>[];
   final Set<String> _postIds = <String>{};
   final Set<String> _reelIds = <String>{};
@@ -162,9 +163,13 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
       final oldCount = _reels.length;
       _mergeRows(posts);
       final addedVideos = _reels.length > oldCount;
+      _emptyLoads = addedVideos ? 0 : _emptyLoads + 1;
       setState(() {
         _loadingMore = false;
-        _moreSearched = !widget.hasMorePages();
+        // Stop for good once the source runs dry, so no "load" prompt is
+        // left hanging at the end of the list.
+        _moreSearched =
+            !widget.hasMorePages() || posts.isEmpty || _emptyLoads >= 3;
       });
       if (addedVideos) _scheduleFillViewport();
     } catch (error) {
@@ -596,20 +601,12 @@ class _XxxFollowCreatorPageState extends State<XxxFollowCreatorPage> {
                                   child: CupertinoActivityIndicator(color: Colors.white70),
                                 ),
                               )
-                            : _moreSearched
+                            : (_moreSearched || _error == null)
                                 ? const SizedBox.shrink()
                                 : OutlinedButton.icon(
                                     onPressed: _loadMore,
-                                    icon: Icon(
-                                      _error != null
-                                          ? CupertinoIcons.refresh
-                                          : CupertinoIcons.cloud_download,
-                                    ),
-                                    label: Text(
-                                      _error != null
-                                          ? 'Try again'
-                                          : 'Load more videos from this creator',
-                                    ),
+                                    icon: const Icon(CupertinoIcons.refresh),
+                                    label: const Text('Try again'),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: Colors.white,
                                       side: BorderSide(color: Colors.white.withValues(alpha: .24)),

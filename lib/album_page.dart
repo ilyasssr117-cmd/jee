@@ -109,7 +109,14 @@ class AlbumLoader extends ChangeNotifier {
       }
     } catch (e) {
       if (_disposed || run != _run) return;
-      error = e;
+      final total = totalCount;
+      if (photos.isNotEmpty && total != null && photos.length >= total) {
+        // Everything is already loaded; a failed extra page request at the
+        // very end is not an error the user needs to see.
+        finished = true;
+      } else {
+        error = e;
+      }
     } finally {
       if (!_disposed && run == _run) {
         loading = false;
@@ -126,7 +133,6 @@ class AlbumLoader extends ChangeNotifier {
   String get countLabel {
     final n = totalCount ?? photos.length;
     final base = '${_groupCount(n)} photo${n == 1 ? '' : 's'}';
-    if (loading && totalCount == null) return '$base · loading…';
     return base;
   }
 

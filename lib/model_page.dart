@@ -365,11 +365,11 @@ class _ModelPageState extends State<ModelPage> {
       if (_mode == _Mode.photos) {
         final n = _albums.length;
         final base = '$n album${n == 1 ? '' : 's'}';
-        return _albumsLoading ? '$base \u00b7 loading\u2026' : base;
+        return base;
       }
       final n = _videos.length;
       final base = '$n video${n == 1 ? '' : 's'}';
-      return _loading ? '$base \u00b7 loading\u2026' : base;
+      return base;
     }
     final videoCount = _totalVideoCount;
     final photoCount = _totalPhotoCount;

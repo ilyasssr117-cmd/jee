@@ -757,6 +757,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
   bool _initialLoadCompleted = false;
   int _initialLoadRetries = 0;
   late ReelSeenStore _seenStore;
+  DateTime? _inactiveSince;
   bool _hasBeenActive = false;
   bool _refreshingSeenOnReturn = false;
   final LinkedHashSet<String> _loadedReelIds = LinkedHashSet<String>();
@@ -833,7 +834,14 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
     }
     if (oldWidget.active == widget.active) return;
     if (widget.active) {
-      final returningToFeed = _hasBeenActive;
+      // A short sideways drag (or cancelled tab swipe) briefly deactivates this
+      // page; that must not reshuffle the feed. Only treat it as "left and
+      // came back" after a real absence.
+      final away = _inactiveSince == null
+          ? Duration.zero
+          : DateTime.now().difference(_inactiveSince!);
+      _inactiveSince = null;
+      final returningToFeed = _hasBeenActive && away > const Duration(seconds: 25);
       _hasBeenActive = true;
       _reelScrollInProgress = false;
       _focusForKeyboard();
@@ -857,6 +865,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
       }
     } else {
       _reelScrollInProgress = false;
+      _inactiveSince ??= DateTime.now();
       _rememberCurrentReel();
       _pauseForLeaving();
     }
@@ -2055,15 +2064,23 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
               child: _ReelsTopBar(clear: _clear, onToggleClear: _toggleClear),
             ),
             if (widget.onExitToPrevious != null)
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: 36,
-                child: _RightEdgeExitGesture(
-                  onExit: widget.onExitToPrevious!,
-                ),
-              ),
+              widget.initialItemsOnly
+                  ? Positioned.fill(
+                      child: _RightEdgeExitGesture(
+                        anywhere: true,
+                        bottomExclusion: bottom + 120,
+                        onExit: widget.onExitToPrevious!,
+                      ),
+                    )
+                  : Positioned(
+                      top: 0,
+                      bottom: 0,
+                      right: 0,
+                      width: 36,
+                      child: _RightEdgeExitGesture(
+                        onExit: widget.onExitToPrevious!,
+                      ),
+                    ),
           ],
         ),
         ),
@@ -3676,9 +3693,21 @@ class _ErrorView extends StatelessWidget {
 
 
 class _RightEdgeExitGesture extends StatefulWidget {
-  const _RightEdgeExitGesture({required this.onExit});
+  const _RightEdgeExitGesture({
+    required this.onExit,
+    this.anywhere = false,
+    this.bottomExclusion = 0,
+  });
 
   final VoidCallback onExit;
+
+  /// When true the swipe works from anywhere on the screen (used on pushed
+  /// pages such as Favorites / creator reels). Otherwise only the thin strip
+  /// this widget is placed in reacts.
+  final bool anywhere;
+
+  /// Height at the bottom that is ignored (progress bar / controls).
+  final double bottomExclusion;
 
   @override
   State<_RightEdgeExitGesture> createState() => _RightEdgeExitGestureState();
@@ -3688,6 +3717,7 @@ class _RightEdgeExitGestureState extends State<_RightEdgeExitGesture> {
   Offset _start = Offset.zero;
   bool _tracking = false;
   bool _triggered = false;
+  int _pointers = 0;
 
   void _trigger() {
     if (_triggered) return;
@@ -3699,27 +3729,46 @@ class _RightEdgeExitGestureState extends State<_RightEdgeExitGesture> {
   // A raw Listener is used on purpose: it sits outside the gesture arena, so
   // the vertical reels PageView and the tab PageView cannot steal the swipe.
   @override
-  Widget build(BuildContext context) => Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (e) {
-          _start = e.position;
-          _tracking = true;
-          _triggered = false;
-        },
-        onPointerMove: (e) {
-          if (!_tracking || _triggered) return;
-          final dx = e.position.dx - _start.dx;
-          final dy = e.position.dy - _start.dy;
-          // Swipe from the right edge towards the left, mostly horizontal.
-          if (dx <= -40 && dx.abs() > dy.abs() * 1.4) {
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (e) {
+        _pointers++;
+        final nearLeftEdge = e.position.dx < 28; // iOS back swipe owns this
+        final inBottomControls =
+            e.position.dy > size.height - widget.bottomExclusion;
+        _tracking = _pointers == 1 &&
+            !(widget.anywhere && (nearLeftEdge || inBottomControls));
+        _start = e.position;
+        _triggered = false;
+      },
+      onPointerMove: (e) {
+        if (!_tracking || _triggered) return;
+        final dx = e.position.dx - _start.dx;
+        final dy = e.position.dy - _start.dy;
+        final horizontal = dx.abs() > dy.abs() * 1.8;
+        if (widget.anywhere) {
+          if (dx.abs() >= 70 && horizontal) {
             _tracking = false;
             _trigger();
           }
-        },
-        onPointerUp: (_) => _tracking = false,
-        onPointerCancel: (_) => _tracking = false,
-        child: const SizedBox.expand(),
-      );
+        } else if (dx <= -40 && horizontal) {
+          _tracking = false;
+          _trigger();
+        }
+      },
+      onPointerUp: (_) {
+        _pointers = (_pointers - 1).clamp(0, 10);
+        _tracking = false;
+      },
+      onPointerCancel: (_) {
+        _pointers = (_pointers - 1).clamp(0, 10);
+        _tracking = false;
+      },
+      child: const SizedBox.expand(),
+    );
+  }
 }
 
 class _XxxFollowCommentsSheet extends StatefulWidget {
@@ -3755,7 +3804,17 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet>
   @override
   void initState() {
     super.initState();
+    _listController.addListener(_autoLoadMore);
     unawaited(_load());
+  }
+
+  // Comments load by themselves while scrolling, so there is no button.
+  void _autoLoadMore() {
+    if (!_hasMore || _loading || _loadingMore || _error != null) return;
+    if (!_listController.hasClients) return;
+    if (_listController.position.extentAfter < 360) {
+      unawaited(_load(more: true));
+    }
   }
 
   @override
@@ -3922,15 +3981,6 @@ class _XxxFollowCommentsSheetState extends State<_XxxFollowCommentsSheet>
               child: const Text('Try again'),
             ),
           ],
-        ),
-      );
-    }
-    if (_hasMore) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: TextButton(
-          onPressed: () => _load(more: true),
-          child: const Text('Load more comments'),
         ),
       );
     }

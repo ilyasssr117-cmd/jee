@@ -89,7 +89,7 @@ void main() {
       final html = _pageHtml
           .replaceFirst(
             'window.__PRELOAD_STATE__ =',
-            'window.__PRELOADED_STATE__ = {\"wrong\":true};\nwindow.__PRELOAD_STATE__ =',
+            'window.__PRELOADED_STATE__ = {"wrong":true};\nwindow.__PRELOAD_STATE__ =',
           )
           .replaceFirst(
             '"fhd_url": "https://www.xxxfollow.com/media/fans/post_public/1/2/2001_fhd.mp4"',

@@ -43,7 +43,7 @@ FriendlyError describeError(Object error, {String subject = 'videos'}) {
     final text = error.message.toLowerCase();
     if (text.contains('could not reach')) return offline;
     if (text.contains('configure')) {
-      return FriendlyError(
+      return const FriendlyError(
         title: 'Content unavailable',
         message: 'Check your content settings and try again.',
         icon: Icons.settings_outlined,

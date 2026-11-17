@@ -80,7 +80,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   static Future<void> _pendingDisposals = Future<void>.value();
 
   static const Duration _controlsTimeout = Duration(seconds: 4);
-  static const Duration _scrubCommitDelay = Duration(milliseconds: 350);
+  static const Duration _scrubCommitDelay = Duration(milliseconds: 140);
+  static const Duration _scrubTapCommitDelay = Duration(milliseconds: 70);
   static const Duration _initTimeout = Duration(seconds: 30);
 
   final ValueNotifier<Duration?> _scrubTarget = ValueNotifier<Duration?>(null);
@@ -1149,7 +1150,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     final value = controller.value;
     final base = _scrubTarget.value ?? value.position;
-    _scrubTo(base + Duration(seconds: seconds), reveal: badge);
+    _scrubTo(
+      base + Duration(seconds: seconds),
+      reveal: badge,
+      commitDelay: _scrubTapCommitDelay,
+    );
   }
 
   void _scrubToFraction(double fraction) {
@@ -1161,7 +1166,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     _scrubTo(total * fraction.clamp(0.0, 1.0));
   }
 
-  void _scrubTo(Duration wanted, {bool reveal = true}) {
+  void _scrubTo(
+    Duration wanted, {
+    bool reveal = true,
+    Duration commitDelay = _scrubCommitDelay,
+  }) {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized || _isLeaving) {
       return;
@@ -1178,7 +1187,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (reveal) _revealControls();
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
-    _scrubTimer = Timer(_scrubCommitDelay, _commitScrub);
+    _scrubTimer = Timer(commitDelay, _commitScrub);
   }
 
   Future<void> _commitScrub() async {
@@ -1271,12 +1280,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       context: context,
       backgroundColor: OnDark.surface,
       isScrollControlled: true,
+      useSafeArea: true,
       constraints: const BoxConstraints(maxWidth: 520),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        // Scrollable so every speed stays reachable in landscape, where the
+        // sheet has very little height.
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2078,15 +2091,22 @@ class _ProgressRow extends StatelessWidget {
                       final width = constraints.maxWidth;
                       double fractionAt(double dx) =>
                           width <= 0 ? 0 : (dx / width).clamp(0.0, 1.0);
-                      return GestureDetector(
+                      // Pointer events respond on first touch (no drag-slop wait);
+                      // the inner detector just claims the gesture.
+                      return Listener(
                         behavior: HitTestBehavior.opaque,
-                        onTapDown: (d) =>
-                            onSeekFraction(fractionAt(d.localPosition.dx)),
-                        onHorizontalDragStart: (_) => onDragStart(),
-                        onHorizontalDragUpdate: (d) =>
-                            onSeekFraction(fractionAt(d.localPosition.dx)),
-                        onHorizontalDragEnd: (_) => onDragEnd(),
-                        onHorizontalDragCancel: onDragEnd,
+                        onPointerDown: (e) {
+                          onDragStart();
+                          onSeekFraction(fractionAt(e.localPosition.dx));
+                        },
+                        onPointerMove: (e) =>
+                            onSeekFraction(fractionAt(e.localPosition.dx)),
+                        onPointerUp: (_) => onDragEnd(),
+                        onPointerCancel: (_) => onDragEnd(),
+                        child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragStart: (_) {},
+                        onHorizontalDragUpdate: (_) {},
                         child: Stack(
                           alignment: Alignment.centerLeft,
                           clipBehavior: Clip.none,
@@ -2138,6 +2158,7 @@ class _ProgressRow extends StatelessWidget {
                               ),
                             ),
                           ],
+                        ),
                         ),
                       );
                     },

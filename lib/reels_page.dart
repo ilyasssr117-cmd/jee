@@ -16,7 +16,6 @@ import 'package:flutter/cupertino.dart'
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -3386,6 +3385,30 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
   double _fracAt(double dx, double width) =>
       width <= 0 ? 0 : (dx / width).clamp(0.0, 1.0).toDouble();
 
+  int? _pointer;
+  bool _seekBusy = false;
+  DateTime _lastLiveSeek = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Seek while the finger moves (throttled and never overlapping) so the
+  // picture follows the thumb instead of jumping only when it is released.
+  void _liveSeek(double fraction) {
+    if (_seekBusy) return;
+    final now = DateTime.now();
+    if (now.difference(_lastLiveSeek) < const Duration(milliseconds: 80)) {
+      return;
+    }
+    final ms = _c.value.duration.inMilliseconds;
+    if (ms <= 0) return;
+    _lastLiveSeek = now;
+    _seekBusy = true;
+    unawaited(
+      _c
+          .seekTo(Duration(milliseconds: (ms * fraction).round()))
+          .catchError((_) {})
+          .whenComplete(() => _seekBusy = false),
+    );
+  }
+
   void _start(double dx, double width) {
     _wasPlaying = _c.value.isPlaying;
     unawaited(_c.pause());
@@ -3399,7 +3422,9 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
   }
 
   void _update(double dx, double width) {
-    setState(() => _frac = _fracAt(dx, width));
+    final fraction = _fracAt(dx, width);
+    setState(() => _frac = fraction);
+    _liveSeek(fraction);
   }
 
   Future<void> _seekToFraction(double fraction, {bool resume = false}) async {
@@ -3428,18 +3453,36 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
     return LayoutBuilder(
       builder: (context, box) {
         final width = box.maxWidth;
-        return GestureDetector(
+        // Raw pointer events react on the very first touch (no waiting for the
+        // drag slop), which makes the bar feel instant. The inner detector only
+        // claims the gesture so the pager / other swipes stay out of the way.
+        return Listener(
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: (d) => _start(d.localPosition.dx, width),
-          onHorizontalDragUpdate: (d) => _update(d.localPosition.dx, width),
-          onHorizontalDragEnd: (_) => _end(),
-          onHorizontalDragCancel: _end,
-          onTapUp: (d) {
-            final fraction = _fracAt(d.localPosition.dx, width);
-            setState(() => _frac = fraction);
-            _showTimesBriefly();
-            unawaited(_seekToFraction(fraction));
+          onPointerDown: (e) {
+            if (_pointer != null) return;
+            _pointer = e.pointer;
+            _start(e.localPosition.dx, width);
+            _liveSeek(_frac);
           },
+          onPointerMove: (e) {
+            if (e.pointer != _pointer) return;
+            _update(e.localPosition.dx, width);
+          },
+          onPointerUp: (e) {
+            if (e.pointer != _pointer) return;
+            _pointer = null;
+            _update(e.localPosition.dx, width);
+            _end();
+          },
+          onPointerCancel: (e) {
+            if (e.pointer != _pointer) return;
+            _pointer = null;
+            _end();
+          },
+          child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (_) {},
+          onHorizontalDragUpdate: (_) {},
           child: SizedBox(
             height: 44,
             child: ValueListenableBuilder<VideoPlayerValue>(
@@ -3551,6 +3594,7 @@ class _ReelProgressBarState extends State<_ReelProgressBar> {
                 );
               },
             ),
+          ),
           ),
         );
       },

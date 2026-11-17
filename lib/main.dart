@@ -19,6 +19,7 @@ import 'local_store.dart';
 import 'offline_listing_cache.dart';
 import 'offline_album_cache.dart';
 import 'widget_sync.dart';
+import 'widgets/app_intro.dart';
 import 'widgets/mini_player_overlay.dart';
 import 'native_bridge.dart';
 import 'platform_ui.dart';
@@ -149,6 +150,7 @@ class VXTUBEFinalApp extends StatefulWidget {
 class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late Brightness _brightness = _resolve();
+  bool _showIntro = true; // launch intro, shown once per app start
 
   final GlobalKey _boundaryKey = GlobalKey();
   ui.Image? _snapshot;
@@ -333,6 +335,14 @@ class _VXTUBEFinalAppState extends State<VXTUBEFinalApp>
                       CurvedAnimation(parent: _fade, curve: Curves.easeInOut),
                     ),
                     child: RawImage(image: snapshot, fit: BoxFit.fill),
+                  ),
+                ),
+              if (_showIntro)
+                Positioned.fill(
+                  child: AppIntro(
+                    onFinished: () {
+                      if (mounted) setState(() => _showIntro = false);
+                    },
                   ),
                 ),
             ],

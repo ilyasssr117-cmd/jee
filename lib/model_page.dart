@@ -65,7 +65,6 @@ class _ModelPageState extends State<ModelPage> {
   ModelPageResult? _firstVideoPage;
   List<AlbumRef>? _firstAlbumPage;
   bool _summaryStarted = false;
-  bool _summaryFinished = false;
   int _nextPage = 1;
   bool _loading = true;
   bool _videosFinishedLoading = false;
@@ -433,11 +432,9 @@ class _ModelPageState extends State<ModelPage> {
         _totalVideoCount = summary.videoCount;
         _totalAlbumCount = summary.albumCount;
         _totalPhotoCount = summary.photoCount;
-        _summaryFinished = true;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _summaryFinished = true);
+      // Totals simply stay unknown; nothing to update.
     }
   }
 

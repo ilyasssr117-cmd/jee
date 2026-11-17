@@ -370,9 +370,8 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
       constraints: BoxConstraints(
         minHeight: _headerHeight(MediaQuery.sizeOf(context)),
       ),
-      // Edge-to-edge: no rounded corners (they showed the page background at the
-      // top corners and cut the header off abruptly at the bottom).
-      child: ClipRect(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(windowsDesktop ? 0 : 28),
         child: Stack(
           alignment: Alignment.bottomLeft,
           children: [
@@ -456,27 +455,6 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                         ),
                       ),
                     ),
-                    // Dissolve the bottom of the header into the page so the
-                    // screen reads as one continuous surface.
-                    if (!windowsDesktop)
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        height: 44,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                AppColors.background.withValues(alpha: 0),
-                                AppColors.background,
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -486,7 +464,7 @@ class _VideoDetailsPageState extends State<VideoDetailsPage> {
                 margin,
                 context.safe.top + Gaps.sm + kMinTapSize + Gaps.md,
                 margin,
-                Gaps.lg + (windowsDesktop ? 0 : 30),
+                Gaps.lg,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -978,10 +956,26 @@ class _DetailsHeroStretch extends StatelessWidget {
             ? (-controller.position.pixels).clamp(0.0, 120.0).toDouble()
             : 0.0;
         final scale = 1.0 + pulled / 2400.0;
-        return Transform.scale(
-          scale: scale,
-          alignment: Alignment.bottomCenter,
-          child: child,
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // While pulling to refresh, fill the gap above the header with the
+            // header's own dark tone so the spinner never floats half on the
+            // artwork and half on the light page.
+            if (pulled > 0)
+              const Positioned(
+                left: 0,
+                right: 0,
+                top: -400,
+                height: 440,
+                child: ColoredBox(color: Color(0xFF0C1020)),
+              ),
+            Transform.scale(
+              scale: scale,
+              alignment: Alignment.bottomCenter,
+              child: child,
+            ),
+          ],
         );
       },
     );

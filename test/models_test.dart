@@ -1,0 +1,569 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:vxtube_final/models.dart';
+import 'package:vxtube_final/scraper.dart';
+
+const _card = '''
+<div class="thumbs__list">
+  <div class="item thumb">
+    <a href="/video/%ID%/" title="Video %ID%"><img data-src="/i/%ID%.jpg" alt="Video %ID%"></a>
+    <ul><li>10:00</li></ul>
+  </div>
+</div>
+''';
+
+String _listing(List<String> ids) =>
+    '<html><body>${ids.map((id) => _card.replaceAll('%ID%', id)).join()}</body></html>';
+
+String _person({String? image}) =>
+    '''
+<html><head>
+<script type="application/ld+json">
+{ "@context": "https://schema.org", "@type": "Person", "name": "Playwithanny",
+  "url": "https://x.example.test/models/playwithanny/"
+  ${image == null ? '' : ', "image": "$image"'} ,
+  "gender": "Male", "jobTitle": "Actor" }
+</script></head><body>%CARDS%</body></html>
+''';
+
+Scraper _scraper(MockClient client) => Scraper(
+  const ScraperConfig(baseUrl: 'https://x.example.test'),
+  client: client,
+);
+
+void main() {
+  test('a video page lists its models', () async {
+    final client = MockClient(
+      (request) async => http.Response('''
+      <html><body>
+        <div class="media-info__row media-models">
+          <div class="media-info__lists"><div class="media-info__lists-row">
+            <span class="media-info__label">Models:</span>
+            <div class="media-info__buttons">
+              <a class="btn" href="https://x.example.test/models/playwithanny/">Playwithanny</a>
+              <a class="btn" href="/models/second-one/">Second One</a>
+              <a class="btn" href="/models/playwithanny/">Playwithanny</a>
+              <a class="btn" href="/categories/tag/">Not a model</a>
+            </div>
+          </div></div>
+        </div>
+      </body></html>''', 200),
+    );
+    final scraper = _scraper(client);
+
+    final models = await scraper.videoModels(
+      const Video(
+        id: 'v',
+        title: 'v',
+        pageUrl: 'https://x.example.test/video/1/',
+      ),
+    );
+
+    expect(models.map((m) => m.name), <String>['Playwithanny', 'Second One']);
+    expect(models.first.url, 'https://x.example.test/models/playwithanny/');
+    expect(models.last.url, 'https://x.example.test/models/second-one/');
+    scraper.close();
+  });
+
+
+  test('fresh model lookup bypasses the cached video detail page', () async {
+    var requests = 0;
+    final client = MockClient((request) async {
+      requests++;
+      return http.Response('''
+        <html><body>
+          <div class="media-models">
+            <a href="/models/example-model/">Example Model</a>
+          </div>
+        </body></html>
+      ''', 200);
+    });
+    final scraper = _scraper(client);
+    const video = Video(
+      id: 'fresh-model-test',
+      title: 'Fresh model test',
+      pageUrl: 'https://x.example.test/video/fresh-model-test/',
+    );
+
+    await scraper.videoModels(video);
+    await scraper.videoModels(video);
+    expect(requests, 1, reason: 'the normal lookup should use the TTL cache');
+
+    await scraper.videoModels(video, fresh: true);
+    expect(requests, 2, reason: 'a fresh lookup must request the page again');
+    scraper.close();
+  });
+
+  test('a video page without models gives an empty list', () async {
+    final client = MockClient(
+      (request) async =>
+          http.Response('<html><body><h1>x</h1></body></html>', 200),
+    );
+    final scraper = _scraper(client);
+    expect(
+      await scraper.videoModels(
+        const Video(
+          id: 'v',
+          title: 'v',
+          pageUrl: 'https://x.example.test/video/1/',
+        ),
+      ),
+      isEmpty,
+    );
+    scraper.close();
+  });
+
+  test('first model page reads the photo and uses .../videos/', () async {
+    final requested = <Uri>[];
+    final client = MockClient((request) async {
+      requested.add(request.url);
+      return http.Response(
+        _person(image: 'https://x.example.test/contents/models/290/s1.jpg')
+            .replaceAll('%CARDS%', _card.replaceAll('%ID%', 'a')),
+        200,
+      );
+    });
+    final scraper = _scraper(client);
+    const model = ModelRef(
+      name: 'Playwithanny',
+      url: 'https://x.example.test/models/playwithanny/',
+    );
+
+    final page = await scraper.modelPage(model);
+
+    expect(
+      requested.single.toString(),
+      'https://x.example.test/models/playwithanny/videos/',
+    );
+    expect(page.profile?.name, 'Playwithanny');
+    expect(
+      page.profile?.imageUrl,
+      'https://x.example.test/contents/models/290/s1.jpg',
+    );
+    expect(page.videos.map((v) => v.id), hasLength(1));
+    scraper.close();
+  });
+
+  test('a model without a photo has no image', () async {
+    final client = MockClient(
+      (request) async =>
+          http.Response(_person().replaceAll('%CARDS%', ''), 200),
+    );
+    final scraper = _scraper(client);
+    final page = await scraper.modelPage(
+      const ModelRef(name: 'Anon', url: 'https://x.example.test/models/anon/'),
+    );
+    expect(page.profile?.imageUrl, isNull);
+    expect(page.profile?.name, 'Playwithanny');
+    scraper.close();
+  });
+
+  test('model profile reads its lazy thumbnail from the model directory', () async {
+    final requested = <String>[];
+    final client = MockClient((request) async {
+      requested.add(request.url.path);
+      if (request.url.path == '/models/playwithanny/videos/') {
+        return http.Response(_person().replaceAll('%CARDS%', ''), 200);
+      }
+      if (request.url.path == '/models/') {
+        return http.Response('''
+          <div class="item thumb thumb--models">
+            <a href="https://x.example.test/models/playwithanny/"
+               title="Playwithanny">
+              <div class="img-holder">
+                <img class="album lazyload"
+                  src="data:image/gif;base64,AAAA"
+                  data-src="https://storage4.example.test/contents/albums/preview/576x760/2000/2114/preview.jpg"
+                  data-webp="https://storage4.example.test/contents/albums/preview/576x760/2000/2114/preview.jpg"
+                  alt="Playwithanny" width="288" height="380" />
+              </div>
+            </a>
+          </div>''', 200);
+      }
+      return http.Response('not found', 404);
+    });
+    final scraper = _scraper(client);
+    const model = ModelRef(
+      name: 'Playwithanny',
+      url: 'https://x.example.test/models/playwithanny/',
+    );
+
+    final profile = await scraper.modelProfile(model);
+
+    expect(
+      profile.imageUrl,
+      'https://storage4.example.test/contents/albums/preview/576x760/2000/2114/preview.jpg',
+    );
+    expect(requested, <String>[
+      '/models/playwithanny/videos/',
+      '/models/',
+    ]);
+    scraper.close();
+  });
+
+  test('later pages use /videos/2/ and past the last page is empty', () async {
+    final requested = <String>[];
+    final client = MockClient((request) async {
+      requested.add(request.url.path);
+      if (request.url.path.endsWith('/videos/2/')) {
+        return http.Response(_listing(<String>['b']), 200);
+      }
+      return http.Response('not found', 404);
+    });
+    final scraper = _scraper(client);
+    const model = ModelRef(name: 'M', url: 'https://x.example.test/models/m/');
+
+    final second = await scraper.modelPage(model, page: 2);
+    final third = await scraper.modelPage(model, page: 3);
+
+    expect(requested, <String>['/models/m/videos/2/', '/models/m/videos/3/']);
+    expect(second.videos, hasLength(1));
+    expect(second.profile, isNull);
+    expect(third.videos, isEmpty);
+    scraper.close();
+  });
+
+  test('a failing first page is an error, not an empty model', () async {
+    final client = MockClient(
+      (request) async => http.Response('not found', 404),
+    );
+    final scraper = _scraper(client);
+    await expectLater(
+      scraper.modelPage(
+        const ModelRef(name: 'M', url: 'https://x.example.test/models/m/'),
+      ),
+      throwsA(isA<ScraperException>()),
+    );
+    scraper.close();
+  });
+
+  test('albums page lists albums with their preview pictures', () async {
+    final requested = <String>[];
+    final client = MockClient((request) async {
+      requested.add(request.url.path);
+      return http.Response('''
+        <html><body><div class="thumbs__list">
+          <div class="item thumb thumb--albums">
+            <a href="https://x.example.test/albums/6078/grazi-pictures-9/" title="Goddess Grazi pictures 9">
+              <div class="img-holder">
+                <img class="lazyload" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                     data-src="https://storage4.example.test/contents/albums/preview/576x760/6000/6078/preview.jpg" alt="pictures 9">
+              </div>
+              <ul class="thumb__data"><li><i class="icon-photo-shape-8"></i>1 250</li></ul>
+            </a>
+          </div>
+          <div class="item thumb thumb--albums">
+            <a href="/albums/37/playwithanny-pictures/">
+              <div class="img-holder"><img data-src="/contents/albums/37.jpg" alt="Playwithanny pictures"></div>
+            </a>
+          </div>
+        </div></body></html>''', 200);
+    });
+    final scraper = _scraper(client);
+    const model = ModelRef(
+      name: 'Playwithanny',
+      url: 'https://x.example.test/models/playwithanny/',
+    );
+
+    final albums = await scraper.modelAlbums(model);
+
+    expect(requested.single, '/models/playwithanny/albums/');
+    expect(albums, hasLength(2));
+    expect(albums[0].title, 'Goddess Grazi pictures 9');
+    expect(albums[0].totalCount, 1250);
+    expect(
+      albums[0].url,
+      'https://x.example.test/albums/6078/grazi-pictures-9/',
+    );
+    expect(
+      albums[0].thumbnailUrl,
+      'https://storage4.example.test/contents/albums/preview/576x760/6000/6078/preview.jpg',
+    );
+    expect(albums[1].title, 'Playwithanny pictures');
+    expect(
+      albums[1].thumbnailUrl,
+      'https://x.example.test/contents/albums/37.jpg',
+    );
+    scraper.close();
+  });
+
+  test('album covers read lazy image attributes and the largest srcset item', () async {
+    final client = MockClient(
+      (_) async => http.Response('''
+        <div class="thumb--albums"><a href="/albums/1/first/" title="First">
+          <img src="data:image/gif;base64,AAAA" data-lazy-src="//cdn.test/first.jpg">
+        </a></div>
+        <div class="thumb--albums"><a href="/albums/2/second/" title="Second">
+          <img srcset="/small.jpg 320w, /large.jpg 960w" src="/tiny.jpg">
+        </a></div>
+      ''', 200),
+    );
+    final scraper = _scraper(client);
+
+    final albums = await scraper.modelAlbums(
+      const ModelRef(name: 'Model', url: 'https://x.example.test/models/m/'),
+    );
+
+    expect(albums[0].thumbnailUrl, 'https://cdn.test/first.jpg');
+    expect(albums[1].thumbnailUrl, 'https://x.example.test/large.jpg');
+    scraper.close();
+  });
+
+  test(
+    'site-wide albums come from /albums/ and later pages from /albums/N/',
+    () async {
+      final requested = <String>[];
+      final client = MockClient((request) async {
+        requested.add(request.url.path);
+        if (request.url.path == '/albums/3/') return http.Response('nope', 404);
+        return http.Response('''
+        <html><body><div class="thumbs__list">
+          <div class="item thumb thumb--albums">
+            <a href="/albums/${request.url.path.length}/set/" title="Set">
+              <img data-src="/c/1.jpg" alt="Set">
+            </a>
+          </div>
+        </div></body></html>''', 200);
+      });
+      final scraper = _scraper(client);
+
+      expect(await scraper.allAlbums(), hasLength(1));
+      expect(await scraper.allAlbums(page: 2), hasLength(1));
+      expect(await scraper.allAlbums(page: 3), isEmpty);
+      expect(requested, <String>['/albums/', '/albums/2/', '/albums/3/']);
+      scraper.close();
+    },
+  );
+
+  test(
+    'a model without albums gives an empty list and later pages end',
+    () async {
+      final client = MockClient(
+        (request) async => request.url.path.endsWith('/albums/2/')
+            ? http.Response('nope', 404)
+            : http.Response('<html><body></body></html>', 200),
+      );
+      final scraper = _scraper(client);
+      const model = ModelRef(
+        name: 'M',
+        url: 'https://x.example.test/models/m/',
+      );
+      expect(await scraper.modelAlbums(model), isEmpty);
+      expect(await scraper.modelAlbums(model, page: 2), isEmpty);
+      scraper.close();
+    },
+  );
+
+  test('album first page reports the exact total without fetching all photos', () async {
+    final client = MockClient(
+      (_) async => http.Response('''
+        <ul><li><span class="media-data__list-title">Images:</span>
+          <strong class="media-data__list-value">1 247</strong></li></ul>
+        <a class="js-ajax-images2" data-from="1" data-total="13">Show More 1,247 Photos</a>
+        <div id="albumGallery">
+          <div class="item"><a class="grid-item" href="/sources/one.jpg">
+            <img src="/thumb-one.jpg"></a></div>
+          <div class="item"><a class="grid-item" href="/sources/two.jpg">
+            <img src="/thumb-two.jpg"></a></div>
+        </div>
+      ''', 200),
+    );
+    final scraper = _scraper(client);
+    const album = AlbumRef(
+      id: 'x.example.test/albums/37/set/',
+      title: 'Set',
+      url: 'https://x.example.test/albums/37/set/',
+    );
+
+    final page = await scraper.albumPhotosPage(album);
+
+    expect(page.totalCount, 1247);
+    expect(page.photos, hasLength(2));
+    scraper.close();
+  });
+
+  test('album photos: page, then load-more from=1, 2, 3 until nothing is left', () async {
+    final seen = <Uri>[];
+    final asyncHeaders = <Map<String, String>>[];
+    String tile(String hash, String file, String token, {String thumb = ''}) =>
+        '''
+      <div class="item"><a href="https://x.example.test/get_image/10/$hash/sources/0/37/$file/?i-acctoken=$token" class="grid-item">
+        <img src="${thumb.isEmpty ? 'https://storage4.example.test/contents/albums/main/200x150/0/37/$file' : thumb}"></a></div>''';
+    final client = MockClient((request) async {
+      seen.add(request.url);
+      final from = request.url.queryParameters['from'];
+      if (from == null) {
+        return http.Response('''
+          <div class="album-view photo-holder"><div class="grid" id="albumGallery">
+            ${tile('aaa', '29944.jpg', 'T1')}
+            <div class="item"><a href="https://x.example.test/get_image/10/bbb/sources/0/37/29945.jpg/?i-acctoken=T1" class="grid-item">
+              <img src="data:image/gif;base64,AAAA" data-webp="https://storage4.example.test/contents/albums/main/200x150/0/37/29945.jpg"></a></div>
+          </div></div>''', 200);
+      }
+      asyncHeaders.add(request.headers);
+      switch (from) {
+        case '1':
+          return http.Response(
+            '${tile('aaa', '29944.jpg', 'T2')}${tile('ccc', '29946.jpg', 'T2')}',
+            200,
+          );
+        case '2':
+          return http.Response(tile('ddd', '29947.jpg', 'T2'), 200);
+        default:
+          return http.Response('<div></div>', 200);
+      }
+    });
+    final scraper = _scraper(client);
+    const album = AlbumRef(
+      id: 'x.example.test/albums/37/playwithanny-pictures/',
+      title: 'Playwithanny pictures',
+      url: 'https://x.example.test/albums/37/playwithanny-pictures/',
+    );
+
+    final page = await scraper.albumPhotos(album);
+    final one = await scraper.albumPhotos(album, chunk: 1);
+    final two = await scraper.albumPhotos(album, chunk: 2);
+    final three = await scraper.albumPhotos(album, chunk: 3);
+
+    expect(page.map((p) => p.id), <String>['0/37/29944.jpg', '0/37/29945.jpg']);
+    expect(
+      page[1].thumbUrl,
+      'https://storage4.example.test/contents/albums/main/200x150/0/37/29945.jpg',
+    );
+    expect(one.map((p) => p.id), <String>['0/37/29944.jpg', '0/37/29946.jpg']);
+    expect(two.map((p) => p.id), <String>['0/37/29947.jpg']);
+    expect(three, isEmpty);
+
+    final first = seen[1].queryParameters;
+    expect(first['mode'], 'async');
+    expect(first['function'], 'get_block');
+    expect(first['block_id'], 'album_view_album_view');
+    expect(first['load'], 'more');
+    expect(first['from'], '1');
+    expect(seen.map((u) => u.queryParameters['from']), <String?>[
+      null,
+      '1',
+      '2',
+      '3',
+    ]);
+    expect(asyncHeaders.first['X-Requested-With'], 'XMLHttpRequest');
+    expect(asyncHeaders.first['Referer'], album.url);
+    scraper.close();
+  });
+
+  test(
+    'video search can be sorted with ?by=post_date and ?by=duration',
+    () async {
+      final requested = <Uri>[];
+      final client = MockClient((request) async {
+        requested.add(request.url);
+        return http.Response('<html><body></body></html>', 200);
+      });
+      final scraper = _scraper(client);
+
+      await scraper.search('Playwithanny', sortBy: 'post_date');
+      await scraper.search('Playwithanny', sortBy: 'duration', page: 2);
+      await scraper.search('Playwithanny');
+
+      expect(requested[0].path, '/search/Playwithanny/');
+      expect(requested[0].queryParameters, <String, String>{'by': 'post_date'});
+      expect(requested[1].path, '/search/Playwithanny/2/');
+      expect(requested[1].queryParameters, <String, String>{'by': 'duration'});
+      expect(requested[2].queryParameters, isEmpty);
+      scraper.close();
+    },
+  );
+
+  test(
+    'model photo: found in og:image or in broken JSON-LD, absent for some',
+    () async {
+      const model = ModelRef(
+        name: 'M',
+        url: 'https://x.example.test/models/m/',
+      );
+
+      Future<ModelProfile?> profileOf(String html) async {
+        final scraper = _scraper(
+          MockClient((r) async => http.Response(html, 200)),
+        );
+        final page = await scraper.modelPage(model);
+        scraper.close();
+        return page.profile;
+      }
+
+      expect(
+        (await profileOf(
+          '<html><head><meta property="og:image" content="/contents/m.jpg"></head></html>',
+        ))?.imageUrl,
+        'https://x.example.test/contents/m.jpg',
+      );
+      expect(
+        (await profileOf('''<html><head><script type="application/ld+json">
+        { "@type": "Person", "name": "M", "image": "https:\\/\\/x.example.test\\/contents\\/models\\/290\\/s1.jpg", }
+        </script></head></html>'''))?.imageUrl,
+        'https://x.example.test/contents/models/290/s1.jpg',
+      );
+      expect((await profileOf('<html><head></head></html>'))?.imageUrl, isNull);
+      expect(
+        (await profileOf(
+          '<html><head><meta property="og:image" content="https://x.example.test/static/images/logo.png"></head></html>',
+        ))?.imageUrl,
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'models & albums search finds the model by name and its albums',
+    () async {
+      final client = MockClient((request) async {
+        final path = request.url.path;
+        if (path == '/models/playwithanny/videos/') {
+          return http.Response(
+            _person(image: 'https://x.example.test/contents/models/290/s1.jpg')
+                .replaceAll('%CARDS%', ''),
+            200,
+          );
+        }
+        if (path == '/search/Playwithanny/') {
+          return http.Response('''
+          <html><body>
+            <a href="/models/other-model/">Other Model</a>
+            <div class="item thumb thumb--albums"><a href="/albums/9/loose-album/" title="Loose album">
+              <img data-src="/c/9.jpg"></a></div>
+          </body></html>''', 200);
+        }
+        if (path == '/models/playwithanny/albums/') {
+          return http.Response('''
+          <div class="item thumb thumb--albums"><a href="/albums/37/playwithanny-pictures/" title="Playwithanny pictures">
+            <img data-src="/c/37.jpg"></a></div>''', 200);
+        }
+        return http.Response('nope', 404);
+      });
+      final scraper = _scraper(client);
+
+      final result = await scraper.searchPeople('Playwithanny');
+
+      expect(result.models.map((m) => m.name), <String>[
+        'Playwithanny',
+        'Other Model',
+      ]);
+      expect(
+        result.models.first.imageUrl,
+        'https://x.example.test/contents/models/290/s1.jpg',
+      );
+      expect(
+        result.albums.map((a) => a.title),
+        containsAll(<String>['Loose album', 'Playwithanny pictures']),
+      );
+      expect(
+        result.albums
+            .firstWhere((a) => a.title == 'Playwithanny pictures')
+            .modelName,
+        'Playwithanny',
+      );
+      scraper.close();
+    },
+  );
+}

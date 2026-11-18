@@ -3,6 +3,8 @@ package com.tv.watch_tube
 import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
+import android.content.pm.ActivityInfo
+import android.os.Bundle
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
@@ -28,15 +30,22 @@ class MainActivity : FlutterActivity() {
     private var reelsRequestId = 0
     private var reelsResult: MethodChannel.Result? = null
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (isTelevisionDevice()) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, deviceChannelName)
             .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "isTelevision" -> result.success(isTelevisionDevice())
-                    else -> result.notImplemented()
-                }
+            when (call.method) {
+                "isTelevision" -> result.success(isTelevisionDevice())
+                else -> result.notImplemented()
             }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, reelsChannelName)
             .setMethodCallHandler { call, result ->
@@ -63,7 +72,12 @@ class MainActivity : FlutterActivity() {
             uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
         val leanbackFeature = packageManager.hasSystemFeature("android.software.leanback")
         val televisionFeature = packageManager.hasSystemFeature("android.hardware.type.television")
-        return televisionUiMode || leanbackFeature || televisionFeature
+        val hasTouchscreen = packageManager.hasSystemFeature("android.hardware.touchscreen")
+        val screenSize = resources.configuration.screenLayout and Configuration.SCREENLAYOUT_SIZE_MASK
+        val largeNonTouchDisplay = !hasTouchscreen &&
+            (screenSize == Configuration.SCREENLAYOUT_SIZE_LARGE ||
+                screenSize == Configuration.SCREENLAYOUT_SIZE_XLARGE)
+        return televisionUiMode || leanbackFeature || televisionFeature || largeNonTouchDisplay
     }
 
     private fun getReelsWebView(): WebView {

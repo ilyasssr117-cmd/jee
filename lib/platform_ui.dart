@@ -38,14 +38,18 @@ Future<bool> _readDeviceProfile() async {
 Future<void> applyBrowseOrientation() async {
   try {
     final tv = await initializeDeviceProfile();
-    await SystemChrome.setPreferredOrientations(
-      tv
-          ? const [
-              DeviceOrientation.landscapeLeft,
-              DeviceOrientation.landscapeRight,
-            ]
-          : const [DeviceOrientation.portraitUp],
-    );
+    if (tv) {
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      // Preserve the existing portrait-first mobile experience. Desktop and
+      // web builds should keep their window dimensions unchanged.
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+      ]);
+    }
     await SystemChrome.setEnabledSystemUIMode(
       tv ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
     );

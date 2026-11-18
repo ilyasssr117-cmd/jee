@@ -14,6 +14,7 @@ import 'download_store.dart';
 import 'error_text.dart';
 import 'local_store.dart';
 import 'offline_listing_cache.dart';
+import 'favorites_store.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
 import 'platform_ui.dart';
@@ -36,6 +37,8 @@ import 'widgets/settings_view.dart';
 import 'widgets/content_source_picker.dart';
 import 'widgets/state_views.dart';
 import 'widgets/video_grid.dart';
+import 'widgets/video_artwork.dart';
+import 'widgets/tv_controls.dart';
 import 'services/remote_config_service.dart';
 
 class _FastSectionPagePhysics extends PageScrollPhysics {
@@ -505,7 +508,11 @@ class _HomePageState extends State<HomePage>
     await Navigator.of(context).push<void>(
       adaptivePageRoute<void>(
         context,
-        builder: (_) => VideoDetailsPage(video: video, queue: queue),
+        builder: (_) => VideoDetailsPage(
+          video: video,
+          queue: queue,
+          onNavigate: _onTabSelect,
+        ),
       ),
     );
     if (!mounted) return;
@@ -802,6 +809,70 @@ class _HomePageState extends State<HomePage>
         final lightIcons = darkMode ||
             (_section == _Section.reels && !searchOpen) ||
             (_section == _Section.home && !searchOpen && _heroVisible);
+        if (isAndroidTv) {
+          final selectedTab = searchOpen
+              ? AppTab.search
+              : switch (_section) {
+                  _Section.home => AppTab.home,
+                  _Section.reels => AppTab.reels,
+                  _Section.library => AppTab.library,
+                  _Section.settings => AppTab.settings,
+                };
+          final selectedIndex = AppTab.values.indexOf(selectedTab);
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            value: SystemUiOverlayStyle.light,
+            child: PopScope(
+              canPop: !searchOpen && _section == _Section.home,
+              onPopInvokedWithResult: (didPop, _) {
+                if (!didPop) _handleBack();
+              },
+              child: Scaffold(
+                backgroundColor: const Color(0xFF080A0F),
+                body: Focus(
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent &&
+                        (event.logicalKey == LogicalKeyboardKey.escape ||
+                            event.logicalKey == LogicalKeyboardKey.browserBack)) {
+                      _handleBack();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: Row(
+                    children: <Widget>[
+                      TvNavigationRail(
+                        selected: selectedIndex,
+                        isEnabled: (index) => _isTabEnabled(AppTab.values[index]),
+                        onSelect: (index) => _onTabSelect(AppTab.values[index]),
+                      ),
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: <Widget>[
+                            IgnorePointer(ignoring: searchOpen, child: content),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              child: searchOpen
+                                  ? SearchOverlay(
+                                      key: const ValueKey<String>('tv-search'),
+                                      bottomInset: 0,
+                                      onClose: _closeSearch,
+                                      onOpen: _openDetails,
+                                    )
+                                  : const SizedBox.shrink(
+                                      key: ValueKey<String>('tv-no-search'),
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: lightIcons
               ? SystemUiOverlayStyle.light
@@ -894,6 +965,7 @@ class _HomePageState extends State<HomePage>
     bool firstLoad,
     Duration? resume,
   ) {
+    if (isAndroidTv) return _buildTvHome(featured, firstLoad, resume);
     return RefreshIndicator(
       onRefresh: _refresh,
       color: AppColors.accent,
@@ -939,6 +1011,273 @@ class _HomePageState extends State<HomePage>
           ),
           ..._contentSlivers(margin),
           SliverToBoxAdapter(child: SizedBox(height: Gaps.xl + bottomInset)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTvHome(
+    Video? featured,
+    bool firstLoad,
+    Duration? resume,
+  ) {
+    final latest = _videos;
+    final subtitle = featured == null
+        ? ''
+        : <String>[
+            if (featured.duration.isNotEmpty) featured.duration,
+            if (featured.views.isNotEmpty) '${featured.views} views',
+            if (featured.date.isNotEmpty) featured.date,
+          ].join('   •   ');
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF080A0F),
+      body: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (featured != null)
+            Positioned.fill(
+              child: VideoArtwork(
+                video: featured,
+                fit: BoxFit.cover,
+                showLabel: false,
+              ),
+            )
+          else
+            const Positioned.fill(child: ColoredBox(color: Color(0xFF101522))),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: <Color>[
+                    const Color(0xFF080A0F).withValues(alpha: 0.99),
+                    const Color(0xFF080A0F).withValues(alpha: 0.88),
+                    const Color(0xFF080A0F).withValues(alpha: 0.42),
+                    const Color(0xFF080A0F).withValues(alpha: 0.22),
+                  ],
+                  stops: const <double>[0, 0.45, 0.76, 1],
+                ),
+              ),
+            ),
+          ),
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: <Color>[Color(0xFF080A0F), Colors.transparent],
+                  stops: <double>[0, 0.48],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(44, 28, 34, 22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    const Text.rich(
+                      TextSpan(children: <InlineSpan>[
+                        TextSpan(text: 'VX', style: TextStyle(color: Colors.white)),
+                        TextSpan(text: 'TUBE', style: TextStyle(color: Color(0xFF70A8FF))),
+                      ]),
+                      style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -1),
+                    ),
+                    const Spacer(),
+                    Text(
+                      videoRepository.source.label.toUpperCase(),
+                      style: const TextStyle(
+                        color: Color(0xFFB8C0D0),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          if (featured != null) ...<Widget>[
+                            const Text(
+                              'FEATURED VIDEO',
+                              style: TextStyle(
+                                color: Color(0xFF8BB8FF),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              featured.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 42,
+                                height: 1.08,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -1.2,
+                              ),
+                            ),
+                            if (subtitle.isNotEmpty) ...<Widget>[
+                              const SizedBox(height: 15),
+                              Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFFD1D6E0),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 15),
+                            Text(
+                              featured.description.isNotEmpty
+                                  ? featured.description
+                                  : 'Explore the latest videos on VXTUBE.',
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Color(0xFFCFD3DD),
+                                fontSize: 17,
+                                height: 1.45,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            Wrap(
+                              spacing: 14,
+                              runSpacing: 12,
+                              children: <Widget>[
+                                TvFocusSurface(
+                                  autofocus: true,
+                                  onPressed: _playFeatured,
+                                  backgroundColor: const Color(0xFF174B9A),
+                                  focusedColor: const Color(0xFF2566C7),
+                                  minWidth: 190,
+                                  minHeight: 58,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        _playingFeatured ? 'Starting…' : (resume != null ? 'Resume' : 'Play'),
+                                        style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                TvFocusSurface(
+                                  onPressed: () => _openDetails(featured, List<Video>.of(_videos)),
+                                  minWidth: 190,
+                                  minHeight: 58,
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      Icon(Icons.info_outline_rounded, color: Colors.white, size: 24),
+                                      SizedBox(width: 10),
+                                      Text('More details', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ] else if (firstLoad) ...<Widget>[
+                            const CircularProgressIndicator(color: Color(0xFF70A8FF)),
+                            const SizedBox(height: 18),
+                            const Text('Loading videos…', style: TextStyle(color: Colors.white, fontSize: 19)),
+                          ] else ...<Widget>[
+                            const Text('No videos available', style: TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 12),
+                            const Text('Check your connection or try again.', style: TextStyle(color: Color(0xFFCFD3DD), fontSize: 17)),
+                            const SizedBox(height: 18),
+                            TvFocusSurface(
+                              autofocus: true,
+                              onPressed: () => _loadPage(reset: true),
+                              child: const Text('Retry', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: <Widget>[
+                    const Text(
+                      'Latest videos',
+                      style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '${latest.length} videos',
+                      style: const TextStyle(color: Color(0xFF9CA5B6), fontSize: 13),
+                    ),
+                    const Spacer(),
+                    if (_loading)
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF82AEFF)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 190,
+                  child: latest.isEmpty
+                      ? const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Your videos will appear here.', style: TextStyle(color: Color(0xFF9CA5B6), fontSize: 15)),
+                        )
+                      : NotificationListener<ScrollNotification>(
+                          onNotification: (notification) {
+                            if (notification.metrics.extentAfter < 300 && _hasMore && !_loading) {
+                              unawaited(_loadPage());
+                            }
+                            return false;
+                          },
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            clipBehavior: Clip.none,
+                            itemCount: latest.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 14),
+                            itemBuilder: (context, index) => TvVideoCard(
+                              video: latest[index],
+                              autofocus: featured == null && index == 0,
+                              width: 226,
+                              onPressed: () => _openDetails(latest[index], List<Video>.of(_videos)),
+                              onBookmark: RemoteConfigService.instance.isFeatureEnabled('favorites')
+                                  ? () {
+                                      final added = FavoritesStore.instance.toggle(latest[index]);
+                                      _toast(added ? 'Added to Watchlist' : 'Removed from Watchlist');
+                                    }
+                                  : null,
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

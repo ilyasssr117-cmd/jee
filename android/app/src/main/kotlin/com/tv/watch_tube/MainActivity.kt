@@ -1,5 +1,8 @@
 package com.tv.watch_tube
 
+import android.app.UiModeManager
+import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +21,7 @@ import org.json.JSONTokener
 
 class MainActivity : FlutterActivity() {
     private val reelsChannelName = "com.tv.watch_tube/reels_browser"
+    private val deviceChannelName = "com.tv.watch_tube/device"
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var reelsWebView: WebView? = null
@@ -26,6 +30,14 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, deviceChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isTelevision" -> result.success(isTelevisionDevice())
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, reelsChannelName)
             .setMethodCallHandler { call, result ->
                 if (call.method != "fetchReels") {
@@ -43,6 +55,15 @@ class MainActivity : FlutterActivity() {
                 val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
                 runOnUiThread { loadReels(url, headers, result) }
             }
+    }
+
+    private fun isTelevisionDevice(): Boolean {
+        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        val televisionUiMode =
+            uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        val leanbackFeature = packageManager.hasSystemFeature("android.software.leanback")
+        val televisionFeature = packageManager.hasSystemFeature("android.hardware.type.television")
+        return televisionUiMode || leanbackFeature || televisionFeature
     }
 
     private fun getReelsWebView(): WebView {

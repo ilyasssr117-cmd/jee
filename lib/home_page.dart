@@ -16,6 +16,7 @@ import 'local_store.dart';
 import 'offline_listing_cache.dart';
 import 'models.dart';
 import 'playback_launcher.dart';
+import 'platform_ui.dart';
 import 'playback_progress.dart';
 import 'reel_favorites.dart';
 import 'reels_page.dart';
@@ -760,9 +761,11 @@ class _HomePageState extends State<HomePage>
     };
 
     final sections = _availableSections;
-    final sectionPhysics = defaultTargetPlatform == TargetPlatform.iOS
-        ? const _FastSectionPagePhysics(parent: BouncingScrollPhysics())
-        : const _FastSectionPagePhysics(parent: ClampingScrollPhysics());
+    final sectionPhysics = isAndroidTv
+        ? const NeverScrollableScrollPhysics()
+        : defaultTargetPlatform == TargetPlatform.iOS
+            ? const _FastSectionPagePhysics(parent: BouncingScrollPhysics())
+            : const _FastSectionPagePhysics(parent: ClampingScrollPhysics());
     final content = RepaintBoundary(
       child: NotificationListener<ScrollNotification>(
         onNotification: _onSectionScrollNotification,

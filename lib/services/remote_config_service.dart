@@ -242,7 +242,10 @@ class RemoteConfigService extends ChangeNotifier {
       unawaited(_persistConfig(validated));
       unawaited(_persistRestriction(restricted));
     } on TimeoutException {
-    } catch (_) {}
+      // Retain the last known configuration when the server times out.
+    } catch (_) {
+      // Remote configuration is optional; keep the last known good state.
+    }
   }
 
   Future<void> _persistConfig(RemoteAppConfig config) async {

@@ -387,7 +387,7 @@ class Scraper {
       throw const ScraperException('The source redirected too many times.');
     } on ScraperException {
       rethrow;
-    } on Exception catch (error) {
+    } on Exception {
       throw const ScraperException(
         'Could not reach the video source.',
         retryable: true,
@@ -1253,6 +1253,7 @@ class Scraper {
         return ModelProfile(name: profile.name, imageUrl: image);
       }
     } on ScraperException {
+      // Profile metadata is optional; keep the basic profile on lookup failure.
     }
     return profile;
   }
@@ -1290,6 +1291,7 @@ class Scraper {
               ),
             );
           } on ScraperException {
+            // One failed slug should not prevent other model candidates loading.
           }
         }(),
     ]);

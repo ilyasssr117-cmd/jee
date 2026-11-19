@@ -1,12 +1,10 @@
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../app_theme.dart';
 import '../content_source.dart';
 import '../touch.dart';
-import '../platform_ui.dart';
 
 Future<ContentSource?> showContentSourcePicker(
   BuildContext context, {
@@ -84,32 +82,22 @@ class _ContentSourcePickerDialogState
 
   @override
   Widget build(BuildContext context) {
-    final tv = isAndroidTv;
     return PopScope(
       canPop: !widget.requiredChoice,
       child: Dialog(
         backgroundColor: AppColors.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 20,
-        insetPadding: EdgeInsets.symmetric(
-          horizontal: tv ? 72 : 28,
-          vertical: tv ? 42 : 20,
-        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(tv ? 30 : 24),
+          borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: AppColors.outline),
         ),
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: tv ? 560 : 332),
+          constraints: const BoxConstraints(maxWidth: 332),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              tv ? 32 : 18,
-              tv ? 30 : 19,
-              tv ? 32 : 18,
-              tv ? 28 : 16,
-            ),
-            child: FocusTraversalGroup(
-              child: Column(
+            padding: const EdgeInsets.fromLTRB(18, 19, 18, 16),
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -125,7 +113,7 @@ class _ContentSourcePickerDialogState
                       child: Icon(
                         Icons.explore_outlined,
                         color: AppColors.accentForeground,
-                        size: tv ? 24 : 19,
+                        size: 19,
                       ),
                     ),
                     const SizedBox(width: 11),
@@ -135,7 +123,7 @@ class _ContentSourcePickerDialogState
                             ? 'Choose your content'
                             : 'Content source',
                         style: AppText.headline.copyWith(
-                          fontSize: tv ? 27 : 18,
+                          fontSize: 18,
                           letterSpacing: -0.35,
                         ),
                       ),
@@ -150,27 +138,25 @@ class _ContentSourcePickerDialogState
                         ? 'Select an option to start browsing.'
                         : 'Choose which catalogue you want to browse.',
                     style: AppText.caption.copyWith(
-                      fontSize: tv ? 16 : 12,
+                      fontSize: 12,
                       height: 1.35,
                     ),
                   ),
                 ),
-                SizedBox(height: tv ? 24 : 17),
+                const SizedBox(height: 17),
                 for (final source in ContentSource.values) ...[
                   _SourceOption(
                     source: source,
                     selected: source == _selected,
-                    tvMode: tv,
-                    autofocus: tv && source == _selected,
                     onTap: () {
                       Haptics.play(Haptic.selection);
                       setState(() => _selected = source);
                     },
                   ),
                   if (source != ContentSource.values.last)
-                    SizedBox(height: tv ? 12 : 8),
+                    const SizedBox(height: 8),
                 ],
-                SizedBox(height: tv ? 24 : 17),
+                const SizedBox(height: 17),
                 Row(
                   children: [
                     if (!widget.requiredChoice) ...[
@@ -191,13 +177,13 @@ class _ContentSourcePickerDialogState
                         backgroundColor: AppColors.accentStrong,
                         foregroundColor: Colors.white,
                         elevation: 0,
-                        minimumSize: Size(tv ? 164 : 104, tv ? 56 : 40),
+                        minimumSize: const Size(104, 40),
                         padding: const EdgeInsets.symmetric(horizontal: 18),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(13),
                         ),
-                        textStyle: TextStyle(
-                          fontSize: tv ? 17 : 13,
+                        textStyle: const TextStyle(
+                          fontSize: 13,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -210,61 +196,26 @@ class _ContentSourcePickerDialogState
                   ],
                 ),
               ],
-                ),
-              ),
             ),
           ),
         ),
+      ),
     );
   }
 }
 
-class _SourceOption extends StatefulWidget {
+class _SourceOption extends StatelessWidget {
   const _SourceOption({
     required this.source,
     required this.selected,
     required this.onTap,
-    required this.tvMode,
-    required this.autofocus,
   });
 
   final ContentSource source;
   final bool selected;
   final VoidCallback onTap;
-  final bool tvMode;
-  final bool autofocus;
 
-  @override
-  State<_SourceOption> createState() => _SourceOptionState();
-}
-
-class _SourceOptionState extends State<_SourceOption> {
-  final FocusNode _focusNode = FocusNode(debugLabel: 'Content source option');
-  bool _focused = false;
-
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    final key = event.logicalKey;
-    final isSelect = key == LogicalKeyboardKey.select ||
-        key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter ||
-        key == LogicalKeyboardKey.gameButtonA;
-    if (isSelect && event is KeyDownEvent) {
-      widget.onTap();
-      return KeyEventResult.handled;
-    }
-    if (isSelect && (event is KeyUpEvent || event is KeyRepeatEvent)) {
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  IconData get _icon => switch (widget.source) {
+  IconData get _icon => switch (source) {
         ContentSource.fetish => Icons.favorite_border_rounded,
         ContentSource.straight => Icons.play_circle_outline_rounded,
         ContentSource.trans => Icons.people_outline_rounded,
@@ -272,92 +223,69 @@ class _SourceOptionState extends State<_SourceOption> {
 
   @override
   Widget build(BuildContext context) {
-    final selected = widget.selected;
-    final source = widget.source;
-    final tv = widget.tvMode;
-    final borderColor = _focused || selected
-        ? AppColors.accentStrong
-        : AppColors.outline;
+    final borderColor = selected ? AppColors.accentStrong : AppColors.outline;
 
-    return Focus(
-      focusNode: _focusNode,
-      autofocus: widget.autofocus,
-      onFocusChange: (focused) {
-        if (mounted) setState(() => _focused = focused);
-      },
-      onKeyEvent: _onKey,
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: source.label,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          decoration: BoxDecoration(
-            color: selected
-                ? AppColors.accent.withValues(alpha: 0.09)
-                : AppColors.surfaceHigh.withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(tv ? 18 : 15),
-            border: Border.all(
-              color: borderColor,
-              width: _focused ? 2.5 : (selected ? 1.35 : 0.8),
-            ),
-            boxShadow: _focused
-                ? [
-                    BoxShadow(
-                      color: AppColors.accentStrong.withValues(alpha: 0.22),
-                      blurRadius: 18,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: source.label,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accent.withValues(alpha: 0.09)
+              : AppColors.surfaceHigh.withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(
+            color: borderColor,
+            width: selected ? 1.35 : 0.8,
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              canRequestFocus: false,
-              borderRadius: BorderRadius.circular(tv ? 18 : 15),
-              onTap: widget.onTap,
-              child: SizedBox(
-                height: tv ? 68 : 52,
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: tv ? 20 : 12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _icon,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(15),
+            onTap: onTap,
+            child: SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Icon(
+                      _icon,
+                      color: selected
+                          ? AppColors.accentForeground
+                          : AppColors.textTertiary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        source.label,
+                        style: AppText.title.copyWith(
+                          fontSize: 14,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 140),
+                      child: Icon(
+                        selected
+                            ? Icons.check_circle_rounded
+                            : Icons.circle_outlined,
+                        key: ValueKey<bool>(selected),
                         color: selected
                             ? AppColors.accentForeground
-                            : AppColors.textTertiary,
-                        size: tv ? 26 : 20,
+                            : AppColors.textTertiary.withValues(alpha: 0.7),
+                        size: 19,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          source.label,
-                          style: AppText.title.copyWith(
-                            fontSize: tv ? 19 : 14,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 140),
-                        child: Icon(
-                          selected
-                              ? Icons.check_circle_rounded
-                              : Icons.circle_outlined,
-                          key: ValueKey<bool>(selected),
-                          color: selected
-                              ? AppColors.accentForeground
-                              : AppColors.textTertiary.withValues(alpha: 0.7),
-                          size: tv ? 24 : 19,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

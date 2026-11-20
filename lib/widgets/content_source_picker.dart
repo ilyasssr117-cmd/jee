@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_theme.dart';
 import '../content_source.dart';
@@ -10,6 +11,7 @@ Future<ContentSource?> showContentSourcePicker(
   BuildContext context, {
   required ContentSource initialSource,
   bool requiredChoice = false,
+  bool tvMode = false,
 }) {
   return showGeneralDialog<ContentSource>(
     context: context,
@@ -40,6 +42,7 @@ Future<ContentSource?> showContentSourcePicker(
             child: _ContentSourcePickerDialog(
               initialSource: initialSource,
               requiredChoice: requiredChoice,
+              tvMode: tvMode,
             ),
           ),
         ),
@@ -66,10 +69,12 @@ class _ContentSourcePickerDialog extends StatefulWidget {
   const _ContentSourcePickerDialog({
     required this.initialSource,
     required this.requiredChoice,
+    required this.tvMode,
   });
 
   final ContentSource initialSource;
   final bool requiredChoice;
+  final bool tvMode;
 
   @override
   State<_ContentSourcePickerDialog> createState() =>
@@ -79,9 +84,19 @@ class _ContentSourcePickerDialog extends StatefulWidget {
 class _ContentSourcePickerDialogState
     extends State<_ContentSourcePickerDialog> {
   late ContentSource _selected = widget.initialSource;
+  final FocusNode _cancelFocusNode = FocusNode(debugLabel: 'Cancel source');
+  final FocusNode _saveFocusNode = FocusNode(debugLabel: 'Save source');
+
+  @override
+  void dispose() {
+    _cancelFocusNode.dispose();
+    _saveFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final tvLayout = widget.tvMode || MediaQuery.sizeOf(context).width >= 900;
     return PopScope(
       canPop: !widget.requiredChoice,
       child: Dialog(
@@ -94,9 +109,15 @@ class _ContentSourcePickerDialogState
           side: BorderSide(color: AppColors.outline),
         ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 332),
+          constraints: BoxConstraints(
+            maxWidth: tvLayout ? 560 : 332,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+          ),
+          child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 19, 18, 16),
+            padding: tvLayout
+                ? const EdgeInsets.fromLTRB(26, 24, 26, 22)
+                : const EdgeInsets.fromLTRB(18, 19, 18, 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -123,7 +144,7 @@ class _ContentSourcePickerDialogState
                             ? 'Choose your content'
                             : 'Content source',
                         style: AppText.headline.copyWith(
-                          fontSize: 18,
+                          fontSize: tvLayout ? 24 : 18,
                           letterSpacing: -0.35,
                         ),
                       ),
@@ -138,7 +159,7 @@ class _ContentSourcePickerDialogState
                         ? 'Select an option to start browsing.'
                         : 'Choose which catalogue you want to browse.',
                     style: AppText.caption.copyWith(
-                      fontSize: 12,
+                      fontSize: tvLayout ? 16 : 12,
                       height: 1.35,
                     ),
                   ),
@@ -148,19 +169,24 @@ class _ContentSourcePickerDialogState
                   _SourceOption(
                     source: source,
                     selected: source == _selected,
+                    tvLayout: tvLayout,
+                    onDownFromLast: source == ContentSource.values.last
+                        ? () => _saveFocusNode.requestFocus()
+                        : null,
                     onTap: () {
                       Haptics.play(Haptic.selection);
                       setState(() => _selected = source);
                     },
                   ),
                   if (source != ContentSource.values.last)
-                    const SizedBox(height: 8),
+                    SizedBox(height: tvLayout ? 12 : 8),
                 ],
                 const SizedBox(height: 17),
                 Row(
                   children: [
                     if (!widget.requiredChoice) ...[
                       TextButton(
+                        focusNode: _cancelFocusNode,
                         style: TextButton.styleFrom(
                           foregroundColor: AppColors.textSecondary,
                           visualDensity: VisualDensity.compact,
@@ -173,11 +199,14 @@ class _ContentSourcePickerDialogState
                     ] else
                       const Spacer(),
                     FilledButton(
+                      focusNode: _saveFocusNode,
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.accentStrong,
                         foregroundColor: Colors.white,
                         elevation: 0,
-                        minimumSize: const Size(104, 40),
+                        minimumSize: tvLayout
+                            ? const Size(132, 54)
+                            : const Size(104, 40),
                         padding: const EdgeInsets.symmetric(horizontal: 18),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(13),
@@ -198,24 +227,73 @@ class _ContentSourcePickerDialogState
               ],
             ),
           ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _SourceOption extends StatelessWidget {
+class _SourceOption extends StatefulWidget {
   const _SourceOption({
     required this.source,
     required this.selected,
+    required this.tvLayout,
+    this.onDownFromLast,
     required this.onTap,
   });
 
   final ContentSource source;
   final bool selected;
+  final bool tvLayout;
+  final VoidCallback? onDownFromLast;
   final VoidCallback onTap;
 
-  IconData get _icon => switch (source) {
+  @override
+  State<_SourceOption> createState() => _SourceOptionState();
+}
+
+class _SourceOptionState extends State<_SourceOption> {
+  final FocusNode _focusNode = FocusNode(debugLabel: 'Content source option');
+  bool _focused = false;
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowDown &&
+        widget.onDownFromLast != null &&
+        (event is KeyDownEvent || event is KeyRepeatEvent)) {
+      widget.onDownFromLast!();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.gameButtonA) {
+      if (event is KeyDownEvent) widget.onTap();
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      final direction = switch (key) {
+        LogicalKeyboardKey.arrowUp => TraversalDirection.up,
+        LogicalKeyboardKey.arrowDown => TraversalDirection.down,
+        LogicalKeyboardKey.arrowLeft => TraversalDirection.left,
+        LogicalKeyboardKey.arrowRight => TraversalDirection.right,
+        _ => null,
+      };
+      if (direction != null && node.focusInDirection(direction)) {
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  IconData get _icon => switch (widget.source) {
         ContentSource.fetish => Icons.favorite_border_rounded,
         ContentSource.straight => Icons.play_circle_outline_rounded,
         ContentSource.trans => Icons.people_outline_rounded,
@@ -223,13 +301,25 @@ class _SourceOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = selected ? AppColors.accentStrong : AppColors.outline;
+    final selected = widget.selected;
+    final borderColor = _focused
+        ? Colors.white
+        : selected
+            ? AppColors.accentStrong
+            : AppColors.outline;
 
     return Semantics(
       button: true,
       selected: selected,
-      label: source.label,
-      child: AnimatedContainer(
+      label: widget.source.label,
+      child: Focus(
+        focusNode: _focusNode,
+        autofocus: selected,
+        onKeyEvent: _onKey,
+        onFocusChange: (value) {
+          if (mounted && value != _focused) setState(() => _focused = value);
+        },
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         curve: Curves.easeOut,
         decoration: BoxDecoration(
@@ -239,16 +329,18 @@ class _SourceOption extends StatelessWidget {
           borderRadius: BorderRadius.circular(15),
           border: Border.all(
             color: borderColor,
-            width: selected ? 1.35 : 0.8,
+            width: _focused ? 3 : selected ? 2 : 1,
           ),
         ),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(15),
-            onTap: onTap,
+            focusColor: AppColors.accentStrong.withValues(alpha: 0.22),
+            canRequestFocus: false,
+            onTap: widget.onTap,
             child: SizedBox(
-              height: 52,
+              height: widget.tvLayout ? 68 : 52,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
@@ -258,14 +350,14 @@ class _SourceOption extends StatelessWidget {
                       color: selected
                           ? AppColors.accentForeground
                           : AppColors.textTertiary,
-                      size: 20,
+                      size: widget.tvLayout ? 25 : 20,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        source.label,
+                        widget.source.label,
                         style: AppText.title.copyWith(
-                          fontSize: 14,
+                          fontSize: widget.tvLayout ? 19 : 14,
                           fontWeight: selected
                               ? FontWeight.w700
                               : FontWeight.w600,
@@ -282,7 +374,7 @@ class _SourceOption extends StatelessWidget {
                         color: selected
                             ? AppColors.accentForeground
                             : AppColors.textTertiary.withValues(alpha: 0.7),
-                        size: 19,
+                        size: widget.tvLayout ? 24 : 19,
                       ),
                     ),
                   ],
@@ -291,6 +383,7 @@ class _SourceOption extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

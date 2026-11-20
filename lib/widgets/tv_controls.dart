@@ -160,7 +160,7 @@ class TvNavigationRail extends StatelessWidget {
         if (isEnabled(index)) index,
     ];
     return Container(
-      width: 102,
+      width: 124,
       color: const Color(0xFF090B10),
       child: SafeArea(
         bottom: false,
@@ -174,12 +174,12 @@ class TvNavigationRail extends StatelessWidget {
               ]),
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: -0.7),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 26),
             Expanded(
               child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 itemCount: visibleIndices.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, __) => const SizedBox(height: 14),
                 itemBuilder: (context, visibleIndex) {
                     final index = visibleIndices[visibleIndex];
                     final item = _items[index];
@@ -192,16 +192,16 @@ class TvNavigationRail extends StatelessWidget {
                         focusedColor: const Color(0xFF1B4A91),
                         borderRadius: 15,
                         padding: const EdgeInsets.symmetric(vertical: 13),
-                        minHeight: 64,
+                        minHeight: 76,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
-                            Icon(item.icon, color: Colors.white, size: 25),
+                            Icon(item.icon, color: Colors.white, size: 28),
                             const SizedBox(height: 5),
                             Text(
                               item.label,
                               maxLines: 1,
-                              style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600),
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),

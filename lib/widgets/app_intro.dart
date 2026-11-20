@@ -161,7 +161,8 @@ class _AppIntroState extends State<AppIntro>
                   child: Center(
                     child: Transform.scale(
                       scale: 1 + .03 * exit,
-                      child: IntrinsicWidth(
+                      child: SizedBox(
+                        width: markSize + 140,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,

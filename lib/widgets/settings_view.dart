@@ -21,10 +21,12 @@ class SettingsView extends StatefulWidget {
     super.key,
     required this.bottomInset,
     required this.onContentSourceChanged,
+    this.tvMode = false,
   });
 
   final double bottomInset;
   final ValueChanged<ContentSource> onContentSourceChanged;
+  final bool tvMode;
 
   @override
   State<SettingsView> createState() => _SettingsViewState();
@@ -36,6 +38,7 @@ class _SettingsViewState extends State<SettingsView> {
     final source = await showContentSourcePicker(
       context,
       initialSource: settings.contentSource,
+      tvMode: widget.tvMode,
     );
     if (!mounted || source == null || source == settings.contentSource) return;
     widget.onContentSourceChanged(source);

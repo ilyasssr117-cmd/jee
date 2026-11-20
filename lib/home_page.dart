@@ -34,6 +34,7 @@ import 'widgets/search_overlay.dart';
 import 'widgets/settings_view.dart';
 import 'widgets/content_source_picker.dart';
 import 'widgets/state_views.dart';
+import 'widgets/tv_controls.dart';
 import 'widgets/video_grid.dart';
 import 'services/remote_config_service.dart';
 
@@ -101,6 +102,7 @@ class _HomePageState extends State<HomePage>
   bool _loading = false;
   bool _hasMore = false;
   bool _playingFeatured = false;
+  bool _isTelevision = false;
   final ValueNotifier<bool> _search = ValueNotifier<bool>(false);
   bool get _searchOpen => _search.value;
   _Section _section = _Section.home;
@@ -126,7 +128,25 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  Future<void> _detectTelevision() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final isTelevision = await const MethodChannel(
+        'com.tv.watch_tube/device',
+      ).invokeMethod<bool>('isTelevision');
+      if (mounted && isTelevision != null && isTelevision != _isTelevision) {
+        setState(() => _isTelevision = isTelevision);
+      }
+    } on PlatformException {
+      // Older builds can still use the regular responsive navigation.
+    } on MissingPluginException {
+      // The Android channel is unavailable in widget tests and older builds.
+    }
+  }
+
   Future<void> _promptForContentSource() async {
+    if (!mounted || _sourceChoiceReady) return;
+    await _detectTelevision();
     if (!mounted || _sourceChoiceReady) return;
     if (AppSettings.instance.hasChosenContentSource) {
       setState(() => _sourceChoiceReady = true);
@@ -137,6 +157,7 @@ class _HomePageState extends State<HomePage>
       context,
       initialSource: AppSettings.instance.contentSource,
       requiredChoice: true,
+      tvMode: _isTelevision,
     );
     if (!mounted) return;
     final source = selected ?? AppSettings.instance.contentSource;
@@ -703,7 +724,8 @@ class _HomePageState extends State<HomePage>
   Widget build(BuildContext context) {
     final margin = context.hMargin;
     final windowsDesktop = defaultTargetPlatform == TargetPlatform.windows;
-    final bottomInset = windowsDesktop
+    final tvLayout = windowsDesktop || _isTelevision;
+    final bottomInset = tvLayout
         ? 24.0
         : appBottomBarHeight(context) + context.safe.bottom;
     final featured = _featured;
@@ -743,6 +765,7 @@ class _HomePageState extends State<HomePage>
         key: const ValueKey<String>('settings'),
         bottomInset: bottomInset,
         onContentSourceChanged: _changeContentSource,
+        tvMode: _isTelevision,
       );
     }
 
@@ -818,21 +841,37 @@ class _HomePageState extends State<HomePage>
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (windowsDesktop)
+                    if (tvLayout)
                       Row(
                         children: [
-                          _WindowsNavigationRail(
-                            selected: searchOpen
-                                ? AppTab.search
-                                : switch (_section) {
-                                    _Section.home => AppTab.home,
-                                    _Section.reels => AppTab.reels,
-                                    _Section.library => AppTab.library,
-                                    _Section.settings => AppTab.settings,
-                                  },
-                            onSelect: _onTabSelect,
-                            isTabEnabled: _isTabEnabled,
-                          ),
+                          if (_isTelevision)
+                            TvNavigationRail(
+                              selected: searchOpen
+                                  ? AppTab.search.index
+                                  : switch (_section) {
+                                      _Section.home => AppTab.home.index,
+                                      _Section.reels => AppTab.reels.index,
+                                      _Section.library => AppTab.library.index,
+                                      _Section.settings => AppTab.settings.index,
+                                    },
+                              onSelect: (index) =>
+                                  _onTabSelect(AppTab.values[index]),
+                              isEnabled: (index) =>
+                                  _isTabEnabled(AppTab.values[index]),
+                            )
+                          else
+                            _WindowsNavigationRail(
+                              selected: searchOpen
+                                  ? AppTab.search
+                                  : switch (_section) {
+                                      _Section.home => AppTab.home,
+                                      _Section.reels => AppTab.reels,
+                                      _Section.library => AppTab.library,
+                                      _Section.settings => AppTab.settings,
+                                    },
+                              onSelect: _onTabSelect,
+                              isTabEnabled: _isTabEnabled,
+                            ),
                           Expanded(child: IgnorePointer(ignoring: searchOpen, child: content)),
                         ],
                       )
@@ -854,7 +893,7 @@ class _HomePageState extends State<HomePage>
                   ],
                 ),
               ),
-              bottomNavigationBar: windowsDesktop
+              bottomNavigationBar: tvLayout
                   ? null
                   : IgnorePointer(
                       ignoring: !searchOpen && _section == _Section.reels,

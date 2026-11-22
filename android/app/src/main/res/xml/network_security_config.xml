@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- HTTPS by default (audit fix 02). All application endpoints are HTTPS.
+         If a future media CDN is PROVEN to require HTTP, add a narrow
+         <domain-config cleartextTrafficPermitted="true"> for that host only.
+         Never return to a global base-config allowance. -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

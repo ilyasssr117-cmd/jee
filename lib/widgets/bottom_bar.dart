@@ -315,7 +315,7 @@ class _TabItem extends StatelessWidget {
               duration: Motion.quick,
               curve: Motion.curve,
               width: 54,
-              height: 30,
+              height: 26,
               decoration: BoxDecoration(
                 // Premium active-pill: the selected destination sits
                 // on a soft brand surface instead of only tinting.

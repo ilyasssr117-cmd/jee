@@ -11,10 +11,17 @@ void main() {
   testWidgets('app starts, shows HomePage, and configures page transitions', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
+    // The app now opens behind the AgeGate (audit fix 06): seed a
+    // confirmed 18+ answer so this test exercises the post-gate app,
+    // which is what its assertions describe.
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'age_asked': true,
+      'is18': true,
+    });
     await LocalStore.init();
 
     await tester.pumpWidget(const VXTUBEFinalApp());
+    await tester.pump();
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byType(HomePage), findsOneWidget);
 

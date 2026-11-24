@@ -18,8 +18,8 @@ abstract final class DeviceProfile {
   /// the native UiMode/Leanback check in MainActivity.
   static bool isTelevision = false;
 
-  static Future<void> detect() async {
-    if (_detected) return;
+  static Future<void> detect({bool force = false}) async {
+    if (_detected && !force) return;
     _detected = true;
     if (defaultTargetPlatform != TargetPlatform.android) return;
     try {

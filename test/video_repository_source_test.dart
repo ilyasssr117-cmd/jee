@@ -75,9 +75,15 @@ void main() {
       ),
     );
 
+    // The routing intent: the saved page is fetched through the
+    // scraper matching its own domain (x-x-x), not the currently
+    // selected source (trans). A model-page fetch targets that
+    // source's model-videos route for the first page
+    // (models/<slug>/videos/0/) by design — see x_x_x_source_test:
+    // "uses the nested model videos route for the first page".
     expect(
       requestedUris.single,
-      Uri.parse('https://x-x-x.tube/models/saved-model/'),
+      Uri.parse('https://x-x-x.tube/models/saved-model/videos/0/'),
     );
 
     for (final scraper in scrapers.values) {

@@ -1123,7 +1123,7 @@ class _DetailsHeroStretch extends StatelessWidget {
                 right: 0,
                 top: -400,
                 height: 440,
-                child: ColoredBox(color: AppColors.background),
+                child: ColoredBox(color: OnDark.background),
               ),
             Transform.scale(
               scale: scale,

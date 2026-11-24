@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import 'app_theme.dart';
 import 'error_text.dart';
 import 'media_headers.dart';
 import 'reel_favorites.dart';

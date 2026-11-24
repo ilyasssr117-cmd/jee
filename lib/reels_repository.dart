@@ -5,11 +5,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cupertino_http/cupertino_http.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:webview_flutter_windows/webview_flutter_windows.dart';
 
 import 'content_source.dart';
+import 'reel_favorites.dart';
 import 'models.dart';
 import 'reel_seen_store.dart';
 import 'xxx_follow_trans_reels.dart';
@@ -22,6 +24,8 @@ import 'xxx_follow_trans_reels.dart';
 /// playback pooling and gestures. Public API is unchanged:
 /// [ReelsRepository] with the same constructor and methods.
 const String _kUserAgent = kReelUserAgent;
+
+const int _kMaxRefetchTries = 4;
 
 const String _kApiUrl = String.fromEnvironment(
   'REELS_API_URL',
@@ -41,6 +45,152 @@ http.Client makeReelsHttpClient() {
     }
   } catch (_) {}
   return http.Client();
+}
+
+/// Response parsing for the reels API, moved with the data layer.
+String? _str(dynamic v) =>
+    v is String && v.isNotEmpty && v.length <= 8192 ? v : null;
+
+String _clipText(String value, int maxLength) =>
+    value.length <= maxLength ? value : value.substring(0, maxLength);
+
+String? _url(dynamic v) {
+  final s = _str(v);
+  if (s == null) return null;
+  final uri = Uri.tryParse(s);
+  if (uri == null ||
+      !uri.hasAuthority ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty) {
+    return null;
+  }
+  return uri.scheme == 'http' || uri.scheme == 'https' ? s : null;
+}
+
+String _titleOf(Map video) {
+  final parsed = video['video_text']?['user_display_video_title']?['default']
+      ?['parsed_text'];
+  if (_str(parsed) != null) return _clipText(parsed as String, 240);
+  return _clipText(_str(video['action_name']) ?? '', 240);
+}
+
+int _countOf(dynamic value) {
+  if (value is num) {
+    return value.clamp(0, 2147483647).toInt();
+  }
+  if (value is Map) {
+    for (final key in const [
+      'count',
+      'total',
+      'value',
+      'like_count',
+      'likes_count',
+      'formatted',
+      'display',
+    ]) {
+      if (!value.containsKey(key)) continue;
+      final parsed = _countOf(value[key]);
+      if (parsed > 0) return parsed;
+    }
+    return 0;
+  }
+  if (value is! String) return 0;
+  final text = value.trim().toLowerCase().replaceAll(',', '');
+  if (text.isEmpty) return 0;
+  final match = RegExp(
+    r'^(\d+(?:\.\d+)?)\s*([kmb])?\s*(?:likes?)?$',
+  ).firstMatch(text);
+  if (match == null) return 0;
+  final number = double.tryParse(match.group(1) ?? '');
+  if (number == null || !number.isFinite || number < 0) return 0;
+  final multiplier = switch (match.group(2)) {
+    'k' => 1000.0,
+    'm' => 1000000.0,
+    'b' => 1000000000.0,
+    _ => 1.0,
+  };
+  return (number * multiplier).clamp(0, 2147483647).round();
+}
+
+int _likesOf(Map video) {
+  const keys = [
+    'like_count',
+    'likes_count',
+    'likeCount',
+    'likesCount',
+    'likes',
+    'like',
+    'total_likes',
+    'totalLikes',
+    'favorite_count',
+    'favorites_count',
+    'favourite_count',
+    'upvote_count',
+    'thumbs_up_count',
+  ];
+  for (final source in [
+    video,
+    video['statistics'],
+    video['stats'],
+    video['engagement'],
+    video['counts'],
+    video['video_statistics'],
+    video['video_stats'],
+    video['engagement_stats'],
+    video['metadata'],
+    video['meta'],
+  ]) {
+    if (source is! Map) continue;
+    for (final key in keys) {
+      if (!source.containsKey(key) || source[key] == null) continue;
+      final parsed = _countOf(source[key]);
+      if (parsed > 0) return parsed;
+    }
+  }
+  return 0;
+}
+
+List<String> _tagsOf(Map video) {
+  final raw = video['tags'];
+  if (raw is! List) return const [];
+  return [
+    for (final t in raw.take(24))
+      if (t is Map && _str(t['name']) != null)
+        _clipText(t['name'] as String, 64),
+  ];
+}
+
+List<ReelItem> parseReels(dynamic body) {
+  if (body is! Map || body['data'] is! List) return const [];
+  final out = <ReelItem>[];
+  for (final raw in (body['data'] as List).take(48)) {
+    if (raw is! Map) continue;
+    final mp4 = _url(raw['mp4_url']);
+    final hls = _url(raw['hls_url']);
+    final url = mp4 ?? hls;
+    if (url == null) continue;
+    out.add(
+      ReelItem(
+        id: _clipText('${raw['video_id'] ?? url}', 256),
+        videoUrl: url,
+        fallbackUrl: mp4 != null ? hls : null,
+        downloadUrl: _url(raw['download_url']),
+        title: _titleOf(raw),
+        thumbUrl: _url(raw['poster_url']) ?? _url(raw['thumbnail_url']),
+        avatarUrl: _url(raw['user_avatar']),
+        author: _clipText(_str(raw['user_name']) ?? '', 100),
+        views: raw['view_count'] is num
+            ? (raw['view_count'] as num).clamp(0, 2147483647).toInt()
+            : 0,
+        likes: _likesOf(raw),
+        durationSec: raw['duration'] is num
+            ? (raw['duration'] as num).clamp(0, 86400).toInt()
+            : 0,
+        tags: _tagsOf(raw),
+      ),
+    );
+  }
+  return out;
 }
 
 class _WindowsReelsBrowser {
@@ -452,7 +602,7 @@ class ReelsRepository {
   }
 }
 
-String _safeReelFileToken(String value) {
+String safeReelFileToken(String value) {
   var hash = 0x811c9dc5;
   for (final unit in value.codeUnits) {
     hash = ((hash ^ unit) * 0x01000193) & 0xffffffff;

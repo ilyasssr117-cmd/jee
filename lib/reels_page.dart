@@ -62,7 +62,6 @@ const int _kPreloadAhead = 2;
 const int _kMaxBufferedReels = 96;
 const int _kReelHistoryKeep = 12;
 const int _kReelTrimTrigger = 48;
-const int _kMaxRefetchTries = 4;
 const String _kClearKey = 'reels_clear_mode_v1';
 const Duration _kReelDoubleTapWindow = Duration(milliseconds: 260);
 const Duration _kReelLongPressDelay = Duration(milliseconds: 140);
@@ -91,151 +90,6 @@ enum _ReelPlaybackState {
   buffering,
   failed,
   retrying,
-}
-
-String? _str(dynamic v) =>
-    v is String && v.isNotEmpty && v.length <= 8192 ? v : null;
-
-String _clipText(String value, int maxLength) =>
-    value.length <= maxLength ? value : value.substring(0, maxLength);
-
-String? _url(dynamic v) {
-  final s = _str(v);
-  if (s == null) return null;
-  final uri = Uri.tryParse(s);
-  if (uri == null ||
-      !uri.hasAuthority ||
-      uri.host.isEmpty ||
-      uri.userInfo.isNotEmpty) {
-    return null;
-  }
-  return uri.scheme == 'http' || uri.scheme == 'https' ? s : null;
-}
-
-String _titleOf(Map video) {
-  final parsed = video['video_text']?['user_display_video_title']?['default']
-      ?['parsed_text'];
-  if (_str(parsed) != null) return _clipText(parsed as String, 240);
-  return _clipText(_str(video['action_name']) ?? '', 240);
-}
-
-int _countOf(dynamic value) {
-  if (value is num) {
-    return value.clamp(0, 2147483647).toInt();
-  }
-  if (value is Map) {
-    for (final key in const [
-      'count',
-      'total',
-      'value',
-      'like_count',
-      'likes_count',
-      'formatted',
-      'display',
-    ]) {
-      if (!value.containsKey(key)) continue;
-      final parsed = _countOf(value[key]);
-      if (parsed > 0) return parsed;
-    }
-    return 0;
-  }
-  if (value is! String) return 0;
-  final text = value.trim().toLowerCase().replaceAll(',', '');
-  if (text.isEmpty) return 0;
-  final match = RegExp(
-    r'^(\d+(?:\.\d+)?)\s*([kmb])?\s*(?:likes?)?$',
-  ).firstMatch(text);
-  if (match == null) return 0;
-  final number = double.tryParse(match.group(1) ?? '');
-  if (number == null || !number.isFinite || number < 0) return 0;
-  final multiplier = switch (match.group(2)) {
-    'k' => 1000.0,
-    'm' => 1000000.0,
-    'b' => 1000000000.0,
-    _ => 1.0,
-  };
-  return (number * multiplier).clamp(0, 2147483647).round();
-}
-
-int _likesOf(Map video) {
-  const keys = [
-    'like_count',
-    'likes_count',
-    'likeCount',
-    'likesCount',
-    'likes',
-    'like',
-    'total_likes',
-    'totalLikes',
-    'favorite_count',
-    'favorites_count',
-    'favourite_count',
-    'upvote_count',
-    'thumbs_up_count',
-  ];
-  for (final source in [
-    video,
-    video['statistics'],
-    video['stats'],
-    video['engagement'],
-    video['counts'],
-    video['video_statistics'],
-    video['video_stats'],
-    video['engagement_stats'],
-    video['metadata'],
-    video['meta'],
-  ]) {
-    if (source is! Map) continue;
-    for (final key in keys) {
-      if (!source.containsKey(key) || source[key] == null) continue;
-      final parsed = _countOf(source[key]);
-      if (parsed > 0) return parsed;
-    }
-  }
-  return 0;
-}
-
-List<String> _tagsOf(Map video) {
-  final raw = video['tags'];
-  if (raw is! List) return const [];
-  return [
-    for (final t in raw.take(24))
-      if (t is Map && _str(t['name']) != null)
-        _clipText(t['name'] as String, 64),
-  ];
-}
-
-List<ReelItem> parseReels(dynamic body) {
-  if (body is! Map || body['data'] is! List) return const [];
-  final out = <ReelItem>[];
-  for (final raw in (body['data'] as List).take(48)) {
-    if (raw is! Map) continue;
-    final mp4 = _url(raw['mp4_url']);
-    final hls = _url(raw['hls_url']);
-    final url = mp4 ?? hls;
-    if (url == null) continue;
-    out.add(
-      ReelItem(
-        id: _clipText('${raw['video_id'] ?? url}', 256),
-        videoUrl: url,
-        fallbackUrl: mp4 != null ? hls : null,
-        downloadUrl: _url(raw['download_url']),
-        title: _titleOf(raw),
-        thumbUrl: _url(raw['poster_url']) ?? _url(raw['thumbnail_url']),
-        avatarUrl: _url(raw['user_avatar']),
-        author: _clipText(_str(raw['user_name']) ?? '', 100),
-        views: raw['view_count'] is num
-            ? (raw['view_count'] as num).clamp(0, 2147483647).toInt()
-            : 0,
-        likes: _likesOf(raw),
-        durationSec: raw['duration'] is num
-            ? (raw['duration'] as num).clamp(0, 86400).toInt()
-            : 0,
-        tags: _tagsOf(raw),
-      ),
-    );
-  }
-  return out;
 }
 
 String _compact(num n) => reelCompact(n);
@@ -1341,7 +1195,7 @@ class _ReelsPageState extends State<ReelsPage> with WidgetsBindingObserver {
           uri.userInfo.isNotEmpty) {
         throw const FormatException('Invalid video URL.');
       }
-      file = File('${dir.path}/reel_${_safeReelFileToken(item.id)}.mp4');
+      file = File('${dir.path}/reel_${safeReelFileToken(item.id)}.mp4');
       final req = http.Request('GET', uri)
         ..headers.addAll(_headersForReel(item));
       final res = await _media.send(req).timeout(const Duration(seconds: 20));

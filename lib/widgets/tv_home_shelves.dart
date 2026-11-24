@@ -180,22 +180,22 @@ class TvHomeShelves extends StatelessWidget {
         onPressed: onOpenReels,
         padding: EdgeInsets.zero,
         borderRadius: 16,
-        child: SizedBox(
+        child: const SizedBox(
           width: 168,
           child: AspectRatio(
             aspectRatio: 9 / 16,
             child: DecoratedBox(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: VxBrand.heroWash,
                 borderRadius: BorderRadius.all(Radius.circular(16)),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.smart_display_rounded,
+                  Icon(Icons.smart_display_rounded,
                       color: AppColors.accent, size: 44),
-                  const SizedBox(height: 12),
-                  const Text(
+                  SizedBox(height: 12),
+                  Text(
                     'Open Reels',
                     style: TextStyle(
                       color: Colors.white,
@@ -203,8 +203,8 @@ class TvHomeShelves extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
+                  SizedBox(height: 6),
+                  Text(
                     'Vertical 9:16',
                     style: TextStyle(
                       color: Colors.white60,

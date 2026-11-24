@@ -21,6 +21,7 @@ String formatPlayerDuration(Duration duration) {
 
 class PlayerProgressRow extends StatelessWidget {
   const PlayerProgressRow({
+    super.key,
     required this.controller,
     required this.scrubTarget,
     required this.dragging,

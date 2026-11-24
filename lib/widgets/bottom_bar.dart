@@ -13,9 +13,9 @@ enum AppTab { home, search, reels, library, settings }
 const double kBottomBarHeight = 74;
 
 double appDockHeight(BuildContext context) {
-  final scale = MediaQuery.textScalerOf(context).scale(12) / 12;
+  final scale = MediaQuery.textScalerOf(context).scale(11) / 11;
   final lines = scale > 1.65 ? 2 : 1;
-  final labelHeight = 12 * scale * 1.1 * lines;
+  final labelHeight = 11 * scale * 1.1 * lines;
   return math.max(66, 42 + labelHeight).toDouble();
 }
 
@@ -334,7 +334,7 @@ class _TabItem extends StatelessWidget {
               duration: Motion.quick,
               curve: Motion.curve,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 height: 1.1,
                 fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                 letterSpacing: 0.1,
@@ -343,7 +343,7 @@ class _TabItem extends StatelessWidget {
               child: Text(
                 _accessibleLabel(
                   label,
-                  MediaQuery.textScalerOf(context).scale(12) / 12,
+                  MediaQuery.textScalerOf(context).scale(11) / 11,
                 ),
                 maxLines: 2,
                 textAlign: TextAlign.center,

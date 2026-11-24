@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:vxtube_final/reels_page.dart';
+import 'package:vxtube_final/reels_repository.dart';
 
 void main() {
   test('parseReels reads likes from flat and nested API fields', () {
